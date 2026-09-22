@@ -34,7 +34,13 @@ export default function Dashboard() {
 
       <div className="mt-12 bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6">
         <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Link href="/book-studio" className="p-4 border dark:border-gray-700 rounded-lg hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-gray-700 transition-all flex flex-col items-center text-center">
+            <Layers size={32} className="text-amber-500 mb-3" />
+            <span className="font-medium">Scanned Book Studio</span>
+            <span className="text-sm text-gray-500 mt-1">Collate, clean & 3mm bleed</span>
+          </Link>
+
           <Link href="/preflight" className="p-4 border dark:border-gray-700 rounded-lg hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-gray-700 transition-all flex flex-col items-center text-center">
             <FileCheck size={32} className="text-blue-500 mb-3" />
             <span className="font-medium">Run Preflight Check</span>

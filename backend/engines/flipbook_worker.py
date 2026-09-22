@@ -193,9 +193,11 @@ def generate_flipbook_task(task_id, state_dict, project_cache, pdf_paths, output
             "progress": 0
         }
 
-def export_flipbook_task(task_id, state_dict, project_cache, export_task_id, output_path, dpi, zip_output):
-    def update_state(message, progress):
-        state_dict[export_task_id] = {'state': 'PROGRESS', 'message': message, 'progress': progress}
+def export_flipbook_task(task_id, state_dict, project_cache, export_task_id, output_path, dpi, export_format, video_res="720"):
+    def update_state(status_msg, prog):
+        if export_task_id in state_dict:
+            state_dict[export_task_id]["status"] = status_msg
+            state_dict[export_task_id]["progress"] = prog
 
     try:
         cached = project_cache[task_id]
@@ -213,25 +215,55 @@ def export_flipbook_task(task_id, state_dict, project_cache, export_task_id, out
             cached["mag_pad_choice"]
         )
 
-        update_state("Generating standalone HTML...", 90)
-        html_content = generate_html_content(
-            padded_pages, original_pdf_name, 
-            cached["direction"], cached["binding_style"], 
-            cached["bg_texture"], cached["sound_enabled"], 
-            page_w, page_h
-        )
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-
         final_output = output_path
-        if zip_output:
-            update_state("Compressing into ZIP archive...", 95)
-            zip_path = output_path.replace(".html", ".zip")
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(output_path, os.path.basename(output_path))
-            final_output = zip_path
-            os.remove(output_path) # Clean up the huge HTML file
+        
+        if export_format in ["webm", "mp4"]:
+            update_state("Generating MP4 Video (Slideshow)...", 90)
+            import subprocess
+            import tempfile
+            import base64
+            
+            mp4_path = output_path.replace(".html", ".mp4")
+            
+            res_map = {"1080": "1920:1080", "720": "1280:720", "480": "854:480"}
+            target_res = res_map.get(str(video_res), "1280:720")
+            scale_filter = f"scale={target_res}:force_original_aspect_ratio=decrease,pad={target_res}:-1:-1:color=black"
+            
+            with tempfile.TemporaryDirectory() as tmpdir:
+                for i, b64_str in enumerate(padded_pages):
+                    img_data = base64.b64decode(b64_str.split(",")[-1])
+                    with open(os.path.join(tmpdir, f"frame_{i:04d}.jpg"), "wb") as f:
+                        f.write(img_data)
+                        
+                cmd = [
+                    "ffmpeg", "-y", "-framerate", "1", "-i", os.path.join(tmpdir, "frame_%04d.jpg"),
+                    "-vf", scale_filter,
+                    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", mp4_path
+                ]
+                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if proc.returncode != 0:
+                    raise RuntimeError(f"FFmpeg failed: {proc.stderr.decode()}")
+                
+            final_output = mp4_path
+        else:
+            update_state("Generating standalone HTML...", 90)
+            html_content = generate_html_content(
+                padded_pages, original_pdf_name, 
+                cached["direction"], cached["binding_style"], 
+                cached["bg_texture"], cached["sound_enabled"], 
+                page_w, page_h
+            )
+            
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            if export_format == "zip":
+                update_state("Compressing into ZIP archive...", 95)
+                zip_path = output_path.replace(".html", ".zip")
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    zipf.write(output_path, os.path.basename(output_path))
+                final_output = zip_path
+                os.remove(output_path) # Clean up the huge HTML file
 
         state_dict[export_task_id] = {
             "state": "SUCCESS", 

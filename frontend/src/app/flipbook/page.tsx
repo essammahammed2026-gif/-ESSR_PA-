@@ -25,7 +25,8 @@ export default function FlipbookStudio() {
   // Export Modal State
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportDpi, setExportDpi] = useState("150");
-  const [exportZip, setExportZip] = useState(true);
+  const [exportFormat, setExportFormat] = useState("zip");
+  const [videoRes, setVideoRes] = useState("720");
   const [exportTaskId, setExportTaskId] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState("");
@@ -150,7 +151,10 @@ export default function FlipbookStudio() {
     const formData = new FormData();
     formData.append("task_id", taskId);
     formData.append("dpi", exportDpi);
-    formData.append("zip_output", String(exportZip));
+    formData.append("export_format", exportFormat);
+    if (exportFormat === "mp4") {
+      formData.append("video_res", videoRes);
+    }
 
     try {
       const res = await fetch("http://localhost:8000/api/flipbook/export", {
@@ -425,17 +429,35 @@ export default function FlipbookStudio() {
                 
                 <div className="p-4 bg-gray-50 dark:bg-gray-900 border dark:border-gray-700 rounded-lg space-y-3">
                   <label className="flex items-start space-x-3 cursor-pointer">
-                    <input type="radio" checked={!exportZip} onChange={() => setExportZip(false)} className="mt-1" />
+                    <input type="radio" checked={exportFormat === "html"} onChange={() => setExportFormat("html")} className="mt-1" />
                     <div>
                       <div className="font-medium flex items-center gap-2"><FileCode2 size={16} className="text-blue-500"/> Standalone HTML File</div>
                       <div className="text-xs text-gray-500 mt-1">One massive Base64-encoded .html file. Easy to open, but can be too large for emails.</div>
                     </div>
                   </label>
                   <label className="flex items-start space-x-3 cursor-pointer">
-                    <input type="radio" checked={exportZip} onChange={() => setExportZip(true)} className="mt-1" />
+                    <input type="radio" checked={exportFormat === "zip"} onChange={() => setExportFormat("zip")} className="mt-1" />
                     <div>
                       <div className="font-medium flex items-center gap-2"><FileArchive size={16} className="text-orange-500"/> ZIP Archive (Recommended)</div>
                       <div className="text-xs text-gray-500 mt-1">Compresses the HTML file into a .zip. Drastically reduces file size for sharing.</div>
+                    </div>
+                  </label>
+                  <label className="flex items-start space-x-3 cursor-pointer">
+                    <input type="radio" checked={exportFormat === "mp4"} onChange={() => setExportFormat("mp4")} className="mt-1" />
+                    <div className="w-full">
+                      <div className="font-medium flex items-center gap-2"><FileCode2 size={16} className="text-purple-500"/> MP4 Video (H.264)</div>
+                      <div className="text-xs text-gray-500 mt-1 mb-2">Exports the flipbook as a fast-rendering MP4 slideshow.</div>
+                      
+                      {exportFormat === "mp4" && (
+                        <div className="mt-2 pl-1 pr-3 w-full">
+                          <label className="block text-xs font-semibold mb-1 text-gray-700 dark:text-gray-300">Video Resolution</label>
+                          <select value={videoRes} onChange={(e) => setVideoRes(e.target.value)} className="w-full text-xs border p-2 rounded bg-white dark:bg-gray-800 dark:border-gray-600">
+                            <option value="1080">1080p (High Quality)</option>
+                            <option value="720">720p (Standard)</option>
+                            <option value="480">480p (Fastest)</option>
+                          </select>
+                        </div>
+                      )}
                     </div>
                   </label>
                 </div>

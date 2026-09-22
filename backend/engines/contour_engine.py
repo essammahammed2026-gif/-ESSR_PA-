@@ -93,34 +93,13 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
         border_pixels = np.concatenate([bgr[0, :, :], bgr[cv_h-1, :, :], bgr[:, 0, :], bgr[:, cv_w-1, :]], axis=0)
         std_dev = np.std(border_pixels, axis=0).mean()
 
-        if std_dev < 15:
-            # STRATEGY 2: Solid Background (Color Distance Threshold)
-            bg_color = np.median(border_pixels, axis=0)
-            diff = cv2.absdiff(bgr, bg_color.astype(np.uint8))
-            diff_dist = np.max(diff, axis=2)
-            eff_thresh = max(6, threshold) if threshold > 0 else 10
-            _, mask_small = cv2.threshold(diff_dist, eff_thresh, 255, cv2.THRESH_BINARY)
-        else:
-            # STRATEGY 3: Complex Photo Background (GrabCut Subject Isolation)
-            # We run GrabCut on an even smaller image for instant CPU processing (<800px)
-            gc_scale = min(1.0, 800.0 / max(cv_w, cv_h))
-            gc_img = cv2.resize(bgr, (0, 0), fx=gc_scale, fy=gc_scale)
-            
-            mask_gc = np.zeros(gc_img.shape[:2], np.uint8)
-            bgdModel = np.zeros((1, 65), np.float64)
-            fgdModel = np.zeros((1, 65), np.float64)
-            
-            # Draw a rect inset by 2% of the image size to define the "Foreground Area"
-            ix = int(gc_img.shape[1] * 0.02)
-            iy = int(gc_img.shape[0] * 0.02)
-            iw = int(gc_img.shape[1] * 0.96)
-            ih = int(gc_img.shape[0] * 0.96)
-            
-            cv2.grabCut(gc_img, mask_gc, (ix, iy, iw, ih), bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
-            
-            mask_gc = np.where((mask_gc == 2) | (mask_gc == 0), 0, 255).astype('uint8')
-            mask_small = cv2.resize(mask_gc, (cv_w, cv_h), interpolation=cv2.INTER_LINEAR)
-            _, mask_small = cv2.threshold(mask_small, 127, 255, cv2.THRESH_BINARY)
+        # STRATEGY 2: Solid Background (Color Distance Threshold)
+        # Apply this fallback to all non-alpha images
+        bg_color = np.median(border_pixels, axis=0)
+        diff = cv2.absdiff(bgr, bg_color.astype(np.uint8))
+        diff_dist = np.max(diff, axis=2)
+        eff_thresh = max(6, threshold) if threshold > 0 else 10
+        _, mask_small = cv2.threshold(diff_dist, eff_thresh, 255, cv2.THRESH_BINARY)
 
     # Step C: Upscale Mask back to original Print Resolution
     if scale_factor < 1.0:

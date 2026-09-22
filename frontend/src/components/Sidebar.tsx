@@ -17,8 +17,9 @@ import { usePathname } from 'next/navigation';
 
 const navItems = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'Book Studio', href: '/book-studio', icon: BookOpen },
   { name: 'Preflight Center', href: '/preflight', icon: FileCheck },
-  { name: 'Flipbook Studio', href: '/flipbook', icon: BookOpen },
+  { name: 'Flipbook Studio', href: '/flipbook', icon: Layers },
   { name: 'Contour Cut', href: '/contour', icon: Scissors },
   { name: 'Quick Print', href: '/print', icon: Printer },
   { name: 'Auto-Bleed', href: '/bleed', icon: Droplet },

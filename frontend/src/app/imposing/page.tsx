@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useLanguage } from "../../context/LanguageContext";
-
 import { Grid, Upload, Download, Loader2, Trash2, Link, Unlink, ChevronLeft, ChevronRight, ArrowRightLeft } from "lucide-react";
 
 // Reusable Number Control
@@ -82,6 +80,28 @@ export default function ImposingStudio() {
   const [cropMarks, setCropMarks] = useState(false);
   const [align, setAlign] = useState("Left");
   const [autoRotateSheet, setAutoRotateSheet] = useState(true);
+
+  // Dynamic presets from settings API
+  const [dbSheets, setDbSheets] = useState<{name: string, width: number, height: number}[]>([]);
+  const [dbRolls, setDbRolls] = useState<{name: string, width: number}[]>([]);
+
+  useEffect(() => {
+    fetch("http://localhost:8000/api/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.sheets) setDbSheets(data.sheets);
+        if (data.rolls) setDbRolls(data.rolls);
+        if (data.imposing) {
+          if (data.imposing.default_sheet_unit) setUnit(data.imposing.default_sheet_unit);
+          if (data.imposing.default_margin !== undefined) setMargin(data.imposing.default_margin);
+          if (data.imposing.default_gap !== undefined) setGap(data.imposing.default_gap);
+          if (data.imposing.crop_marks !== undefined) setCropMarks(data.imposing.crop_marks);
+          if (data.imposing.draw_border !== undefined) setDrawBorder(data.imposing.draw_border);
+          if (data.imposing.auto_rotate_sheet !== undefined) setAutoRotateSheet(data.imposing.auto_rotate_sheet);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const [isUploading, setIsUploading] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -164,7 +184,7 @@ export default function ImposingStudio() {
       }
     } else {
       setSheetW(parseFloat(sheetPreset));
-      setSheetH(2000.0); // Dummy for Roll
+      // In Roll mode, do not override sheetH. It will act as the max segment length limit.
     }
   }, [sheetPreset, mode]);
 
@@ -252,7 +272,7 @@ export default function ImposingStudio() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items, mode, sheet_w: sheetW, sheet_h: sheetH, margin, gap, draw_border: drawBorder, border_color: borderColor, crop_marks: cropMarks, align, auto_rotate_sheet: autoRotateSheet, auto_rotate_sheet: autoRotateSheet, draw_border: drawBorder, border_color: borderColor, crop_marks: cropMarks, align
+          items, mode, sheet_w: sheetW, sheet_h: sheetH, margin, gap, draw_border: drawBorder, border_color: borderColor, crop_marks: cropMarks, align, auto_rotate_sheet: autoRotateSheet
         })
       });
       const data = await res.json();
@@ -279,7 +299,7 @@ export default function ImposingStudio() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items, mode, sheet_w: sheetW, sheet_h: sheetH, margin, gap, draw_border: drawBorder, border_color: borderColor, crop_marks: cropMarks, align, auto_rotate_sheet: autoRotateSheet, auto_rotate_sheet: autoRotateSheet, draw_border: drawBorder, border_color: borderColor, crop_marks: cropMarks, align
+          items, mode, sheet_w: sheetW, sheet_h: sheetH, margin, gap, draw_border: drawBorder, border_color: borderColor, crop_marks: cropMarks, align, auto_rotate_sheet: autoRotateSheet
         })
       });
       
@@ -359,16 +379,28 @@ export default function ImposingStudio() {
               >
                 {mode === "Sheet" ? (
                   <>
-                    <option value="210,297">A4 (210 x 297)</option>
-                    <option value="297,420">A3 (297 x 420)</option>
-                    <option value="320,450">SRA3 (320 x 450)</option>
-                    <option value="480,650">B2 (480 x 650)</option>
+                    {(dbSheets.length > 0 ? dbSheets : [
+                      { name: "A4", width: 210, height: 297 },
+                      { name: "A3", width: 297, height: 420 },
+                      { name: "SRA3", width: 320, height: 450 },
+                      { name: "B2", width: 480, height: 650 }
+                    ]).map((s, idx) => (
+                      <option key={idx} value={`${s.width},${s.height}`}>
+                        {s.name} ({s.width} x {s.height} mm)
+                      </option>
+                    ))}
                   </>
                 ) : (
                   <>
-                    <option value="600">60cm Roll (600mm)</option>
-                    <option value="1000">100cm Roll (1000mm)</option>
-                    <option value="1200">120cm Roll (1200mm)</option>
+                    {(dbRolls.length > 0 ? dbRolls : [
+                      { name: "60cm Roll", width: 600 },
+                      { name: "100cm Roll", width: 1000 },
+                      { name: "160cm Wide Roll", width: 1600 }
+                    ]).map((r, idx) => (
+                      <option key={idx} value={`${r.width}`}>
+                        {r.name} ({r.width}mm)
+                      </option>
+                    ))}
                   </>
                 )}
                 <option value="custom">Custom Size...</option>
@@ -380,16 +412,16 @@ export default function ImposingStudio() {
                   <input type="number" value={toUnit(sheetW, unit)} onChange={(e) => { setSheetPreset("custom"); setSheetW(toMm(parseFloat(e.target.value)||1, unit)); }} className="w-full min-w-0 text-sm border p-1.5 rounded-lg dark:bg-gray-900 dark:border-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                 </div>
                 {mode === "Sheet" && (
-                  <>
-                    <button onClick={() => { setSheetPreset("custom"); setSheetW(sheetH); setSheetH(sheetW); }} className="p-2 mb-0.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300 transition-colors" title="Swap W/H">
-                      <ArrowRightLeft size={16} />
-                    </button>
-                    <div className="flex-1 flex flex-col">
-                      <label className="text-xs text-gray-500 mb-1">Height</label>
-                      <input type="number" value={toUnit(sheetH, unit)} onChange={(e) => { setSheetPreset("custom"); setSheetH(toMm(parseFloat(e.target.value)||1, unit)); }} className="w-full min-w-0 text-sm border p-1.5 rounded-lg dark:bg-gray-900 dark:border-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                    </div>
-                  </>
+                  <button onClick={() => { setSheetPreset("custom"); setSheetW(sheetH); setSheetH(sheetW); }} className="p-2 mb-0.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300 transition-colors" title="Swap W/H">
+                    <ArrowRightLeft size={16} />
+                  </button>
                 )}
+                <div className="flex-1 flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">
+                    {mode === "Sheet" ? "Height" : "Max Roll Length"}
+                  </label>
+                  <input type="number" value={toUnit(sheetH, unit)} onChange={(e) => { setSheetPreset("custom"); setSheetH(toMm(parseFloat(e.target.value)||1, unit)); }} className="w-full min-w-0 text-sm border p-1.5 rounded-lg dark:bg-gray-900 dark:border-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                </div>
               </div>
             </div>
 

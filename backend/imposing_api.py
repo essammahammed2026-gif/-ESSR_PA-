@@ -170,7 +170,7 @@ def preview_imposing(req: ImposingRequest):
                 
             res = MeterSegmentPacker.pack_multi_artworks(
                 roll_width_mm=req.sheet_w, # sheet_w acts as roll width
-                segment_limit_mm=2000.0, # 2 meters max per segment
+                segment_limit_mm=req.sheet_h,
                 margin_l_mm=req.margin, margin_r_mm=req.margin,
                 margin_t_mm=req.margin, margin_b_mm=req.margin,
                 gap_mm=req.gap,
@@ -248,7 +248,7 @@ def export_imposing(req: ImposingRequest):
                 ))
                 
             res = MeterSegmentPacker.pack_multi_artworks(
-                roll_width_mm=req.sheet_w, segment_limit_mm=2000.0,
+                roll_width_mm=req.sheet_w, segment_limit_mm=req.sheet_h,
                 margin_l_mm=req.margin, margin_r_mm=req.margin,
                 margin_t_mm=req.margin, margin_b_mm=req.margin,
                 gap_mm=req.gap, artworks=specs

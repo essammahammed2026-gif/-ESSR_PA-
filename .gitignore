@@ -1,0 +1,37 @@
+# Python & Virtual Environments
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak
+
+# Node & Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+.npm
+*.tsbuildinfo
+next-env.d.ts
+
+# Temporary uploads & output generated flipbooks
+backend/temp_uploads/
+backend/public_flipbooks/flipbook_*
+backend/public_flipbooks/flipbook_export_*
+
+# Logs & Environment
+*.log
+.env
+.env.local
+.env.*.local
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Ad-hoc test files
+test.jpg

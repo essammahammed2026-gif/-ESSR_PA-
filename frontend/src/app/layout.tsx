@@ -54,6 +54,7 @@ export default function RootLayout({
           <div className="flex-1 overflow-y-auto py-4">
             <nav className="space-y-1 px-2">
               <NavItem href="/" icon={<Home size={18}/>} label="Command Center" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/book-studio" icon={<BookOpen size={18}/>} label="Scanned Book Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
               <NavItem href="/preflight" icon={<FileCheck size={18}/>} label="PDF Preflight" isCollapsed={isSidebarCollapsed} pathname={pathname} />
               <NavItem href="/flipbook" icon={<BookOpen size={18}/>} label="Flipbook Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
               <NavItem href="/contour" icon={<Scissors size={18}/>} label="Contour Cut Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
@@ -72,9 +73,9 @@ export default function RootLayout({
         </div>
         
         {/* Main Content Area */}
-        <div className="flex-1 overflow-hidden relative">
+        <main className="flex-1 overflow-y-auto min-h-0 h-full p-6 md:p-8 relative">
           {children}
-        </div>
+        </main>
       </body>
     </html>
   );

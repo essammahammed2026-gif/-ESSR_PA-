@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from settings_api import router as settings_router
 from imposing_api import router as imposing_router
+from book_scan_api import router as book_scan_router
 from fastapi import UploadFile, File, Form, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,7 @@ from engines.helpers import apply_print_binding_padding
 app = FastAPI(title="ESSR PA API")
 app.include_router(settings_router)
 app.include_router(imposing_router)
+app.include_router(book_scan_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -163,7 +165,8 @@ async def export_flipbook(
     background_tasks: BackgroundTasks,
     task_id: str = Form(...),
     dpi: int = Form(150),
-    zip_output: bool = Form(True)
+    export_format: str = Form("zip"),
+    video_res: str = Form("720")
 ):
     if task_id not in PROJECT_CACHE:
         raise HTTPException(status_code=404, detail="Project cache not found")
@@ -182,7 +185,8 @@ async def export_flipbook(
         export_task_id=export_task_id,
         output_path=output_path,
         dpi=dpi,
-        zip_output=zip_output
+        export_format=export_format,
+        video_res=video_res
     )
     
     return {"task_id": export_task_id, "message": "Export started"}
