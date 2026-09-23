@@ -12,9 +12,9 @@ import {
   Trash2, 
   CheckCircle2, 
   AlertCircle,
-  Sliders,
-  Check
+  Sliders
 } from "lucide-react";
+import { API_BASE_URL } from "@/lib/api";
 
 interface Sheet {
   name: string;
@@ -113,14 +113,14 @@ export default function SettingsPage() {
   const fetchSettings = async () => {
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/api/settings");
+      const res = await fetch(API_BASE_URL + "/api/settings");
       if (res.ok) {
         const data = await res.json();
         setSettings(data);
       } else {
         setErrorMsg("Failed to load settings from server");
       }
-    } catch (e: any) {
+    } catch {
       setErrorMsg("Error connecting to backend API");
     } finally {
       setLoading(false);
@@ -132,7 +132,7 @@ export default function SettingsPage() {
     setSuccessMsg(null);
     setErrorMsg(null);
     try {
-      const res = await fetch("http://localhost:8000/api/settings", {
+      const res = await fetch(API_BASE_URL + "/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
@@ -143,7 +143,7 @@ export default function SettingsPage() {
       } else {
         setErrorMsg("Failed to update settings");
       }
-    } catch (e: any) {
+    } catch {
       setErrorMsg("Network error saving settings");
     } finally {
       setSaving(false);
@@ -154,14 +154,14 @@ export default function SettingsPage() {
     if (!confirm("Reset all settings to system defaults? Custom presets will be reverted.")) return;
     setSaving(true);
     try {
-      const res = await fetch("http://localhost:8000/api/settings/reset", { method: "POST" });
+      const res = await fetch(API_BASE_URL + "/api/settings/reset", { method: "POST" });
       if (res.ok) {
         const data = await res.json();
         setSettings(data.settings);
         setSuccessMsg("Settings restored to factory defaults");
         setTimeout(() => setSuccessMsg(null), 3500);
       }
-    } catch (e) {
+    } catch {
       setErrorMsg("Failed to reset settings");
     } finally {
       setSaving(false);
@@ -242,6 +242,12 @@ export default function SettingsPage() {
       </div>
 
       {/* Notifications */}
+      {loading && (
+        <div className="max-w-6xl w-full mx-auto mb-4 p-3 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-800 dark:text-purple-300 rounded-xl flex items-center space-x-2 text-sm">
+          <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          <span>Loading system preferences...</span>
+        </div>
+      )}
       {successMsg && (
         <div className="max-w-6xl w-full mx-auto mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl flex items-center space-x-2 text-sm">
           <CheckCircle2 size={18} />

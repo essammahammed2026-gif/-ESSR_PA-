@@ -1,22 +1,19 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { 
-  Upload, 
   RotateCw, 
   Trash2, 
   Download, 
   Settings2, 
   Sparkles, 
-  Layers, 
   FileText, 
   RefreshCw, 
   Eye, 
-  Check, 
   Sliders, 
-  ArrowUpDown,
   BookOpen
 } from "lucide-react";
+import { API_BASE_URL } from "@/lib/api";
 
 interface BookPage {
   id: string;
@@ -34,7 +31,7 @@ export default function BookStudioPage() {
   const [isSpread, setIsSpread] = useState<boolean>(false);
   const [oddsOrder, setOddsOrder] = useState<"forward" | "reverse">("forward");
   const [evensOrder, setEvensOrder] = useState<"reverse" | "forward">("reverse");
-  const [splitPos, setSplitPos] = useState<number>(0.5);
+  const [splitPos] = useState<number>(0.5);
 
   // Files
   const [fileOdds, setFileOdds] = useState<File | null>(null);
@@ -52,7 +49,7 @@ export default function BookStudioPage() {
   const [previewCleaned, setPreviewCleaned] = useState<boolean>(true);
   const [cleanBorders, setCleanBorders] = useState<boolean>(true);
   const [borderMarginPx, setBorderMarginPx] = useState<number>(15);
-  const [borderThreshold, setBorderThreshold] = useState<number>(210);
+  const [borderThreshold] = useState<number>(210);
   const [enhanceColors, setEnhanceColors] = useState<boolean>(true);
   const [saturation, setSaturation] = useState<number>(1.30);
   const [contrast, setContrast] = useState<number>(1.10);
@@ -91,7 +88,7 @@ export default function BookStudioPage() {
         formData.append("file_single", fileSingle);
       }
 
-      const res = await fetch("http://localhost:8000/api/book-scan/init-session", {
+      const res = await fetch(API_BASE_URL + "/api/book-scan/init-session", {
         method: "POST",
         body: formData,
       });
@@ -107,8 +104,8 @@ export default function BookStudioPage() {
       if (data.pages.length > 0) {
         setSelectedPageId(data.pages[0].id);
       }
-    } catch (e: any) {
-      alert(`Initialization error: ${e.message}`);
+    } catch (e: unknown) {
+      alert(`Initialization error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setIsInitializing(false);
     }
@@ -117,7 +114,7 @@ export default function BookStudioPage() {
   const handleRotate = async (pageId: string, delta: number = 90) => {
     if (!sessionId) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/book-scan/rotate/${sessionId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/book-scan/rotate/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ page_id: pageId, rotation_delta: delta })
@@ -134,7 +131,7 @@ export default function BookStudioPage() {
   const handleDelete = async (pageId: string) => {
     if (!sessionId) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/book-scan/page/${sessionId}/${pageId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/book-scan/page/${sessionId}/${pageId}`, {
         method: "DELETE"
       });
       if (res.ok) {
@@ -167,7 +164,7 @@ export default function BookStudioPage() {
 
     // Persist reorder to backend
     try {
-      await fetch(`http://localhost:8000/api/book-scan/reorder/${sessionId}`, {
+      await fetch(`${API_BASE_URL}/api/book-scan/reorder/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ page_ids: reordered.map(p => p.id) })
@@ -181,7 +178,7 @@ export default function BookStudioPage() {
     if (!sessionId) return;
     setIsExporting(true);
     try {
-      const res = await fetch(`http://localhost:8000/api/book-scan/export/${sessionId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/book-scan/export/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -211,8 +208,8 @@ export default function BookStudioPage() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-    } catch (e: any) {
-      alert(`Export error: ${e.message}`);
+    } catch (e: unknown) {
+      alert(`Export error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setIsExporting(false);
     }
@@ -220,7 +217,7 @@ export default function BookStudioPage() {
 
   const getThumbUrl = (pageId: string, clean: boolean) => {
     if (!sessionId) return "";
-    return `http://localhost:8000/api/book-scan/page-thumbnail/${sessionId}/${pageId}?preview_clean=${clean}&clean_borders=${cleanBorders}&border_margin_px=${borderMarginPx}&border_threshold=${borderThreshold}&enhance_colors=${enhanceColors}&saturation=${saturation}&contrast=${contrast}&deskew=${deskew}&t=${Date.now()}`;
+    return `${API_BASE_URL}/api/book-scan/page-thumbnail/${sessionId}/${pageId}?preview_clean=${clean}&clean_borders=${cleanBorders}&border_margin_px=${borderMarginPx}&border_threshold=${borderThreshold}&enhance_colors=${enhanceColors}&saturation=${saturation}&contrast=${contrast}&deskew=${deskew}&t=${Date.now()}`;
   };
 
   return (
@@ -339,7 +336,7 @@ export default function BookStudioPage() {
                     <label className="text-xs font-medium text-gray-500 block mb-1">Odds Feed Order</label>
                     <select
                       value={oddsOrder}
-                      onChange={(e: any) => setOddsOrder(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setOddsOrder(e.target.value as "forward" | "reverse")}
                       className="w-full text-sm border dark:border-gray-600 bg-white dark:bg-gray-800 rounded-lg p-2"
                     >
                       <option value="forward">Forward (1, 3, 5...)</option>
@@ -351,7 +348,7 @@ export default function BookStudioPage() {
                     <label className="text-xs font-medium text-gray-500 block mb-1">Evens Feed Order</label>
                     <select
                       value={evensOrder}
-                      onChange={(e: any) => setEvensOrder(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEvensOrder(e.target.value as "reverse" | "forward")}
                       className="w-full text-sm border dark:border-gray-600 bg-white dark:bg-gray-800 rounded-lg p-2"
                     >
                       <option value="reverse">Reverse (...6, 4, 2) [ADF Flip]</option>
@@ -481,6 +478,7 @@ export default function BookStudioPage() {
                     }`}
                   >
                     <div className="relative aspect-[3/4] bg-gray-100 dark:bg-gray-900 rounded overflow-hidden flex items-center justify-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={getThumbUrl(p.id, previewCleaned)}
                         alt={p.label}
@@ -542,6 +540,7 @@ export default function BookStudioPage() {
                   <div className="space-y-2">
                     <span className="text-xs font-semibold text-gray-500 uppercase">Original Extracted Scan</span>
                     <div className="h-[450px] bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center p-2 border dark:border-gray-700">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={getThumbUrl(selectedPageId, false)}
                         alt="Original scan"
@@ -556,6 +555,7 @@ export default function BookStudioPage() {
                       Cleaned with 3mm Bleed & Crop Marks
                     </span>
                     <div className="h-[450px] bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center p-2 border border-green-500/30">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={getThumbUrl(selectedPageId, true)}
                         alt="Cleaned scan"
@@ -723,7 +723,7 @@ export default function BookStudioPage() {
                 </label>
                 <select
                   value={exportDpi}
-                  onChange={(e: any) => setExportDpi(parseInt(e.target.value))}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setExportDpi(parseInt(e.target.value))}
                   className="w-full text-xs border dark:border-gray-600 bg-white dark:bg-gray-800 rounded-lg p-2"
                 >
                   <option value="150">150 DPI (Fast / Draft)</option>

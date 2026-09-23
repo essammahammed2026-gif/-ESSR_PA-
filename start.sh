@@ -15,7 +15,13 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 cd ..
 
-# 2. Start Celery Worker
+# 2. Check and start Redis if not running
+if ! redis-cli ping >/dev/null 2>&1; then
+  echo "=> Starting Redis server in background..."
+  redis-server --daemonize yes 2>/dev/null || true
+fi
+
+# 3. Start Celery Worker
 echo "=> Starting Celery Worker..."
 cd backend
 source .venv/bin/activate
