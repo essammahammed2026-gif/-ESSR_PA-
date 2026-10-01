@@ -17,7 +17,10 @@ frontend/build/
 next-env.d.ts
 
 # Temporary uploads & output generated flipbooks
-backend/temp_uploads/
+backend/temp_uploads/*
+!backend/temp_uploads/.gitkeep
+backend/public_flipbooks/*
+!backend/public_flipbooks/.gitkeep
 backend/public_flipbooks/flipbook_*
 backend/public_flipbooks/flipbook_export_*
 
@@ -33,6 +36,9 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Ad-hoc test files
-test.jpg
+# Ad-hoc test files & database snapshots
+*.jpg
+*.png
+*.pdf
+*.avif
 dump.rdb

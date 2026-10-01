@@ -43,8 +43,13 @@ export default function FlipbookStudio() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const isFirstRender = useRef(true);
   const prevBindingRef = useRef(bindingStyle);
+  const lastAppliedSettings = useRef({
+    direction: "",
+    bindingStyle: "",
+    magPadChoice: "",
+    addFlyleaves: false,
+  });
 
   const runPreflight = async (selectedFiles: File[]) => {
     if (selectedFiles.length === 0) return;
@@ -71,6 +76,12 @@ export default function FlipbookStudio() {
       runPreflight(arr);
       setTaskId(null);
       setResultUrl(null);
+      lastAppliedSettings.current = {
+        direction: "",
+        bindingStyle: "",
+        magPadChoice: "",
+        addFlyleaves: false,
+      };
     }
   };
 
@@ -107,21 +118,21 @@ export default function FlipbookStudio() {
     }
   };
 
-  const handleInstantUpdate = useCallback(async (overrideStates?: {
-    direction?: string;
-    bindingStyle?: string;
-    magPadChoice?: string;
-    addFlyleaves?: boolean;
+  const handleInstantUpdate = useCallback(async (newSettings: {
+    direction: string;
+    bindingStyle: string;
+    magPadChoice: string;
+    addFlyleaves: boolean;
   }) => {
     if (!taskId) return;
     setIsUpdating(true);
     const formData = new FormData();
     formData.append("task_id", taskId);
-    formData.append("direction", overrideStates?.direction ?? direction);
-    formData.append("binding_style", overrideStates?.bindingStyle ?? bindingStyle);
+    formData.append("direction", newSettings.direction);
+    formData.append("binding_style", newSettings.bindingStyle);
     formData.append("bg_texture", "Dark Mode");
-    formData.append("mag_pad_choice", overrideStates?.magPadChoice ?? magPadChoice);
-    formData.append("add_flyleaves", String(overrideStates?.addFlyleaves ?? addFlyleaves));
+    formData.append("mag_pad_choice", newSettings.magPadChoice);
+    formData.append("add_flyleaves", String(newSettings.addFlyleaves));
 
     try {
       const res = await fetch(`${API_BASE_URL}/api/flipbook/update`, {
@@ -137,7 +148,7 @@ export default function FlipbookStudio() {
     } finally {
       setIsUpdating(false);
     }
-  }, [taskId, direction, bindingStyle, magPadChoice, addFlyleaves]);
+  }, [taskId]);
 
   const triggerDownload = async (url: string) => {
     try {
@@ -197,6 +208,13 @@ export default function FlipbookStudio() {
           if (data.state === "SUCCESS") {
             clearInterval(interval);
             setIsGenerating(false);
+            lastAppliedSettings.current = {
+              direction,
+              bindingStyle,
+              magPadChoice,
+              addFlyleaves,
+            };
+            prevBindingRef.current = bindingStyle;
             setResultUrl(`${API_BASE_URL}/flipbooks/${data.result.output.replace("public_flipbooks/", "")}`);
           } else if (data.state === "FAILURE") {
             clearInterval(interval);
@@ -209,7 +227,7 @@ export default function FlipbookStudio() {
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [taskId, isGenerating]);
+  }, [taskId, isGenerating, direction, bindingStyle, magPadChoice, addFlyleaves]);
 
   // Poll for EXPORT generation
   useEffect(() => {
@@ -243,24 +261,46 @@ export default function FlipbookStudio() {
     return () => clearInterval(interval);
   }, [exportTaskId, isExporting]);
 
-  // Auto-update preview when settings change
+  // Auto-update preview only when settings change after initial generation
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
+    if (!taskId || isGenerating) return;
+    const prev = lastAppliedSettings.current;
+    if (!prev.direction) {
+      // First generation not finished yet
       return;
     }
-    if (taskId && !isGenerating && !isUpdating) {
-      let currentFlyleaves = addFlyleaves;
-      if (bindingStyle !== prevBindingRef.current) {
-        if (bindingStyle !== "Hard Cover") {
-          setAddFlyleaves(false);
-          currentFlyleaves = false;
-        }
-        prevBindingRef.current = bindingStyle;
+
+    let nextFlyleaves = addFlyleaves;
+    if (bindingStyle !== prevBindingRef.current) {
+      if (bindingStyle !== "Hard Cover") {
+        setAddFlyleaves(false);
+        nextFlyleaves = false;
       }
-      handleInstantUpdate({ addFlyleaves: currentFlyleaves });
+      prevBindingRef.current = bindingStyle;
     }
-  }, [direction, bindingStyle, magPadChoice, addFlyleaves, handleInstantUpdate, isGenerating, isUpdating, taskId]);
+
+    const hasChanged =
+      prev.direction !== direction ||
+      prev.bindingStyle !== bindingStyle ||
+      prev.magPadChoice !== magPadChoice ||
+      prev.addFlyleaves !== nextFlyleaves;
+
+    if (!hasChanged) return;
+
+    lastAppliedSettings.current = {
+      direction,
+      bindingStyle,
+      magPadChoice,
+      addFlyleaves: nextFlyleaves,
+    };
+
+    handleInstantUpdate({
+      direction,
+      bindingStyle,
+      magPadChoice,
+      addFlyleaves: nextFlyleaves,
+    });
+  }, [direction, bindingStyle, magPadChoice, addFlyleaves, taskId, isGenerating, handleInstantUpdate]);
 
   const showMagPadding = bindingStyle === "Magazine" && numPages > 0 && numPages % 4 !== 0;
   const showHardCoverOptions = bindingStyle === "Hard Cover";

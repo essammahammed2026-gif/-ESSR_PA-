@@ -11,7 +11,8 @@ import {
   RotateCcw, 
   Upload, 
   Layers, 
-  SlidersHorizontal 
+  SlidersHorizontal,
+  Sparkles
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
@@ -91,11 +92,27 @@ const NumberControl: React.FC<NumberControlProps> = ({
   );
 };
 
+interface DetectedProfile {
+  width: number;
+  height: number;
+  hasAlpha: boolean;
+  bgType: string;
+  suggestedOptions: {
+    offset_val: string;
+    threshold: string;
+    smoothing_factor: string;
+    keep_holes: boolean;
+    add_white_matte: boolean;
+    stroke_color: string;
+  };
+}
+
 export default function ContourStudio() {
   const [fileId, setFileId] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detectedProfile, setDetectedProfile] = useState<DetectedProfile | null>(null);
 
   // Prepress Parameters
   const [offsetVal, setOffsetVal] = useState("0");
@@ -115,6 +132,7 @@ export default function ContourStudio() {
 
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
   const isFirstRender = useRef(true);
+  const lastGeneratedKey = useRef<string | null>(null);
 
   // Mouse wheel pan & zoom with non-passive event listener
   useEffect(() => {
@@ -151,6 +169,8 @@ export default function ContourStudio() {
     return () => canvas.removeEventListener("wheel", handleNativeWheel);
   }, []);
 
+  const rafId = useRef<number | null>(null);
+
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDragging(true);
     dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
@@ -158,9 +178,15 @@ export default function ContourStudio() {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isDragging) return;
-    setPosition({
-      x: e.clientX - dragStart.current.x,
-      y: e.clientY - dragStart.current.y
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    if (rafId.current) return;
+    rafId.current = requestAnimationFrame(() => {
+      setPosition({
+        x: clientX - dragStart.current.x,
+        y: clientY - dragStart.current.y
+      });
+      rafId.current = null;
     });
   };
 
@@ -210,10 +236,16 @@ export default function ContourStudio() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
+    // Reset file input value so user can re-upload or upload the same file
+    e.target.value = "";
     
-    setIsGenerating(true);
-    setError(null);
+    // 1. Reset viewport / UI canvas state
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+    setArtworkOpacity("100");
     setSvgContent(null);
+    setError(null);
+    setIsGenerating(true);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -226,7 +258,52 @@ export default function ContourStudio() {
       const data = await res.json();
       if (data.success) {
         setFileId(data.file_id);
-        generateContour(data.file_id, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor);
+        
+        // 2. Configure options to fit the uploaded image
+        const suggested = data.suggested_options || {};
+        const nextOffset = String(suggested.offset_val ?? "0");
+        const nextThreshold = String(suggested.threshold ?? "20");
+        const nextSmoothing = String(suggested.smoothing_factor ?? "2");
+        const nextKeepHoles = Boolean(suggested.keep_holes ?? false);
+        const nextAddWhiteMatte = Boolean(suggested.add_white_matte ?? false);
+        const nextStrokeColor = String(suggested.stroke_color ?? "#FF00FF");
+
+        setOffsetVal(nextOffset);
+        setThreshold(nextThreshold);
+        setSmoothing(nextSmoothing);
+        setKeepHoles(nextKeepHoles);
+        setAddWhiteMatte(nextAddWhiteMatte);
+        setStrokeColor(nextStrokeColor);
+
+        setDetectedProfile({
+          width: data.width || 0,
+          height: data.height || 0,
+          hasAlpha: Boolean(data.has_alpha),
+          bgType: data.bg_type || "unknown",
+          suggestedOptions: {
+            offset_val: nextOffset,
+            threshold: nextThreshold,
+            smoothing_factor: nextSmoothing,
+            keep_holes: nextKeepHoles,
+            add_white_matte: nextAddWhiteMatte,
+            stroke_color: nextStrokeColor,
+          },
+        });
+
+        // 3. Mark key so debounced effect doesn't perform a duplicate run
+        const generatedKey = `${data.file_id}_${nextOffset}_${nextThreshold}_${nextSmoothing}_${nextKeepHoles}_${nextAddWhiteMatte}_${nextStrokeColor}`;
+        lastGeneratedKey.current = generatedKey;
+
+        // 4. Immediately trigger contour generation with the new image & auto-fitted options
+        generateContour(
+          data.file_id, 
+          nextOffset, 
+          nextThreshold, 
+          nextSmoothing, 
+          nextKeepHoles, 
+          nextAddWhiteMatte, 
+          nextStrokeColor
+        );
       } else {
         setError(data.error || "Artwork upload failed.");
         setIsGenerating(false);
@@ -237,6 +314,17 @@ export default function ContourStudio() {
     }
   };
 
+  const handleResetToAuto = () => {
+    if (!detectedProfile) return;
+    const opt = detectedProfile.suggestedOptions;
+    setOffsetVal(opt.offset_val);
+    setThreshold(opt.threshold);
+    setSmoothing(opt.smoothing_factor);
+    setKeepHoles(opt.keep_holes);
+    setAddWhiteMatte(opt.add_white_matte);
+    setStrokeColor(opt.stroke_color);
+  };
+
   // Debounced auto-recalculation when parameters change (350ms)
   useEffect(() => {
     if (isFirstRender.current) {
@@ -245,9 +333,15 @@ export default function ContourStudio() {
     }
     if (!fileId) return;
 
+    const currentKey = `${fileId}_${offsetVal}_${threshold}_${smoothing}_${keepHoles}_${addWhiteMatte}_${strokeColor}`;
+    if (lastGeneratedKey.current === currentKey) {
+      return;
+    }
+
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     
     typingTimeout.current = setTimeout(() => {
+      lastGeneratedKey.current = currentKey;
       generateContour(fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor);
     }, 350);
 
@@ -256,17 +350,33 @@ export default function ContourStudio() {
     };
   }, [fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor, generateContour]);
 
-  const handleDownload = () => {
-    if (!svgContent) return;
-    const blob = new Blob([svgContent], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `cut_contour_${Date.now()}.svg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const handleDownload = async () => {
+    if (!fileId) return;
+    // Download production SVG with full embedded artwork from the server export endpoint
+    const params = new URLSearchParams({
+      file_id: fileId,
+      offset_val: offsetVal,
+      threshold: threshold,
+      smoothing_factor: smoothing,
+      stroke_color: strokeColor,
+      keep_holes: String(keepHoles),
+      add_white_matte: String(addWhiteMatte),
+    });
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/contour/export?${params}`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `cut_contour_${Date.now()}.svg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Failed to export production SVG.");
+    }
   };
 
   const handleFitToViewport = () => {
@@ -338,6 +448,41 @@ export default function ContourStudio() {
                 </span>
               </label>
             </div>
+
+            {detectedProfile && (
+              <div className="bg-[#131720] border border-[#2E3648] rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-pink-400 flex items-center gap-1.5">
+                    <Sparkles size={13} className="text-pink-400" />
+                    Auto-Configured Profile
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetToAuto}
+                    title="Reset options to auto-detected settings for this image"
+                    className="text-[10px] text-slate-400 hover:text-pink-300 flex items-center gap-1 hover:underline transition-colors"
+                  >
+                    <RotateCcw size={11} />
+                    Reset
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5 text-[10px] text-slate-400">
+                  <span className="px-1.5 py-0.5 rounded bg-[#1F2633] text-slate-300 font-mono">
+                    {detectedProfile.width} × {detectedProfile.height}px
+                  </span>
+                  <span className={`px-1.5 py-0.5 rounded font-mono ${
+                    detectedProfile.hasAlpha 
+                      ? "bg-emerald-950 text-emerald-300 border border-emerald-800/40" 
+                      : "bg-blue-950 text-blue-300 border border-blue-800/40"
+                  }`}>
+                    {detectedProfile.hasAlpha ? "Alpha Cutout" : detectedProfile.bgType.replace("_", " ")}
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-[#1F2633] text-slate-300 font-mono">
+                    Thresh: {detectedProfile.suggestedOptions.threshold}
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="pt-2 border-t border-[#242A38] space-y-4">
               <div className="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-slate-400">

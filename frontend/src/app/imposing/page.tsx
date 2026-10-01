@@ -238,6 +238,8 @@ export default function ImposingStudio() {
     return () => canvas.removeEventListener("wheel", handleNativeWheel);
   }, []);
 
+  const rafId = useRef<number | null>(null);
+
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDragging(true);
     dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
@@ -245,9 +247,15 @@ export default function ImposingStudio() {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isDragging) return;
-    setPosition({
-      x: e.clientX - dragStart.current.x,
-      y: e.clientY - dragStart.current.y
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    if (rafId.current) return;
+    rafId.current = requestAnimationFrame(() => {
+      setPosition({
+        x: clientX - dragStart.current.x,
+        y: clientY - dragStart.current.y
+      });
+      rafId.current = null;
     });
   };
 
@@ -939,6 +947,8 @@ export default function ImposingStudio() {
                           // eslint-disable-next-line @next/next/no-img-element
                           <img 
                             src={`${API_BASE_URL}/temp_uploads/${box.thumb}`} 
+                            loading="lazy"
+                            decoding="async"
                             className="w-full h-full object-contain"
                             style={{ transform: box.rotated ? "rotate(90deg)" : "none" }}
                             alt="thumb" 

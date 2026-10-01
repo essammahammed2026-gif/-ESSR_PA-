@@ -158,6 +158,11 @@ async def get_page_thumbnail(
     if not page_info:
         raise HTTPException(status_code=404, detail="Page not found.")
 
+    # Disk cache: return cached thumbnail if it exists
+    thumb_path = os.path.join(session["session_dir"], f"thumb_{page_id}_{preview_clean}.jpg")
+    if os.path.exists(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
     doc_map = {}
     if session.get("odds_path"):
         doc_map["odds"] = fitz.open(session["odds_path"])
@@ -187,11 +192,10 @@ async def get_page_thumbnail(
         if not success:
             raise HTTPException(status_code=500, detail="Failed to encode thumbnail.")
 
-        thumb_path = os.path.join(session["session_dir"], f"thumb_{page_id}_{preview_clean}.jpg")
         with open(thumb_path, "wb") as f:
             f.write(enc.tobytes())
 
-        return FileResponse(thumb_path, media_type="image/jpeg")
+        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
     finally:
         for d in doc_map.values():
             d.close()

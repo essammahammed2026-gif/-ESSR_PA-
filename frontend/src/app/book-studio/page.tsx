@@ -482,6 +482,8 @@ export default function BookStudioPage() {
                       <img
                         src={getThumbUrl(p.id, previewCleaned)}
                         alt={p.label}
+                        loading="lazy"
+                        decoding="async"
                         className="object-contain w-full h-full pointer-events-none"
                         style={{ transform: `rotate(${p.rotation}deg)` }}
                       />

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" dir="$dir_code">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -108,14 +108,14 @@
 
     #book-wrapper {
       position: relative;
-      max-width: 92vw;
-      max-height: 76vh;
+      max-width: 96vw;
+      max-height: 82vh;
       box-shadow: 
         0 25px 50px -12px rgba(0, 0, 0, 0.6),
         0 0 80px rgba(59, 130, 246, 0.04),
         0 0 1px 1px rgba(255, 255, 255, 0.1) inset;
       border-radius: 8px;
-      overflow: hidden;
+      overflow: visible;
       transform-origin: center center;
       transition: transform 0.2s ease;
     }
@@ -311,7 +311,7 @@
 
   <div id="book-container">
     <div id="book-wrapper" class="$rtl_mode_class">
-      <div id="binding-spine-overlay" class="spine-overlay $spine_class"></div>
+      <div id="binding-spine-overlay" class="spine-overlay $spine_class" style="display: none;"></div>
     </div>
   </div>
 
@@ -341,13 +341,34 @@
   const pages = $pages_json;
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('book-wrapper');
-    pages.forEach((src) => {
+    const LAZY_WINDOW = 3; // Load images within ±3 pages of the current spread
+
+    pages.forEach((src, i) => {
       const div = document.createElement('div');
       div.className = 'page';
       const img = document.createElement('img');
-      img.src = src; img.style.width = '100%'; img.style.height = '100%'; img.style.objectFit = 'contain';
+      img.style.width = '100%'; img.style.height = '100%'; img.style.objectFit = 'contain';
+      // Only eagerly load the first few pages; defer the rest
+      if (i <= LAZY_WINDOW * 2) {
+        img.src = src;
+      } else {
+        img.dataset.src = src;
+        img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+      }
       div.appendChild(img); container.appendChild(div);
     });
+
+    function lazyLoadPages(currentIndex) {
+      const allImgs = container.querySelectorAll('.page img');
+      const start = Math.max(0, currentIndex - LAZY_WINDOW);
+      const end = Math.min(allImgs.length - 1, currentIndex + LAZY_WINDOW * 2);
+      for (let i = start; i <= end; i++) {
+        const img = allImgs[i];
+        if (img.dataset.src && img.src !== img.dataset.src) {
+          img.src = img.dataset.src;
+        }
+      }
+    }
 
     const pf = new St.PageFlip(container, {
       width: $page_w,
@@ -365,22 +386,45 @@
     pf.loadFromHTML(document.querySelectorAll('.page'));
     window.pf = pf;
 
+    const isRTL = $is_rtl_json;
+
+    // Fix mouse/touch coordinate mapping when mirrored in RTL mode
+    if (isRTL && pf.getUI) {
+      const ui = pf.getUI();
+      if (ui && ui.getMousePos) {
+        const origGetMousePos = ui.getMousePos.bind(ui);
+        ui.getMousePos = function(clientX, clientY) {
+          const pos = origGetMousePos(clientX, clientY);
+          const rect = this.distElement ? this.distElement.getBoundingClientRect() : null;
+          if (rect && rect.width) {
+            return {
+              x: rect.width - pos.x,
+              y: pos.y
+            };
+          }
+          return pos;
+        };
+      }
+    }
+
+    let audioCtx = null;
     if ($sound_json) {
       pf.on('flip', (e) => {
-          try {
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.1);
-            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + 0.1);
-          } catch(err) {}
+        try {
+          if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+          const oscillator = audioCtx.createOscillator();
+          const gainNode = audioCtx.createGain();
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+          oscillator.type = 'sine';
+          oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+          oscillator.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.1);
+          gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+          oscillator.start();
+          oscillator.stop(audioCtx.currentTime + 0.1);
+        } catch(err) {}
       });
     }
 
@@ -391,7 +435,6 @@
     const btnFullscreen = document.getElementById('btn-fullscreen');
 
     let zoomLevel = 1.0;
-    const isRTL = $is_rtl_json;
     const zoomText = document.getElementById('zoom-level');
     const updateZoom = (z) => {
       zoomLevel = Math.min(Math.max(0.3, z), 3.0);
@@ -421,22 +464,40 @@
           statusText = isRTL ? `Pages $${p2}-$${p1} of $${total}` : `Pages $${p1}-$${p2} of $${total}`;
         }
       }
-      document.getElementById('status').innerText = statusText;
+      const statusEl = document.getElementById('status');
+      if (statusEl) statusEl.innerText = statusText;
 
       const isFirst = pageIndex === 0;
       const isLast = (pageIndex >= total - 1) || 
                      (pf.getOrientation() === 'landscape' && pageIndex >= total - 2 && pageIndex % 2 === 1);
       
-      btnFirst.disabled = isFirst;
-      btnPrev.disabled = isFirst;
-      btnNext.disabled = isLast;
-      btnLast.disabled = isLast;
+      if (btnFirst) btnFirst.disabled = isFirst;
+      if (btnPrev) btnPrev.disabled = isFirst;
+      if (btnNext) btnNext.disabled = isLast;
+      if (btnLast) btnLast.disabled = isLast;
     };
 
-    btnFirst.addEventListener('click', () => pf.flip(0));
-    btnPrev.addEventListener('click', () => pf.flipPrev());
-    btnNext.addEventListener('click', () => pf.flipNext());
-    btnLast.addEventListener('click', () => pf.flip(pages.length - 1));
+    const updateSpine = (pageIndex) => {
+      const spine = document.getElementById('binding-spine-overlay');
+      if (!spine) return;
+      if (pageIndex === 0 || pageIndex >= pages.length - 1) {
+        spine.style.display = 'none';
+      } else {
+        const bounds = pf.getBoundsRect ? pf.getBoundsRect() : null;
+        if (bounds && bounds.height) {
+          spine.style.top = bounds.top + 'px';
+          spine.style.height = bounds.height + 'px';
+          spine.style.left = (bounds.left + bounds.pageWidth) + 'px';
+        }
+        spine.style.display = 'block';
+        spine.style.opacity = '1';
+      }
+    };
+
+    if (btnFirst) btnFirst.addEventListener('click', () => pf.flip(0));
+    if (btnPrev) btnPrev.addEventListener('click', () => pf.flipPrev());
+    if (btnNext) btnNext.addEventListener('click', () => pf.flipNext());
+    if (btnLast) btnLast.addEventListener('click', () => pf.flip(pages.length - 1));
 
     if (btnFullscreen) {
       btnFullscreen.addEventListener('click', () => {
@@ -456,43 +517,39 @@
         if (e.data === 'flipping' || e.data === 'user_fold') {
           spine.style.opacity = '0';
         } else if (e.data === 'read') {
-          const curr = pf.getCurrentPageIndex();
-          if (curr === 0 || curr === pages.length - 1) {
-            spine.style.display = 'none';
-          } else {
-            spine.style.display = 'block';
-            spine.style.opacity = '1';
-          }
+          updateSpine(pf.getCurrentPageIndex());
         }
       }
     });
 
     pf.on('flip', (e) => {
-      const spine = document.getElementById('binding-spine-overlay');
-      if (spine) {
-        if (e.data === 0 || e.data === pages.length - 1) {
-          spine.style.display = 'none';
-        } else {
-          spine.style.display = 'block';
-          spine.style.opacity = '1';
-        }
-      }
+      updateSpine(e.data);
       updateControls(e.data);
+      lazyLoadPages(e.data);
     });
 
     pf.on('changeOrientation', (e) => {
       updateControls(pf.getCurrentPageIndex());
+      updateSpine(pf.getCurrentPageIndex());
+    });
+
+    window.addEventListener('resize', () => {
+      if (pf) {
+        pf.update();
+        updateSpine(pf.getCurrentPageIndex());
+      }
     });
 
     updateControls(0);
+    updateSpine(0);
 
     document.addEventListener('keydown', (e) => {
       if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
       
       if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-        pf.flipPrev();
+        isRTL ? pf.flipNext() : pf.flipPrev();
       } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
-        pf.flipNext();
+        isRTL ? pf.flipPrev() : pf.flipNext();
       } else if (e.key === 'Home') {
         pf.flip(0);
       } else if (e.key === 'End') {

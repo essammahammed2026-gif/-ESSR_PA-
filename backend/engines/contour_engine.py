@@ -25,7 +25,8 @@ def chaikin_smooth(points, iterations=1):
 
 def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", threshold=20, 
                              dpi=300, stroke_color="#FF00FE", stroke_width=1.0, 
-                             keep_holes=False, add_white_matte=False, pdf_page=0, smoothing_factor=0, **kwargs):
+                             keep_holes=False, add_white_matte=False, pdf_page=0, smoothing_factor=0, 
+                             preview_url=None, **kwargs):
     """
     Generates a production-ready SVG cut contour path using FULLY AUTOMATIC classical computer vision.
     NO AI MODELS ARE USED. 
@@ -35,6 +36,7 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
     
     physical_w_pt = None
     physical_h_pt = None
+    img_href = preview_url
 
     # 1. Load Artwork & Determine Exact Physical Size
     if ext == ".pdf":
@@ -53,9 +55,10 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
         h, w = pix.h, pix.w
         doc.close()
         
-        success, png_data = cv2.imencode('.png', img)
-        img_b64 = base64.b64encode(png_data.tobytes()).decode("utf-8")
-        mime = "image/png"
+        if not img_href:
+            success, png_data = cv2.imencode('.png', img)
+            img_b64 = base64.b64encode(png_data.tobytes()).decode("utf-8")
+            img_href = f"data:image/png;base64,{img_b64}"
     else:
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         h, w = img.shape[:2]
@@ -63,9 +66,11 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
         physical_w_pt = (w / dpi) * 72.0
         physical_h_pt = (h / dpi) * 72.0
 
-        with open(img_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode("utf-8")
-        mime = "image/png" if ext == ".png" else "image/jpeg"
+        if not img_href:
+            with open(img_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode("utf-8")
+            mime = "image/png" if ext == ".png" else "image/jpeg"
+            img_href = f"data:{mime};base64,{img_b64}"
 
     if len(img.shape) == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -188,7 +193,7 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
 
     svg_content = f'''<svg width="{physical_w_pt}pt" height="{physical_h_pt}pt" viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
   <g id="Artwork">
-    {white_matte_path}<image width="{w}" height="{h}" xlink:href="data:{mime};base64,{img_b64}"/>
+    {white_matte_path}<image width="{w}" height="{h}" href="{img_href}" xlink:href="{img_href}"/>
   </g>
   <g id="CutContourLines">
     <path id="CutContour" stroke="{stroke_color}" stroke-width="{stroke_width}" fill="none" stroke-linejoin="round" stroke-linecap="round" d="{full_path_d}"/>
@@ -196,3 +201,101 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
 </svg>'''
 
     return svg_content
+
+
+def analyze_image_for_contour(img_path):
+    """
+    Analyzes an uploaded artwork file (image or PDF) and suggests optimal contour cut parameters.
+    Returns:
+        dict: image properties and suggested_options (threshold, offset_val, smoothing_factor, keep_holes, add_white_matte, stroke_color).
+    """
+    ext = os.path.splitext(img_path)[1].lower()
+    img = None
+    has_real_alpha = False
+    
+    if ext == ".pdf":
+        try:
+            doc = fitz.open(img_path)
+            if len(doc) > 0:
+                page = doc[0]
+                pix = page.get_pixmap(dpi=150, alpha=True)
+                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+                doc.close()
+        except Exception:
+            pass
+    else:
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        return {
+            "width": 0, "height": 0, "has_alpha": False, "bg_type": "unknown",
+            "suggested_options": {
+                "offset_val": "0", "threshold": "20", "smoothing_factor": "2",
+                "keep_holes": False, "add_white_matte": False, "stroke_color": "#FF00FF"
+            }
+        }
+
+    h, w = img.shape[:2]
+    channels = img.shape[2] if len(img.shape) > 2 else 1
+
+    if channels == 4:
+        alpha = img[:, :, 3]
+        std_alpha = float(np.std(alpha))
+        min_alpha = float(np.min(alpha))
+        has_real_alpha = bool(std_alpha > 0.5 and min_alpha < 250)
+
+    if has_real_alpha:
+        bg_type = "transparent"
+        rec_thresh = "20"
+        rec_smooth = "3" if max(w, h) > 2000 else ("1" if max(w, h) < 600 else "2")
+        suggested = {
+            "offset_val": "0",
+            "threshold": rec_thresh,
+            "smoothing_factor": rec_smooth,
+            "keep_holes": False,
+            "add_white_matte": False,
+            "stroke_color": "#FF00FF"
+        }
+    else:
+        bgr = img[:, :, :3] if channels >= 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        top = bgr[0, :, :]
+        bottom = bgr[h - 1, :, :]
+        left = bgr[:, 0, :]
+        right = bgr[:, w - 1, :]
+        border_pixels = np.concatenate([top, bottom, left, right], axis=0)
+        
+        bg_color = np.median(border_pixels, axis=0)
+        std_dev = float(np.std(border_pixels, axis=0).mean())
+        border_diff = np.max(cv2.absdiff(border_pixels, bg_color.astype(np.uint8)), axis=1)
+        noise_p95 = float(np.percentile(border_diff, 95))
+        
+        mean_bg = float(np.mean(bg_color))
+        if mean_bg > 220:
+            bg_type = "white_background"
+        elif mean_bg < 45:
+            bg_type = "dark_background"
+        elif std_dev < 18:
+            bg_type = "solid_background"
+        else:
+            bg_type = "complex_background"
+
+        if std_dev < 18:
+            rec_thresh = int(np.clip(noise_p95 + 14, 16, 55))
+        else:
+            rec_thresh = int(np.clip(noise_p95 * 0.7 + 24, 25, 70))
+
+        rec_smooth = "3" if max(w, h) > 2000 else ("1" if max(w, h) < 600 else "2")
+
+        suggested = {
+            "offset_val": "0",
+            "threshold": str(rec_thresh),
+            "smoothing_factor": rec_smooth,
+            "keep_holes": False,
+            "add_white_matte": False,
+            "stroke_color": "#FF00FF"
+        }
+
+    return {
+        "width": w, "height": h, "has_alpha": has_real_alpha, "bg_type": bg_type,
+        "suggested_options": suggested
+    }

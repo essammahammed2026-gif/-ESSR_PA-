@@ -5,3 +5,7 @@ redis
 pydantic
 python-multipart
 pymupdf
+opencv-python
+numpy
+shapely
+reportlab

@@ -46,9 +46,9 @@
         "auto_rotate_sheet": true
     },
     "contour": {
-        "default_dpi": 150,
+        "default_dpi": 300,
         "default_threshold": 20,
-        "default_offset": 0.0,
+        "default_offset": 0.25,
         "default_stroke_color": "#FF00FF",
         "default_stroke_width": 1.0,
         "default_smoothing": 2.0,

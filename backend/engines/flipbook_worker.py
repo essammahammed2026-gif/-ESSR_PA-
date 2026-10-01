@@ -52,10 +52,16 @@ def generate_html_content(b64_pages, original_pdf_name, direction, binding_style
         bg_css = "background-color: var(--bg-slate-950);"
         color_css = "color: var(--text-slate-100);"
 
-    if _FLIPBOOK_TEMPLATE is None:
+    try:
+        with open(_TEMPLATE_PATH, 'r', encoding='utf-8') as _f:
+            template = Template(_f.read())
+    except Exception:
+        template = _FLIPBOOK_TEMPLATE
+
+    if template is None:
         raise ValueError("Flipbook HTML template not found!")
 
-    return _FLIPBOOK_TEMPLATE.substitute(
+    return template.substitute(
         dir_code=dir_code,
         first_pdf_name=original_pdf_name,
         bg_css=bg_css,

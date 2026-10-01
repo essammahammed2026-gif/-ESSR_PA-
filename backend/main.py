@@ -8,9 +8,11 @@ from fastapi.staticfiles import StaticFiles
 import shutil
 import os
 import uuid
+import fitz
+import cv2
 from typing import List
 from engines.preflight import run_preflight
-from engines.contour_engine import generate_contour_cut_svg
+from engines.contour_engine import generate_contour_cut_svg, analyze_image_for_contour
 from engines.flipbook_worker import generate_flipbook_task, generate_html_content, export_flipbook_task
 from engines.helpers import apply_print_binding_padding
 
@@ -157,6 +159,13 @@ async def update_flipbook(
     with open(cached["output_path"], "w", encoding="utf-8") as f:
         f.write(html_content)
         
+    cached["direction"] = direction
+    cached["binding_style"] = binding_style
+    cached["mag_pad_choice"] = mag_pad_choice
+    cached["add_flyleaves"] = add_flyleaves
+    cached["bg_texture"] = bg_texture
+    cached["sound_enabled"] = sound_enabled
+
     return {"success": True, "output": cached["output_path"], "message": "Flipbook updated instantly!"}
 
 
@@ -201,18 +210,59 @@ async def get_task_status(task_id: str):
 
 
 CONTOUR_CACHE = {}
+CONTOUR_PREVIEWS = {}
 
 @app.post("/api/contour/upload")
 async def upload_contour_file(file: UploadFile = File(...)):
     try:
         os.makedirs("temp_uploads", exist_ok=True)
         file_id = str(uuid.uuid4())[:12]
+        ext = os.path.splitext(file.filename)[1].lower()
         file_path = f"temp_uploads/{file_id}_{file.filename}"
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
         CONTOUR_CACHE[file_id] = file_path
-        return {"success": True, "file_id": file_id}
+
+        # Generate lightweight downsampled raster for ultra-fast, low-memory browser proofing
+        preview_filename = f"{file_id}_preview.png"
+        preview_disk_path = f"temp_uploads/{preview_filename}"
+        try:
+            if ext == ".pdf":
+                doc = fitz.open(file_path)
+                if len(doc) > 0:
+                    pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.5, 0.5), alpha=True)
+                    pix.save(preview_disk_path)
+                doc.close()
+            else:
+                img_cv = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
+                if img_cv is not None:
+                    h_cv, w_cv = img_cv.shape[:2]
+                    max_dim = 1200.0
+                    if max(w_cv, h_cv) > max_dim:
+                        scale = max_dim / float(max(w_cv, h_cv))
+                        resized = cv2.resize(img_cv, (int(w_cv * scale), int(h_cv * scale)), interpolation=cv2.INTER_AREA)
+                        cv2.imwrite(preview_disk_path, resized)
+                    else:
+                        cv2.imwrite(preview_disk_path, img_cv)
+            if os.path.exists(preview_disk_path):
+                CONTOUR_PREVIEWS[file_id] = f"/temp_uploads/{preview_filename}"
+        except Exception as e_prev:
+            print("Notice: could not generate downsampled preview:", e_prev)
+        
+        # Analyze uploaded artwork and suggest optimal settings
+        analysis = analyze_image_for_contour(file_path)
+        
+        return {
+            "success": True, 
+            "file_id": file_id,
+            "filename": file.filename,
+            "width": analysis.get("width", 0),
+            "height": analysis.get("height", 0),
+            "has_alpha": analysis.get("has_alpha", False),
+            "bg_type": analysis.get("bg_type", "unknown"),
+            "suggested_options": analysis.get("suggested_options", {})
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -225,11 +275,12 @@ async def generate_contour(
     threshold: int = Form(20),
     smoothing_factor: float = Form(2.0),
     dpi: int = Form(300),
-        stroke_color: str = Form("#FF00FE"),
+    stroke_color: str = Form("#FF00FE"),
     stroke_width: float = Form(1.0),
     keep_holes: bool = Form(False),
     add_white_matte: bool = Form(False),
-    pdf_page: int = Form(0)
+    pdf_page: int = Form(0),
+    preview_mode: bool = Form(True)
 ):
     try:
         if file_id and file_id in CONTOUR_CACHE:
@@ -242,18 +293,22 @@ async def generate_contour(
         else:
             return {"success": False, "error": "No file provided"}
 
+        # In preview mode, use the lightweight downscaled preview raster URL instead of encoding 20-50MB base64
+        preview_url = CONTOUR_PREVIEWS.get(file_id) if (preview_mode and file_id) else None
+
         svg_content = generate_contour_cut_svg(
             img_path=file_path,
             offset_val=offset_val,
             offset_unit=offset_unit,
             threshold=threshold,
             dpi=dpi,
-                        stroke_color=stroke_color,
+            stroke_color=stroke_color,
             stroke_width=stroke_width,
             keep_holes=keep_holes,
             add_white_matte=add_white_matte,
             pdf_page=pdf_page,
-            smoothing_factor=smoothing_factor
+            smoothing_factor=smoothing_factor,
+            preview_url=preview_url
         )
         
         return {"success": True, "svg": svg_content}
@@ -261,3 +316,41 @@ async def generate_contour(
         import traceback
         traceback.print_exc()
         return {"success": False, "error": str(e)}
+
+@app.get("/api/contour/export")
+async def export_contour_svg(
+    file_id: str,
+    offset_val: float = 0.0,
+    offset_unit: str = "mm",
+    threshold: int = 20,
+    smoothing_factor: float = 2.0,
+    dpi: int = 300,
+    stroke_color: str = "#FF00FE",
+    stroke_width: float = 1.0,
+    keep_holes: bool = False,
+    add_white_matte: bool = False,
+    pdf_page: int = 0
+):
+    if file_id not in CONTOUR_CACHE:
+        raise HTTPException(status_code=404, detail="Artwork file not found or expired")
+    file_path = CONTOUR_CACHE[file_id]
+    from fastapi import Response
+    svg_content = generate_contour_cut_svg(
+        img_path=file_path,
+        offset_val=offset_val,
+        offset_unit=offset_unit,
+        threshold=threshold,
+        dpi=dpi,
+        stroke_color=stroke_color,
+        stroke_width=stroke_width,
+        keep_holes=keep_holes,
+        add_white_matte=add_white_matte,
+        pdf_page=pdf_page,
+        smoothing_factor=smoothing_factor,
+        preview_url=None # Full standalone SVG with embedded artwork for RIP / Plotter
+    )
+    return Response(
+        content=svg_content,
+        media_type="image/svg+xml",
+        headers={"Content-Disposition": f'attachment; filename="cut_contour_{file_id}.svg"'}
+    )

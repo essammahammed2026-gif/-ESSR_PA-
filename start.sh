@@ -25,7 +25,7 @@ fi
 echo "=> Starting Celery Worker..."
 cd backend
 source .venv/bin/activate
-celery -A celery_app worker --loglevel=info &
+celery -A celery_app worker --concurrency=2 --loglevel=info &
 CELERY_PID=$!
 cd ..
 
