@@ -12,7 +12,10 @@ import {
   Trash2, 
   CheckCircle2, 
   AlertCircle,
-  Sliders
+  Sliders,
+  Edit2,
+  Check,
+  X
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
@@ -40,6 +43,7 @@ interface AppSettingsData {
     crop_marks: boolean;
     draw_border: boolean;
     auto_rotate_sheet: boolean;
+    uniform_orientation: boolean;
   };
   contour: {
     default_dpi: number;
@@ -78,6 +82,7 @@ export default function SettingsPage() {
       crop_marks: false,
       draw_border: false,
       auto_rotate_sheet: true,
+      uniform_orientation: true,
     },
     contour: {
       default_dpi: 300,
@@ -202,40 +207,93 @@ export default function SettingsPage() {
     });
   };
 
+  // Editing state for sheets
+  const [editingSheetIdx, setEditingSheetIdx] = useState<number | null>(null);
+  const [editSheetName, setEditSheetName] = useState("");
+  const [editSheetW, setEditSheetW] = useState(320);
+  const [editSheetH, setEditSheetH] = useState(450);
+
+  // Editing state for rolls
+  const [editingRollIdx, setEditingRollIdx] = useState<number | null>(null);
+  const [editRollName, setEditRollName] = useState("");
+  const [editRollW, setEditRollW] = useState(600);
+
+  const startEditSheet = (idx: number, sheet: Sheet) => {
+    setEditingSheetIdx(idx);
+    setEditSheetName(sheet.name);
+    setEditSheetW(sheet.width);
+    setEditSheetH(sheet.height);
+  };
+
+  const handleSaveEditSheet = () => {
+    if (editingSheetIdx === null) return;
+    if (!editSheetName.trim() || editSheetW <= 0 || editSheetH <= 0) return;
+    const updated = [...settings.sheets];
+    updated[editingSheetIdx] = {
+      name: editSheetName.trim(),
+      width: Number(editSheetW),
+      height: Number(editSheetH),
+      unit: "mm",
+    };
+    setSettings({ ...settings, sheets: updated });
+    setEditingSheetIdx(null);
+  };
+
+  const handleCancelEditSheet = () => {
+    setEditingSheetIdx(null);
+  };
+
+  const startEditRoll = (idx: number, roll: Roll) => {
+    setEditingRollIdx(idx);
+    setEditRollName(roll.name);
+    setEditRollW(roll.width);
+  };
+
+  const handleSaveEditRoll = () => {
+    if (editingRollIdx === null) return;
+    if (!editRollName.trim() || editRollW <= 0) return;
+    const updated = [...settings.rolls];
+    updated[editingRollIdx] = {
+      name: editRollName.trim(),
+      width: Number(editRollW),
+      unit: "mm",
+    };
+    setSettings({ ...settings, rolls: updated });
+    setEditingRollIdx(null);
+  };
+
+  const handleCancelEditRoll = () => {
+    setEditingRollIdx(null);
+  };
+
   return (
-    <div className="h-full flex flex-col overflow-y-auto bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 p-6 lg:p-8">
-      {/* Header */}
-      <div className="max-w-6xl w-full mx-auto mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-purple-600 text-white rounded-xl shadow-md">
-              <Settings size={24} />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">System Settings</h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Configure defaults, print media formats, and studio engine preferences.
-              </p>
-            </div>
-          </div>
+    <div className="h-full flex flex-col overflow-y-auto bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 p-2 md:p-3">
+      {/* Compact Header */}
+      <div className="w-full mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex items-center space-x-2.5">
+          <Settings className="text-purple-500" size={20} />
+          <h1 className="text-base md:text-lg font-bold tracking-tight">System Settings</h1>
+          <span className="hidden xl:inline text-xs text-gray-500 dark:text-gray-400 border-l border-gray-300 dark:border-gray-700 pl-2.5">
+            Configure defaults, print media formats, and studio engine preferences
+          </span>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2 self-start sm:self-auto shrink-0">
           <button
             onClick={handleResetDefaults}
             disabled={saving}
-            className="flex items-center space-x-1.5 px-3.5 py-2 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
           >
-            <RotateCcw size={14} />
+            <RotateCcw size={13} />
             <span>Reset Defaults</span>
           </button>
 
           <button
             onClick={handleSaveAll}
             disabled={saving}
-            className="flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-700 text-white shadow transition disabled:opacity-50"
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition disabled:opacity-50"
           >
-            <Save size={15} />
+            <Save size={14} />
             <span>{saving ? "Saving..." : "Save Settings"}</span>
           </button>
         </div>
@@ -340,20 +398,82 @@ export default function SettingsPage() {
                     </thead>
                     <tbody className="divide-y dark:divide-gray-700">
                       {settings.sheets.map((s, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-gray-750">
-                          <td className="py-2.5 px-3 font-semibold">{s.name}</td>
-                          <td className="py-2.5 px-3">{s.width} mm</td>
-                          <td className="py-2.5 px-3">{s.height} mm</td>
-                          <td className="py-2.5 px-3 text-right">
-                            <button
-                              onClick={() => handleDeleteSheet(s.name)}
-                              className="text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-950/40"
-                              title="Delete sheet"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </td>
-                        </tr>
+                        editingSheetIdx === idx ? (
+                          <tr key={idx} className="bg-purple-50/70 dark:bg-purple-950/30 border-l-2 border-purple-500">
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                value={editSheetName}
+                                onChange={(e) => setEditSheetName(e.target.value)}
+                                className="w-full text-xs font-semibold border p-1.5 rounded dark:bg-gray-900 dark:border-gray-700"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <div className="flex items-center space-x-1">
+                                <input
+                                  type="number"
+                                  value={editSheetW}
+                                  onChange={(e) => setEditSheetW(parseFloat(e.target.value) || 0)}
+                                  className="w-20 text-xs border p-1.5 rounded dark:bg-gray-900 dark:border-gray-700"
+                                />
+                                <span className="text-xs text-gray-500">mm</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-3">
+                              <div className="flex items-center space-x-1">
+                                <input
+                                  type="number"
+                                  value={editSheetH}
+                                  onChange={(e) => setEditSheetH(parseFloat(e.target.value) || 0)}
+                                  className="w-20 text-xs border p-1.5 rounded dark:bg-gray-900 dark:border-gray-700"
+                                />
+                                <span className="text-xs text-gray-500">mm</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <div className="flex items-center justify-end space-x-1">
+                                <button
+                                  onClick={handleSaveEditSheet}
+                                  className="text-emerald-500 hover:text-emerald-700 p-1.5 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                                  title="Save changes"
+                                >
+                                  <Check size={16} />
+                                </button>
+                                <button
+                                  onClick={handleCancelEditSheet}
+                                  className="text-gray-400 hover:text-gray-600 p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  title="Cancel"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-gray-750">
+                            <td className="py-2.5 px-3 font-semibold">{s.name}</td>
+                            <td className="py-2.5 px-3">{s.width} mm</td>
+                            <td className="py-2.5 px-3">{s.height} mm</td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="flex items-center justify-end space-x-1">
+                                <button
+                                  onClick={() => startEditSheet(idx, s)}
+                                  className="text-purple-500 hover:text-purple-700 p-1 rounded-md hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                                  title="Edit sheet"
+                                >
+                                  <Edit2 size={15} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteSheet(s.name)}
+                                  className="text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-950/40"
+                                  title="Delete sheet"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
                       ))}
                     </tbody>
                   </table>
@@ -419,19 +539,70 @@ export default function SettingsPage() {
                     </thead>
                     <tbody className="divide-y dark:divide-gray-700">
                       {settings.rolls.map((r, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-gray-750">
-                          <td className="py-2.5 px-3 font-semibold">{r.name}</td>
-                          <td className="py-2.5 px-3">{r.width} mm</td>
-                          <td className="py-2.5 px-3 text-right">
-                            <button
-                              onClick={() => handleDeleteRoll(r.name)}
-                              className="text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-950/40"
-                              title="Delete roll"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </td>
-                        </tr>
+                        editingRollIdx === idx ? (
+                          <tr key={idx} className="bg-purple-50/70 dark:bg-purple-950/30 border-l-2 border-purple-500">
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                value={editRollName}
+                                onChange={(e) => setEditRollName(e.target.value)}
+                                className="w-full text-xs font-semibold border p-1.5 rounded dark:bg-gray-900 dark:border-gray-700"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <div className="flex items-center space-x-1">
+                                <input
+                                  type="number"
+                                  value={editRollW}
+                                  onChange={(e) => setEditRollW(parseFloat(e.target.value) || 0)}
+                                  className="w-24 text-xs border p-1.5 rounded dark:bg-gray-900 dark:border-gray-700"
+                                />
+                                <span className="text-xs text-gray-500">mm</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <div className="flex items-center justify-end space-x-1">
+                                <button
+                                  onClick={handleSaveEditRoll}
+                                  className="text-emerald-500 hover:text-emerald-700 p-1.5 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                                  title="Save changes"
+                                >
+                                  <Check size={16} />
+                                </button>
+                                <button
+                                  onClick={handleCancelEditRoll}
+                                  className="text-gray-400 hover:text-gray-600 p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  title="Cancel"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-gray-750">
+                            <td className="py-2.5 px-3 font-semibold">{r.name}</td>
+                            <td className="py-2.5 px-3">{r.width} mm</td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="flex items-center justify-end space-x-1">
+                                <button
+                                  onClick={() => startEditRoll(idx, r)}
+                                  className="text-purple-500 hover:text-purple-700 p-1 rounded-md hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                                  title="Edit roll"
+                                >
+                                  <Edit2 size={15} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteRoll(r.name)}
+                                  className="text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-950/40"
+                                  title="Delete roll"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
                       ))}
                     </tbody>
                   </table>
@@ -570,6 +741,21 @@ export default function SettingsPage() {
                     className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500"
                   />
                   <span className="text-sm">Draw Outer Diecut / Bleed Border Lines by Default</span>
+                </label>
+
+                <label className="flex items-center space-x-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.imposing.uniform_orientation}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        imposing: { ...settings.imposing, uniform_orientation: e.target.checked },
+                      })
+                    }
+                    className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500"
+                  />
+                  <span className="text-sm">Enforce Same Orientation for Polar / Guillotine Cutting by Default</span>
                 </label>
 
                 <label className="flex items-center space-x-3 cursor-pointer">

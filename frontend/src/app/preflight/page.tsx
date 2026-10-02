@@ -102,21 +102,20 @@ export default function PreflightCenterPage() {
   const verdict = getVerdict();
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-12">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-[#242A38]">
-        <div>
-          <div className="flex items-center space-x-3">
-            <h1 className="text-3xl font-extrabold tracking-tight text-white">
-              PDF Preflight Center
-            </h1>
-            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-700/50">
-              ISO 12647
-            </span>
-          </div>
-          <p className="text-sm text-slate-400 mt-1">
-            Automated prepress validation for dimensions, image resolutions, and uniformity.
-          </p>
+    <div className="w-full max-w-6xl mx-auto space-y-4 pb-6">
+      {/* Compact Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
+        <div className="flex items-center space-x-2.5">
+          <FileCheck className="text-blue-400" size={20} />
+          <h1 className="text-base md:text-lg font-bold tracking-tight text-white">
+            PDF Preflight Center
+          </h1>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-700/50">
+            ISO 12647
+          </span>
+          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
+            Automated prepress validation for dimensions, image resolutions, and uniformity
+          </span>
         </div>
 
         {result && (
@@ -125,9 +124,9 @@ export default function PreflightCenterPage() {
               setResult(null);
               setFiles([]);
             }}
-            className="flex items-center space-x-2 text-xs text-slate-400 hover:text-white px-3 py-2 rounded-lg bg-[#181D27] border border-[#242A38] hover:border-slate-600 transition-colors w-fit"
+            className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-[#181D27] border border-[#242A38] hover:border-slate-600 transition-colors w-fit shrink-0"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={13} />
             <span>Reset Inspection</span>
           </button>
         )}

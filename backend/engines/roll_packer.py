@@ -10,6 +10,10 @@ class ArtworkSpec:
     piece_h_mm: float
     quantity: int
     shape_type: str = "rectangle"
+    keep_aspect: bool = False
+    fill_color: str = "#FFFFFF"
+    page_num: int = 0
+    file_id: str = ""
 
 
 @dataclass
@@ -23,6 +27,10 @@ class PlacedItem:
     h_mm: float
     shape_type: str
     segment_index: int
+    keep_aspect: bool = False
+    fill_color: str = "#FFFFFF"
+    page_num: int = 0
+    file_id: str = ""
 
 
 @dataclass
@@ -76,7 +84,11 @@ class MeterSegmentPacker:
                     "name": art.name,
                     "w": art.piece_w_mm,
                     "h": art.piece_h_mm,
-                    "shape": art.shape_type
+                    "shape": art.shape_type,
+                    "keep_aspect": art.keep_aspect,
+                    "fill_color": art.fill_color,
+                    "page_num": getattr(art, "page_num", 0),
+                    "file_id": getattr(art, "file_id", "")
                 })
                 item_id_counter += 1
 
@@ -138,7 +150,11 @@ class MeterSegmentPacker:
                                 w_mm=pw,
                                 h_mm=ph,
                                 shape_type=piece["shape"],
-                                segment_index=seg_idx
+                                segment_index=seg_idx,
+                                keep_aspect=piece["keep_aspect"],
+                                fill_color=piece["fill_color"],
+                                page_num=piece.get("page_num", 0),
+                                file_id=piece.get("file_id", "")
                             ))
                             placed_indices.append(idx)
                             shelf_x += pw + gap_mm

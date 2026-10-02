@@ -221,34 +221,37 @@ export default function BookStudioPage() {
   };
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-4">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <BookOpen className="text-amber-500" size={32} />
+    <div className="w-full space-y-3 pb-4">
+      {/* Compact Studio Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex items-center space-x-2.5">
+          <BookOpen className="text-amber-500" size={20} />
+          <h1 className="text-base md:text-lg font-bold tracking-tight text-white">
             Scanned Book Studio
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Collate odd/even passes, split double-page spreads, whiten & deskew pages, and add 3mm bleed with crop marks.
-          </p>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-700/50">
+            Bleed & Deskew
+          </span>
+          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
+            Collate odd/even passes, split double-page spreads, whiten & deskew pages, and add 3mm bleed
+          </span>
         </div>
 
         {sessionId && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
             <button
               onClick={() => { setSessionId(null); setPages([]); }}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-sm font-medium transition-colors"
+              className="px-3 py-1.5 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-xs font-medium transition-colors"
             >
               New Job
             </button>
             <button
               onClick={handleExport}
               disabled={isExporting}
-              className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold shadow-md transition-all disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
             >
-              {isExporting ? <RefreshCw className="animate-spin" size={18} /> : <Download size={18} />}
-              {isExporting ? "Rendering PDF..." : "Export Print-Ready PDF"}
+              {isExporting ? <RefreshCw className="animate-spin" size={14} /> : <Download size={14} />}
+              <span>{isExporting ? "Rendering PDF..." : "Export Print-Ready PDF"}</span>
             </button>
           </div>
         )}
@@ -541,11 +544,13 @@ export default function BookStudioPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <span className="text-xs font-semibold text-gray-500 uppercase">Original Extracted Scan</span>
-                    <div className="h-[450px] bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center p-2 border dark:border-gray-700">
+                    <div className="h-[560px] lg:h-[620px] bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center p-2 border dark:border-gray-700">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={getThumbUrl(selectedPageId, false)}
                         alt="Original scan"
+                        loading="lazy"
+                        decoding="async"
                         className="object-contain h-full w-full"
                       />
                     </div>
@@ -556,11 +561,13 @@ export default function BookStudioPage() {
                       <Sparkles size={14} />
                       Cleaned with 3mm Bleed & Crop Marks
                     </span>
-                    <div className="h-[450px] bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center p-2 border border-green-500/30">
+                    <div className="h-[560px] lg:h-[620px] bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center p-2 border border-green-500/30">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={getThumbUrl(selectedPageId, true)}
                         alt="Cleaned scan"
+                        loading="lazy"
+                        decoding="async"
                         className="object-contain h-full w-full"
                       />
                     </div>

@@ -97,36 +97,34 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 pb-12">
-      {/* Top Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-[#242A38]">
-        <div>
-          <div className="flex items-center space-x-3">
-            <h1 className="text-3xl font-extrabold tracking-tight text-white">Command Center</h1>
-            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700/50">
-              v2.4
-            </span>
-          </div>
-          <p className="text-sm text-slate-400 mt-1">
-            Prepress automation, print layout imposing, and finishing management suite.
-          </p>
+    <div className="w-full max-w-6xl mx-auto space-y-4 pb-6">
+      {/* Compact Top Header Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
+        <div className="flex items-center space-x-2.5">
+          <h1 className="text-base md:text-lg font-bold tracking-tight text-white">Command Center</h1>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700/50">
+            v2.4
+          </span>
+          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
+            Prepress automation, print layout imposing, and finishing management suite
+          </span>
         </div>
 
         {/* Engine Status Indicator */}
-        <div className="flex items-center space-x-2 bg-[#181D27] px-3.5 py-2 rounded-lg border border-[#242A38]">
-          <Server size={16} className="text-slate-400" />
-          <span className="text-xs text-slate-400">Engine API:</span>
+        <div className="flex items-center space-x-2 bg-[#181D27] px-2.5 py-1 rounded-lg border border-[#242A38] self-start sm:self-auto shrink-0">
+          <Server size={14} className="text-slate-400" />
+          <span className="text-[11px] text-slate-400">Engine API:</span>
           {backendStatus === "checking" && (
-            <span className="text-xs font-semibold text-slate-400">Connecting...</span>
+            <span className="text-[11px] font-semibold text-slate-400">Connecting...</span>
           )}
           {backendStatus === "online" && (
-            <div className="flex items-center space-x-1.5 text-emerald-400 text-xs font-semibold">
+            <div className="flex items-center space-x-1.5 text-emerald-400 text-[11px] font-semibold">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <span>Online (FastAPI / PyMuPDF)</span>
             </div>
           )}
           {backendStatus === "offline" && (
-            <div className="flex items-center space-x-1.5 text-red-400 text-xs font-semibold">
+            <div className="flex items-center space-x-1.5 text-red-400 text-[11px] font-semibold">
               <span className="w-2 h-2 rounded-full bg-red-500" />
               <span>Offline</span>
             </div>

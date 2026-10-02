@@ -10,13 +10,26 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from engines.book_scan_engine import BookScanEngine
 
+import time
+
 router = APIRouter(prefix="/api/book-scan", tags=["Book Scan Studio"])
 
 TEMP_DIR = "temp_uploads/book_scans"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# In-memory session store
+# In-memory session store & TTL tracking
 SESSIONS: Dict[str, Dict[str, Any]] = {}
+SESSION_TIMESTAMPS: Dict[str, float] = {}
+SESSION_TTL_SECONDS = 7200  # 2 hours
+
+def evict_stale_sessions():
+    now = time.time()
+    stale_ids = [sid for sid, ts in SESSION_TIMESTAMPS.items() if now - ts > SESSION_TTL_SECONDS]
+    for sid in stale_ids:
+        SESSION_TIMESTAMPS.pop(sid, None)
+        sess = SESSIONS.pop(sid, None)
+        if sess and "session_dir" in sess:
+            cleanup_session_dir(sess["session_dir"])
 
 class SessionInitResponse(BaseModel):
     session_id: str
@@ -115,6 +128,8 @@ async def init_book_scan_session(
             spread_split_pos=spread_split_pos,
             single_doc=single_doc
         )
+    evict_stale_sessions()
+    SESSION_TIMESTAMPS[session_id] = time.time()
 
     SESSIONS[session_id] = {
         "mode": mode,

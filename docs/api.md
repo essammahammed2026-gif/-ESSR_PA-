@@ -23,6 +23,7 @@ Managed by `backend/imposing_api.py`.
 * **`POST /api/imposing/upload`**: Uploads source artwork or PDF page to inspect geometry and dimensions.
 * **`POST /api/imposing/preview`**: Accepts layout parameters (sheet dimensions, roll width, margins, spacing, rotation flag) and runs `sheet_packer` or `roll_packer`. Returns calculated layout metrics (yield count, waste percentage) and an SVG representation for live canvas visualization.
 * **`POST /api/imposing/export`**: Renders the final print-ready PDF via `sheet_gang_exporter.py` with crop marks, registration targets, and bleed margins.
+* **`POST /api/imposing/export-svg`**: Generates a layered SVG with separated `Artwork` (print) and `CutContour` (die-cut vector) layers for digital flatbed cutter software.
 
 ### 2. Preflight Inspection (`/api/preflight`)
 Managed in `backend/main.py`.
@@ -52,4 +53,6 @@ Managed by `backend/settings_api.py`.
 
 * **`GET /api/settings`**: Retrieves application settings, standard sheet sizes (A4, A3, SRA3, B2), roll widths, and studio default values from `settings.json`.
 * **`PUT /api/settings`**: Persists updated machine configurations or custom substrate sizes.
+* **`POST /api/settings/sheets`** / **`PUT /api/settings/sheets/{name}`** / **`DELETE /api/settings/sheets/{name}`**: Creates, updates, or deletes sheet size presets.
+* **`POST /api/settings/rolls`** / **`PUT /api/settings/rolls/{name}`** / **`DELETE /api/settings/rolls/{name}`**: Creates, updates, or deletes continuous roll presets.
 * **`POST /api/settings/reset`**: Restores system defaults.

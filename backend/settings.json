@@ -17,11 +17,35 @@
             "width": 320.0,
             "height": 450.0,
             "unit": "mm"
+        },
+        {
+            "name": "33x48",
+            "width": 330.0,
+            "height": 480.0,
+            "unit": "mm"
+        },
+        {
+            "name": "32x46",
+            "width": 320.0,
+            "height": 460.0,
+            "unit": "mm"
+        },
+        {
+            "name": "A5",
+            "width": 148.0,
+            "height": 210.0,
+            "unit": "mm"
+        },
+        {
+            "name": "A6",
+            "width": 105.0,
+            "height": 148.0,
+            "unit": "mm"
         }
     ],
     "rolls": [
         {
-            "name": "60cm Roll",
+            "name": "60cm Heat Transfer Vinyle",
             "width": 600.0,
             "unit": "mm"
         },
@@ -38,12 +62,13 @@
     ],
     "imposing": {
         "default_sheet_unit": "cm",
-        "default_margin": 10.0,
-        "default_gap": 5.0,
-        "default_bleed": 2.0,
+        "default_margin": 0.0,
+        "default_gap": 0.0,
+        "default_bleed": 0.0,
         "crop_marks": false,
         "draw_border": false,
-        "auto_rotate_sheet": true
+        "auto_rotate_sheet": true,
+        "uniform_orientation": true
     },
     "contour": {
         "default_dpi": 300,
@@ -60,6 +85,6 @@
         "default_binding": "Soft Cover (Paperback)",
         "default_texture": "Dark Mode",
         "sound_enabled": false,
-        "eco_mode": false
+        "eco_mode": true
     }
 }

@@ -14,7 +14,7 @@ import {
   SlidersHorizontal,
   Sparkles
 } from "lucide-react";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, getApiUrl } from "@/lib/api";
 
 const PRESET_COLORS = [
   { name: "CutContour (Magenta)", value: "#FF00FF" },
@@ -222,7 +222,12 @@ export default function ContourStudio() {
       });
       const data = await res.json();
       if (data.success) {
-        setSvgContent(data.svg);
+        // Ensure relative asset URLs in SVG point to the centralized API
+        const displaySvg = (data.svg as string).replace(
+          /(href|xlink:href)\s*=\s*["'](\/temp_uploads\/[^"']+)["']/g,
+          (_match, attr, path) => `${attr}="${getApiUrl(path)}"`
+        );
+        setSvgContent(displaySvg);
       } else {
         setError(data.error || "Failed to generate die-cut path.");
       }
@@ -390,38 +395,37 @@ export default function ContourStudio() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 pb-12">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-[#242A38]">
-        <div>
-          <div className="flex items-center space-x-3">
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center space-x-2">
-              <span>Contour Cut Studio</span>
-            </h1>
-            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-pink-950 text-pink-300 border border-pink-700/50">
-              Die-Line Vector
-            </span>
-          </div>
-          <p className="text-sm text-slate-400 mt-1">
-            Plotter-ready cut lines with physical scaling, bleed expansion, and choke underbase.
-          </p>
+    <div className="w-full space-y-3 pb-4">
+      {/* Compact Studio Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
+        <div className="flex items-center space-x-2.5">
+          <Scissors className="text-pink-400" size={20} />
+          <h1 className="text-base md:text-lg font-bold tracking-tight text-white">
+            Contour Cut Studio
+          </h1>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-pink-950 text-pink-300 border border-pink-700/50">
+            Die-Line Vector
+          </span>
+          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
+            Plotter-ready cut lines with physical scaling, bleed expansion, and choke underbase
+          </span>
         </div>
 
         {svgContent && (
           <button 
             onClick={handleDownload}
-            className="px-4 py-2 bg-pink-600 hover:bg-pink-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm"
+            className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm self-start sm:self-auto shrink-0"
           >
-            <Download size={15} />
+            <Download size={14} />
             <span>Export CutContour SVG</span>
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3.5">
         {/* Left Settings Panel */}
-        <div className="lg:col-span-1 space-y-5">
-          <div className="bg-[#181D27] p-5 rounded-xl border border-[#242A38] space-y-5">
+        <div className="lg:col-span-1 space-y-3.5">
+          <div className="bg-[#181D27] p-3.5 rounded-xl border border-[#242A38] space-y-3.5">
             <div className="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-slate-400 pb-2 border-b border-[#242A38]">
               <Upload size={14} className="text-pink-400" />
               <span>Input Artwork</span>
@@ -584,9 +588,9 @@ export default function ContourStudio() {
             </div>
           )}
 
-          <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex-1 flex flex-col overflow-hidden min-h-[580px] shadow-sm relative">
+          <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex-1 flex flex-col overflow-hidden min-h-[720px] h-[calc(100vh-140px)] shadow-sm relative">
             {/* Canvas Toolbar */}
-            <div className="p-3 border-b border-[#242A38] flex justify-between items-center bg-[#141822]">
+            <div className="p-2.5 border-b border-[#242A38] flex justify-between items-center bg-[#141822]">
               <div className="flex items-center space-x-3">
                 <span className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
                   <Layers size={14} className="text-pink-400" />
@@ -646,12 +650,12 @@ export default function ContourStudio() {
                 >
                   <style>{`
                     #Artwork { opacity: ${Number(artworkOpacity) / 100}; transition: opacity 0.1s; } 
-                    .canvas-svg-container > svg { width: 100% !important; height: 100% !important; max-height: 65vh; pointer-events: none; }
+                    .canvas-svg-container > svg { width: 100% !important; height: 100% !important; max-height: 78vh; pointer-events: none; }
                   `}</style>
                   <div 
                     dangerouslySetInnerHTML={{ __html: svgContent }} 
                     className="canvas-svg-container w-full h-full object-contain" 
-                    style={{ maxHeight: "65vh" }} 
+                    style={{ maxHeight: "78vh" }} 
                   />
                 </div>
               )}

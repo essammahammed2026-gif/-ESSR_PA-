@@ -26,6 +26,7 @@ class ImposingSettings(BaseModel):
     crop_marks: bool = False
     draw_border: bool = False
     auto_rotate_sheet: bool = True
+    uniform_orientation: bool = True
 
 class ContourSettings(BaseModel):
     default_dpi: int = 300
@@ -71,6 +72,7 @@ DEFAULT_SETTINGS: dict = {
         "crop_marks": False,
         "draw_border": False,
         "auto_rotate_sheet": True,
+        "uniform_orientation": True,
     },
     "contour": {
         "default_dpi": 300,
@@ -138,6 +140,22 @@ def add_sheet(sheet: SheetPreset):
     save_settings(settings)
     return settings
 
+@router.put("/api/settings/sheets/{sheet_name}")
+def edit_sheet(sheet_name: str, sheet: SheetPreset):
+    settings = load_settings()
+    current_sheets = settings.get("sheets", [])
+    found = False
+    for i, s in enumerate(current_sheets):
+        if s.get("name") == sheet_name:
+            current_sheets[i] = sheet.dict()
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    settings["sheets"] = current_sheets
+    save_settings(settings)
+    return settings
+
 @router.delete("/api/settings/sheets/{sheet_name}")
 def delete_sheet(sheet_name: str):
     settings = load_settings()
@@ -155,6 +173,22 @@ def add_roll(roll: RollPreset):
     existing = [r for r in settings.get("rolls", []) if r.get("name") != roll.name]
     existing.append(roll.dict())
     settings["rolls"] = existing
+    save_settings(settings)
+    return settings
+
+@router.put("/api/settings/rolls/{roll_name}")
+def edit_roll(roll_name: str, roll: RollPreset):
+    settings = load_settings()
+    current_rolls = settings.get("rolls", [])
+    found = False
+    for i, r in enumerate(current_rolls):
+        if r.get("name") == roll_name:
+            current_rolls[i] = roll.dict()
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Roll not found")
+    settings["rolls"] = current_rolls
     save_settings(settings)
     return settings
 

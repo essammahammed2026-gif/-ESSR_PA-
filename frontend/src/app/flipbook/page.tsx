@@ -142,9 +142,11 @@ export default function FlipbookStudio() {
       const data = await res.json();
       if (data.success) {
         setResultUrl(`${API_BASE_URL}/flipbooks/${data.output.replace("public_flipbooks/", "")}?t=${Date.now()}`);
+      } else {
+        setError(data.error || "Failed to update flipbook preview.");
       }
-    } catch {
-      // silent background update
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error updating preview");
     } finally {
       setIsUpdating(false);
     }
@@ -306,39 +308,38 @@ export default function FlipbookStudio() {
   const showHardCoverOptions = bindingStyle === "Hard Cover";
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-12">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-[#242A38]">
-        <div>
-          <div className="flex items-center space-x-3">
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center space-x-2">
-              <span>Flipbook Studio</span>
-            </h1>
-            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700/50">
-              HTML5 3D Proof
-            </span>
-          </div>
-          <p className="text-sm text-slate-400 mt-1">
-            Convert print PDFs into realistic 3D virtual publications for digital soft-proofing.
-          </p>
+    <div className="w-full space-y-3 pb-4">
+      {/* Compact Studio Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
+        <div className="flex items-center space-x-2.5">
+          <Layers className="text-indigo-400" size={20} />
+          <h1 className="text-base md:text-lg font-bold tracking-tight text-white">
+            Flipbook Studio
+          </h1>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700/50">
+            HTML5 3D Proof
+          </span>
+          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
+            Convert print PDFs into realistic 3D virtual publications for digital soft-proofing
+          </span>
         </div>
 
         {resultUrl && !isGenerating && (
           <button 
             type="button"
             onClick={() => setShowExportModal(true)} 
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm"
+            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm self-start sm:self-auto shrink-0"
           >
-            <Download size={15} />
+            <Download size={14} />
             <span>Export & Download</span>
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
         {/* Settings Panel */}
-        <div className="lg:col-span-1 space-y-5">
-          <div className="bg-[#181D27] p-5 rounded-xl border border-[#242A38] space-y-4">
+        <div className="lg:col-span-1 space-y-3.5">
+          <div className="bg-[#181D27] p-3.5 rounded-xl border border-[#242A38] space-y-3.5">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block pb-2 border-b border-[#242A38]">
               Virtual Binding Options
             </span>
@@ -493,8 +494,8 @@ export default function FlipbookStudio() {
           )}
 
           {!isGenerating && resultUrl && (
-            <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex flex-col h-[680px] overflow-hidden relative shadow-lg">
-              <div className="p-3 border-b border-[#242A38] flex justify-between items-center bg-[#141822]">
+            <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex flex-col min-h-[720px] h-[calc(100vh-140px)] overflow-hidden relative shadow-lg">
+              <div className="p-2.5 border-b border-[#242A38] flex justify-between items-center bg-[#141822]">
                 <div className="flex items-center space-x-3">
                   <span className="text-xs font-bold text-slate-200 flex items-center space-x-1.5">
                     <Layers size={14} className="text-indigo-400" />

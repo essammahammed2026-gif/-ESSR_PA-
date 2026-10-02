@@ -15,6 +15,8 @@ from engines.preflight import run_preflight
 from engines.contour_engine import generate_contour_cut_svg, analyze_image_for_contour
 from engines.flipbook_worker import generate_flipbook_task, generate_html_content, export_flipbook_task
 from engines.helpers import apply_print_binding_padding
+import time
+from typing import List, Dict, Any
 
 app = FastAPI(title="ESSR PA API")
 app.include_router(settings_router)
@@ -35,11 +37,38 @@ os.makedirs("public_flipbooks", exist_ok=True)
 app.mount("/temp_uploads", StaticFiles(directory="temp_uploads"), name="temp_uploads")
 app.mount("/flipbooks", StaticFiles(directory="public_flipbooks"), name="flipbooks")
 
-TASK_STATES = {}
-PROJECT_CACHE = {}
+TASK_STATES: Dict[str, Any] = {}
+PROJECT_CACHE: Dict[str, Any] = {}
+CONTOUR_CACHE: Dict[str, str] = {}
+CONTOUR_PREVIEWS: Dict[str, str] = {}
+CACHE_TIMESTAMPS: Dict[str, float] = {}
+
+CACHE_TTL_SECONDS = 7200  # 2 hours eviction window
+
+def evict_stale_caches():
+    """Prunes in-memory caches and temporary files to prevent OOM on low-memory systems."""
+    now = time.time()
+    stale_keys = [k for k, ts in CACHE_TIMESTAMPS.items() if now - ts > CACHE_TTL_SECONDS]
+    for k in stale_keys:
+        CACHE_TIMESTAMPS.pop(k, None)
+        PROJECT_CACHE.pop(k, None)
+        TASK_STATES.pop(k, None)
+        f_path = CONTOUR_CACHE.pop(k, None)
+        if f_path and os.path.exists(f_path):
+            try:
+                os.remove(f_path)
+            except OSError:
+                pass
+        p_path = CONTOUR_PREVIEWS.pop(k, None)
+        if p_path and os.path.exists(p_path.lstrip("/")):
+            try:
+                os.remove(p_path.lstrip("/"))
+            except OSError:
+                pass
 
 @app.get("/")
 def read_root():
+    evict_stale_caches()
     return {"status": "ok", "message": "ESSR PA Backend Running"}
 
 @app.post("/api/preflight")
@@ -87,6 +116,7 @@ async def create_flipbook(
     output_path = f"public_flipbooks/{output_filename}"
 
     TASK_STATES[task_id] = {"state": "PENDING", "status": "Pending...", "progress": 0}
+    CACHE_TIMESTAMPS[task_id] = time.time()
 
 
     target_indices = None
@@ -138,6 +168,7 @@ async def update_flipbook(
     if task_id not in PROJECT_CACHE:
         raise HTTPException(status_code=404, detail="Project cache not found")
         
+    CACHE_TIMESTAMPS[task_id] = time.time()
     cached = PROJECT_CACHE[task_id]
     
     # 1. Padding
@@ -209,9 +240,6 @@ async def get_task_status(task_id: str):
 
 
 
-CONTOUR_CACHE = {}
-CONTOUR_PREVIEWS = {}
-
 @app.post("/api/contour/upload")
 async def upload_contour_file(file: UploadFile = File(...)):
     try:
@@ -223,6 +251,7 @@ async def upload_contour_file(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, buffer)
         
         CONTOUR_CACHE[file_id] = file_path
+        CACHE_TIMESTAMPS[file_id] = time.time()
 
         # Generate lightweight downsampled raster for ultra-fast, low-memory browser proofing
         preview_filename = f"{file_id}_preview.png"

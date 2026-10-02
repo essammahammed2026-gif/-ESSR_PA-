@@ -14,7 +14,7 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 |   Studios:                                                   |
 |   /             Command Center & Engine Heartbeat            |
 |   /book-studio  Scanned Book Intake & Bleed Synthesis        |
-|   /imposing     Gang Run / Step-and-Repeat Imposition        |
+|   /imposing     Gang Run, Multi-file Batch Ingest, Per-Item Stretch/Pad|
 |   /contour      Die-Cut Contour Vectorization                |
 |   /flipbook     Interactive 3D Virtual Proofing              |
 |   /preflight    PDF Geometry, DPI, & Color Inspection        |
@@ -51,6 +51,7 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 ### 1. Frontend (`frontend/`)
 * **Framework:** Next.js 14 (App Router) with React 18 and strict TypeScript.
 * **Styling & Components:** Tailwind CSS, shadcn/base-ui primitives, Lucide icons.
+* **Imposition Workflow:** Features a dual-mode workflow separating **Book & Publication Imposition** (sequential page ordering, book trim presets, outward bleed synthesis, opposing page auto-alignment) from **Gang Run & Sticker Nesting** (MaxRects 2D bin packing, multi-file queue, continuous roll and cut-sheet ganging).
 * **API Communication:** All requests route through `src/lib/api.ts` (`API_BASE_URL` dynamically configured via `NEXT_PUBLIC_API_URL`, defaulting to `http://localhost:8000`).
 * **Reactive Throttling:** Real-time sliders (margins, gaps, thresholds, offsets) are throttled using `src/lib/useDebounce.ts` (350ms) to prevent network flooding and server load spikes.
 
@@ -67,10 +68,11 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 
 ## Data Flow & Storage Lifecycle
 
-### Ephemeral Storage Policy
+### Ephemeral Storage Policy & Memory Safety
 ESSR_PA follows a strict **zero-retention / ephemeral storage policy**:
 * Files uploaded to `/temp_uploads/` are processed immediately.
 * Endpoints like `/api/preflight` automatically clean up temporary files in a `finally` block upon completion.
+* **In-Memory TTL Cache Eviction:** On low-memory systems (4GB–8GB RAM), prolonged usage can accumulate stale file references and preview objects. `backend/main.py` and `backend/book_scan_api.py` run automated TTL eviction (`CACHE_TTL_SECONDS = 7200` / 2 hours) on `PROJECT_CACHE`, `CONTOUR_CACHE`, `CONTOUR_PREVIEWS`, and `SESSIONS`, unlinking expired disk assets and purging dictionaries.
 * Generated export files (such as flipbook HTML assets or imposing PDFs) are stored temporarily in runtime directories (`backend/temp_uploads/` and `backend/public_flipbooks/`), which are ignored by version control.
 * *Roadmap Goal:* Transition file processing to purely in-memory buffers or client-side storage to eliminate local disk reliance entirely.
 

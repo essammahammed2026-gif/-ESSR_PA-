@@ -9,12 +9,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+- Implemented **Two-Mode Imposition Architecture (Book & Publication Mode vs. Gang Run & Sticker Nesting Mode)** in Imposing Studio:
+  - **Streamlined Operator UI & Layout De-Cluttering**:
+    - **Quiet Imposing 2-Step Workflow Architecture**: Split Book Mode into an intuitive 2-stage prepress pipeline:
+      - **Step 1 (Page Trim & Bleed Setup)**: Configure Finished Trim preset/dimensions, Content Fit Mode (`Fit`, `Stretch`, `Crop`), opposing landscape auto-rotation, and Bleed Extension (Mirrored Edge or Solid Color).
+      - **Step 2 (Sheet Impose / Step & Repeat)**: Target Press Sheet selection, corner crop marks, gripper margins, gutter gaps, guillotine orientation, and sheet alignment.
+    - **Ultra-Fast Book Imposition ($O(1)$ Template Replication)**: Replaced repeated 125+ pass MaxRects bin-packing on uniform book sheets with instant Sheet 1 template placement and mathematical page sequence offsets, dropping calculation times from 15–20s down to ~15ms on 500+ page documents.
+    - **In-Memory Document Handle Caching**: Cached open PDF document handles during preview calculation cycles to eliminate repetitive disk re-reads.
+    - **Compact Half-Width Viewport**: Reduced preview canvas width by half (`max-w-[560px]`) alongside the 370px sidebar to optimize screen space and eliminate excessive horizontal eye travel.
+    - **Bleed Off by Default & Consolidated Controls**: Uploaded artwork and books now initialize with bleed disabled (`bleed_mode: "none"`, `bleed_mm: 0`). When toggled on, the **Bleed Method** (Mirrored Edge vs Solid Color) and **Bleed Type** (Outside vs Inside) appear together inside the primary Bleed Extension group rather than hidden away in Advanced Options.
+    - **Trim Box & Content Fit Streamlining**: Moved content fit selector (`Stretch`, `Fit`, `Crop`) directly under Finished Trim Size inputs; removed duplicate original size from trim card and added a quick `Reset` button.
+    - **Active File Information & Page Range**: Consolidated the active file card with primary file name, total sequential page count, original dimensions (`W × H`), and direct Page Range input (`all` / custom) right beneath the title.
+    - **Centered Alignment Default**: Imposition placement now defaults to `Center` rather than `Top Left`.
+    - **Cleaner Viewport**: Removed redundant prepress legend and verbose media stats bar from the top of the preview panel for an uncluttered prepress cockpit.
+    - Replaced the overwhelming 2-column side-by-side cockpit cards with a single sleek, focused sidebar (`w-[350px]`) and a compact live press sheet viewport (`h-[380px] lg:h-[420px]`).
+    - Added quick-toggle Bleed Method selection (**Mirrored Edge** vs **Solid Color**) with color swatch and screen eyedropper.
+    - Upgraded preview thumbnail resolution from ~72 DPI (0.35 scale) to ~150 DPI (0.72 scale) in both synchronous and background pre-generation for crisp page readability.
+    - Added viewport toolbar toggle (`Labels On / Labels Off`) and reduced page overlay badges to a minimal 7px non-intrusive badge.
+    - Simplified everyday book imposition down to 3 quick steps: (1) Finished Trim preset, (2) Press Sheet size, (3) 3 Essential Prepress Toggles (`Auto-orient landscape`, `Prepress Corner Crop Marks`, `Bleed Extension`).
+    - Introduced a progressive disclosure accordion (`[ ⚙️ Advanced Options ]`) to house technical prepress tuning (gripper margins, gutter gaps, inside/outside bleed synthesis, 3×3 alignment, and die-line outlines) without cluttering operator workflow.
+    - Dedicated **Book Geometry & Bleed** card with standard book trim presets (A5, A4, B5, Novel 6×9", Digest, Pocket, Custom), aspect lock and swap W/H, reset to original PDF size, outward mirror bleed synthesis, and fit mode selection.
+    - Preserves sequential page imposition: maintains strict numerical page order (1, 2, 3...) across press sheets (`job_mode: "book"` in `MaxRectsSheetPacker`).
+    - Prepress Opposing Landscape checkbox: single clear toggle `Auto-orient opposing landscape pages` (turns landscape pages 90° CW to match book trim; normal portrait pages remain upright).
+    - Dedicated **Target Press Media & Marks** card with sheet presets (SRA3, A3, B2, 33×48, A4, Custom), swap W/H, gripper margin, gutter gap, 3×3 alignment grid, Polar/guillotine cut, prepress corner crop marks, and cut outline die-lines.
+  - **Gang Run & Sticker Nesting Mode**: Retains continuous roll and cut sheet nesting with multi-item queue, copy counts, and individual bleed/fit parameters.
+  - **Prepress Viewport Legend**: Visual legend in the viewport toolbar distinguishing Trim Box cut line, Bleed margin, and Press Gripper margin.
+  - **Inside Bleed Mode**: Retains the exact target trim dimensions (e.g. 19.5 × 28.2 cm) while insetting content by the user-specified bleed margin (e.g. 2.5 mm).
+  - **Outside Bleed Mode**: Keeps artwork at full target size and expands the outer cut box on the sheet by 2× bleed margin.
+  - **Solid Fill Bleed**: Pads the outer margin with a solid color, selectable via an integrated color swatch and screen/page eyedropper.
+  - **Mirror-Edge Bleed**: Synthesizes a true bleed extension by reflecting and mirroring outer edge pixels (via OpenCV `BORDER_REFLECT_101`) directly in high-res vector PDF export.
+  - **Interactive Thumbnail & Eyedropper Upgrade**: Upgraded `ArtworkColorPicker` to load directly from the PDF thumbnail endpoint, enabling direct color sampling from any page of a book.
+- Added per-item **Fit Mode** (`stretch`, `fit`, `crop`) and **Conditional Opposing Page Rotation** (`none`, `cw`, `ccw`) in Imposing Studio:
+  - **Stretch**: Forces artwork/PDF pages to fill the exact target W×H dimensions.
+  - **Scale**: Scales proportionally to target bounds and letterboxes/pads with selectable background color (integrates with color picker & eyedropper).
+  - **Crop**: Centers and scales artwork proportionally to fill the target W×H area without whitespace, clipping overflow evenly.
+  - **Opposing Page Rotation Only**: Examines each individual page's aspect orientation ($W > H$ vs. $H > W$). Only pages whose orientation opposes the target slot (e.g., landscape pages in a portrait book) are rotated 90° CW or CCW; pages that already match the target orientation are kept unrotated.
+- Fixed Imposing Studio live preview and export for **Bleed Synthesis** and **Opposing Page Rotation**:
+  - **Bleed Preview Rendering**: Fixed a React state batching race condition where selecting bleed mode or type overwrote the atomic item updates. Added full live canvas preview visualization for both **Solid Bleed** (with prepress hatch guides and color fill) and **Mirror Bleed** (with outward edge reflections), as well as dedicated trim box / safety boundary dashed markers and corner badges displaying mode and placement (`inside` vs `outside`).
+  - **Opposing Page Rotation Bug**: Fixed the aspect orientation comparison in `imposing_api.py`, `sheet_packer.py`, and `sheet_gang_exporter.py`. Orientation was previously checked against physical sheet coordinates (which inverted whenever the bin packer rotated the piece on the press sheet, mistakenly causing portrait pages to rotate). Orientation is now strictly evaluated against the user-configured target trim dimensions (`target_w_mm` vs `target_h_mm`), ensuring portrait pages remain unrotated while only opposing pages (e.g. landscape diagrams or spreads in a portrait book) rotate CW/CCW without stretching or distortion.
+  - **Outside Bleed Cut Alignment**: Updated `SheetGangExporter` PDF and SVG exporters so that when outside bleed is active, cut contours, borders, and prepress crop marks align directly with the finished trim box (`content_rect`) rather than the outer bleed margin.
+- Added background thumbnail pre-generation for multi-page PDFs in Imposing Studio: on upload a daemon thread opens the PDF once and sequentially renders all page thumbnails at 0.35× scale, eliminating the N-parallel-fitz.open() spike that caused lag on large books. Subsequent thumbnail requests become instant disk-cache hits regardless of book size.
+- Added multi-page book imposing in Imposing Studio (`/imposing`): supports imposing massive books (e.g. up to 3,000 pages) without crashing or UI freezing.
+
+- Added on-demand lazy thumbnail generation endpoint (`GET /api/imposing/thumbnail/{file_id}/{page_num}`) with low-res (72 DPI, 0.35 scale, ~15KB) disk caching so only visible press sheets load thumbnails.
+- Guaranteed 100% full-resolution vector PDF and SVG exports (`/api/imposing/export` & `/api/imposing/export-svg`) by extracting raw page vector trees directly via PyMuPDF `show_pdf_page()`, completely bypassing low-res preview assets.
+- Added multi-page book badge (`Book (X pages)`) and custom page range selector (e.g. `1-16`, `17-32`, or `all`) with quick preset buttons directly inside the artwork queue cards.
+- Added high-volume sheet navigation toolbar with first/last shortcuts (`<<`, `>>`) and a direct sheet number jump input.
+- Added inline editing capabilities for Sheet Presets and Continuous Roll Media in Settings Studio (`/settings`) with dedicated backend endpoints (`PUT /api/settings/sheets/{name}` and `PUT /api/settings/rolls/{name}`).
+- Added Layered Cut SVG Export (`/api/imposing/export-svg`) in Imposing Studio and `SheetGangExporter.export_svg`: exports press-ready SVGs with separated `Artwork` and `CutContour` layers (with base64 embedded artwork, trim boxes, and optional corner crop marks) for digital cutting plotters (Zünd, Kongsberg, Roland, Summa).
+- Added Polar / Guillotine uniform piece orientation mode (`uniform_orientation: bool`) in Imposing Studio and `MaxRectsSheetPacker` engine so repeated copies of artwork maintain an identical 0° or 90° orientation across sheets for continuous straight-line guillotine cutter channels.
+- Refactored Imposing Studio layout to feature a wider, side-by-side control panel for Settings and Artwork Items, while removing the bulky top-level efficiency HUD in favor of a compact embedded statistics bar in the viewport header, significantly increasing available workspace.
+- Moved the Imposing Studio "Add Artwork" drag-and-drop box from the bottom of the Items queue up into the global top header bar as a primary action button to save vertical space.
+- Added multiple file selection support in Imposing Studio: users can now upload a batch of artwork simultaneously, creating an independent queue card for each file.
+- Added native Original Size tracking for all uploaded imposing artwork, displaying original dimensions in the queue card and providing a quick "Reset to Original Size" shortcut button.
+- Migrated the **"Keep Aspect Ratio"** and Background Fill Color tool from a global layout setting into an individual, per-artwork setting, allowing different files to be stretched or padded independently on the same sheet.
+- Integrated the native browser **EyeDropper API** (with a fallback smart modal for Firefox/Zen) to allow users to pick background fill colors and border colors directly from their artwork inside the Imposing Studio preview.
+- Fixed Imposing Studio canvas preview to forcefully stretch artwork thumbnails (`object-fill`) instead of padding them with white space (`object-contain`), matching the backend PDF export behavior exactly.
+- Replaced the Sheet/Roll Alignment text dropdown with a much more intuitive and compact interactive 3x3 grid selector.
+- Added native AVIF and WEBP image handling in the backend PDF exporter by intercepting them with OpenCV and injecting them into PyMuPDF as standard streams.
+- Enabled 9-way alignment (Top Left, Top Center, Top Right, Left, Center, Right, Bottom Left, Bottom Center, Bottom Right) for Sheet and Roll imposing, and fixed alignment not being applied to final outputs.
+- Removed the `% Scale` field completely from the Imposing Studio items list to simplify the user interface, relying exclusively on exact W/H dimensions.
+- Added and fixed "Show Box / Cut Outline Around Art" toggle with custom color picker across Imposing Studio canvas preview and PDF export (eliminating unwanted forced green preview outlines when borders are disabled).
+- Added global default setting for `uniform_orientation` in Settings Studio (`/settings`) and backend `settings_api.py`.
 - Standardized documentation layout: `docs/architecture.md`, `docs/engines.md`, `docs/api.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.
 - Comprehensive backend dependencies in `requirements.txt` (`opencv-python`, `numpy`, `shapely`, `reportlab`).
 - Centralized API client (`frontend/src/lib/api.ts`) and debounce hook (`frontend/src/lib/useDebounce.ts`).
+- Low-end hardware optimizations:
+  - Automated 2-hour TTL cache eviction (`evict_stale_caches`, `evict_stale_sessions`) in `main.py` and `book_scan_api.py` to prevent memory leaks on 4GB–8GB machines.
+  - Native image lazy-loading (`loading="lazy"` and `decoding="async"`) across Book Studio thumbnails and high-res preview inspectors.
+  - RequestAnimationFrame (`rAF`) event throttling for canvas pan/zoom interactions in Imposing and Contour studios.
+  - Downsampled raster preview pipeline for Contour Studio with standalone `/api/contour/export` for high-resolution die lines.
+  - Sliding-window lazy loading (`LAZY_WINDOW = 3`) in Flipbook 3D virtual proofing engine.
+
+### Fixed
+- Fixed missing artwork image in Contour Cut Studio preview caused by unproxied relative `/temp_uploads` asset URLs: routed via Next.js rewrites and resolved through centralized `getApiUrl()`.
+- Fixed flipbook preview live update failure when switching binding styles, restoring missing `apply_print_binding_padding` import in `backend/main.py` and improving UI error handling in `frontend/src/app/flipbook/page.tsx`.
 
 ### Changed
+- Streamlined sidebar header and studio header bars into compact toolbars, reducing vertical overhead and expanding workspace canvas and tool panel areas across Contour, Imposing, Flipbook, and Book Scan studios.
 - Rebuilt root `README.md` into a concise, professional project overview and 5-minute quickstart guide.
 - Hardened `.gitignore` to prevent test PDFs, images, temporary files, and output flipbooks from entering the repository.
 - Streamlined `AGENTS.md` into an authoritative, token-efficient rulebook.
