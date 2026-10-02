@@ -35,12 +35,21 @@ To avoid documentation degradation across AI sessions:
 
 ---
 
-## 3. Session Verification Gate (Definition of Done)
+## 3. Verification Protocol (Iterative vs. Definition of Done)
 
-Before completing any task or ending a session, the following checks MUST pass cleanly:
+### A. Fast Inner Loop (During Active Iteration & Editing)
+Do **NOT** run full Next.js production builds (`npm run build`) or spin background polling timers after every minor code edit. This wastes tokens, CPU, and context. Use lightweight checks instead:
 
 ```bash
-# 1. Frontend validation (0 errors, 0 warnings)
+# Fast TypeScript & ESLint check (< 3 seconds)
+cd frontend && npm run lint
+```
+
+### B. Final Session Gate (Definition of Done — Only Run Once Before Handover or Commit)
+Before completing any major task, handing off to the user, or ending a session, the following checks MUST pass cleanly:
+
+```bash
+# 1. Frontend validation (Full production build check)
 cd frontend && npm run lint && npm run build
 
 # 2. Backend validation (0 syntax/import errors)
