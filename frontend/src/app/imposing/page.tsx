@@ -31,216 +31,9 @@ import {
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
-const toUnit = (mm: number, unit: string) => {
-  if (unit === "cm") return +(mm / 10).toFixed(2);
-  if (unit === "in") return +(mm / 25.4).toFixed(3);
-  return +mm.toFixed(2);
-};
-
-const toMm = (val: number, unit: string) => {
-  if (unit === "cm") return val * 10;
-  if (unit === "in") return val * 25.4;
-  return val;
-};
-
-interface NumberControlProps {
-  label: string;
-  value_mm: number;
-  unit: string;
-  min_mm: number;
-  max_mm: number;
-  step: number;
-  onChange: (val: number) => void;
-}
-
-const NumberControl: React.FC<NumberControlProps> = ({ 
-  label, 
-  value_mm, 
-  unit, 
-  min_mm, 
-  max_mm, 
-  step, 
-  onChange 
-}) => {
-  const [localVal, setLocalVal] = useState(toUnit(value_mm, unit).toString());
-  
-  useEffect(() => { 
-    setLocalVal(toUnit(value_mm, unit).toString()); 
-  }, [value_mm, unit]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setLocalVal(e.target.value);
-    const parsed = parseFloat(e.target.value);
-    if (!isNaN(parsed)) {
-      const mm_val = toMm(parsed, unit);
-      if (mm_val >= min_mm && mm_val <= max_mm) {
-        onChange(mm_val);
-      }
-    }
-  };
-
-  const handleInc = () => {
-    const parsed = parseFloat(localVal) || 0;
-    const newVal = parseFloat((parsed + step).toFixed(3));
-    const mm_val = Math.round(toMm(newVal, unit) * 1000) / 1000;
-    if (mm_val <= max_mm) {
-      setLocalVal(newVal.toString()); 
-      onChange(mm_val);
-    }
-  };
-
-  const handleDec = () => {
-    const parsed = parseFloat(localVal) || 0;
-    const newVal = parseFloat((parsed - step).toFixed(3));
-    const mm_val = Math.round(toMm(newVal, unit) * 1000) / 1000;
-    if (mm_val >= min_mm) {
-      setLocalVal(newVal.toString()); 
-      onChange(mm_val);
-    }
-  };
-
-  return (
-    <div className="space-y-1">
-      <label className="text-xs font-semibold text-slate-300 block">{label}</label>
-      <div className="flex items-center space-x-1.5">
-        <button 
-          type="button"
-          onClick={handleDec} 
-          className="w-7 h-7 shrink-0 flex items-center justify-center bg-[#232936] rounded text-slate-300 hover:bg-[#2E3648] hover:text-white font-bold transition-colors text-xs"
-        >
-          -
-        </button>
-        <div className="flex-1 min-w-0 flex items-center bg-[#131720] border border-[#2E3648] rounded px-2 py-1">
-          <input 
-            type="number" 
-            value={localVal} 
-            onChange={handleChange}
-            className="w-full text-xs bg-transparent text-center text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none outline-none font-mono"
-          />
-          <span className="text-[10px] text-slate-400 ml-1 shrink-0">{unit}</span>
-        </div>
-        <button 
-          type="button"
-          onClick={handleInc} 
-          className="w-7 h-7 shrink-0 flex items-center justify-center bg-[#232936] rounded text-slate-300 hover:bg-[#2E3648] hover:text-white font-bold transition-colors text-xs"
-        >
-          +
-        </button>
-      </div>
-    </div>
-  );
-};
-
-interface ImposingItem {
-  file_id: string;
-  name: string;
-  w: number;
-  h: number;
-  copies: number;
-  ratio: number;
-  locked: boolean;
-  keep_aspect?: boolean;
-  fill_color?: string;
-  original_w?: number;
-  original_h?: number;
-  page_count?: number;
-  page_range?: string;
-  is_book?: boolean;
-  page_num?: number;
-  /** "stretch" | "fit" | "crop" — how content fills the target W×H box */
-  fit_mode?: 'stretch' | 'fit' | 'crop';
-  /** "none" | "cw" | "ccw" — explicit content rotation, independent of packer auto-rotation */
-  page_rotation?: 'none' | 'cw' | 'ccw';
-  /** "none" | "solid" | "mirror" — bleed synthesis */
-  bleed_mode?: 'none' | 'solid' | 'mirror';
-  bleed_mm?: number;
-  bleed_color?: string;
-  /** "inside" | "outside" */
-  bleed_type?: 'inside' | 'outside';
-}
-
-interface PreviewBox {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  thumb?: string;
-  rotated?: boolean;
-  keep_aspect?: boolean;
-  fill_color?: string;
-  file_id?: string;
-  page_num?: number;
-  page_label?: string;
-  fit_mode?: 'stretch' | 'fit' | 'crop';
-  page_rotation?: 'none' | 'cw' | 'ccw';
-  bleed_mode?: 'none' | 'solid' | 'mirror';
-  bleed_mm?: number;
-  bleed_color?: string;
-  bleed_type?: 'inside' | 'outside';
-}
-
-interface PreviewPage {
-  w: number;
-  h: number;
-  boxes: PreviewBox[];
-}
-
-interface PreviewResponse {
-  success: boolean;
-  error?: string;
-  preview_pages: PreviewPage[];
-  stats: {
-    pages: number;
-    total_length_m?: number;
-    avg_efficiency: number;
-  };
-}
-
-const ArtworkColorPicker = ({ fileId, pageNum = 0, onSelect }: { fileId: string, pageNum?: number, onSelect: (color: string) => void }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    const ext = fileId.toLowerCase().split('.').pop() || '';
-    if (ext === 'pdf') {
-      img.src = `${API_BASE_URL}/api/imposing/thumbnail/${fileId}/${pageNum}`;
-    } else {
-      img.src = `${API_BASE_URL}/temp_uploads/${fileId}`;
-    }
-    img.onload = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      // Increase internal resolution up to 1200px for much higher precision picking
-      const scale = Math.min(1, 1200 / Math.max(img.width, img.height));
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (ctx) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    };
-  }, [fileId, pageNum]);
-
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-    const pixel = ctx.getImageData(x, y, 1, 1).data;
-    const hex = "#" + [pixel[0], pixel[1], pixel[2]].map(v => v.toString(16).padStart(2, '0')).join('');
-    onSelect(hex);
-  };
-
-  return (
-    <div className="cursor-crosshair border border-[#2E3648] rounded-lg hover:border-emerald-500 transition-colors bg-black/40 flex items-center justify-center p-2 w-full">
-      <canvas ref={canvasRef} onClick={handleClick} className="max-w-full object-contain max-h-[60vh] rounded shadow-sm" />
-    </div>
-  );
-};
+import { NumberControl, ArtworkColorPicker, toUnit, toMm } from "@/components/imposing/controls";
+import { ImposingItem, ImpositionPreviewResponse } from "@/types/prepress";
+import { useImpositionState } from "@/hooks/useImpositionState";
 
 const BOOK_TRIM_PRESETS = [
   { name: "A5 (148 × 210 mm)", w: 148, h: 210 },
@@ -252,52 +45,26 @@ const BOOK_TRIM_PRESETS = [
 ];
 
 function ImposingStudioContent() {
-  const [jobMode, setJobMode] = useState<"book" | "gang">("book");
-  const [selectedBookIdx, setSelectedBookIdx] = useState(0);
-  const [items, setItems] = useState<ImposingItem[]>([]);
-  const [mode, setMode] = useState<"Sheet" | "Roll">("Sheet");
-  const [unit, setUnit] = useState("mm");
-  
-  const [sheetW, setSheetW] = useState(320);
-  const [sheetH, setSheetH] = useState(450);
-  const [sheetPreset, setSheetPreset] = useState("320,450");
-  
-  const [margin, setMargin] = useState(10.0);
-  const [gap, setGap] = useState(5.0);
-  const [drawBorder, setDrawBorder] = useState(false);
-  const [borderColor, setBorderColor] = useState("#000000");
-  const [cropMarks, setCropMarks] = useState(true);
-  const [align, setAlign] = useState("Center");
-  const [autoRotateSheet, setAutoRotateSheet] = useState(true);
-  const [uniformOrientation, setUniformOrientation] = useState(true);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  const [dbSheets, setDbSheets] = useState<{name: string; width: number; height: number}[]>([]);
-  const [dbRolls, setDbRolls] = useState<{name: string; width: number}[]>([]);
-
-  useEffect(() => {
-    fetch(`${API_BASE_URL}/api/settings`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.sheets) {
-          setDbSheets(data.sheets);
-          setSheetW(prev => prev > 0 ? prev : (data.sheets[0]?.width || 320));
-          setSheetH(prev => prev > 0 ? prev : (data.sheets[0]?.height || 450));
-          setSheetPreset(prev => prev ? prev : (data.sheets[0] ? `${data.sheets[0].width},${data.sheets[0].height}` : "320,450"));
-        }
-        if (data.rolls) setDbRolls(data.rolls);
-        if (data.imposing) {
-          if (data.imposing.default_sheet_unit) setUnit(data.imposing.default_sheet_unit);
-          if (data.imposing.default_margin !== undefined) setMargin(data.imposing.default_margin);
-          if (data.imposing.default_gap !== undefined) setGap(data.imposing.default_gap);
-          if (data.imposing.crop_marks !== undefined) setCropMarks(data.imposing.crop_marks);
-          if (data.imposing.draw_border !== undefined) setDrawBorder(data.imposing.draw_border);
-          if (data.imposing.auto_rotate_sheet !== undefined) setAutoRotateSheet(data.imposing.auto_rotate_sheet);
-          if (data.imposing.uniform_orientation !== undefined) setUniformOrientation(data.imposing.uniform_orientation);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const {
+    jobMode, setJobMode,
+    selectedBookIdx, setSelectedBookIdx,
+    items, setItems,
+    mode, setMode,
+    unit, setUnit,
+    sheetW, setSheetW,
+    sheetH, setSheetH,
+    sheetPreset, setSheetPreset,
+    margin, setMargin,
+    gap, setGap,
+    drawBorder, setDrawBorder,
+    borderColor, setBorderColor,
+    cropMarks, setCropMarks,
+    align, setAlign,
+    autoRotateSheet, setAutoRotateSheet,
+    uniformOrientation, setUniformOrientation,
+    showAdvanced, setShowAdvanced,
+    dbSheets, dbRolls
+  } = useImpositionState();
 
   const searchParams = useSearchParams();
 
@@ -352,7 +119,7 @@ function ImposingStudioContent() {
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingSvg, setIsExportingSvg] = useState(false);
   
-  const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
+  const [previewData, setPreviewData] = useState<ImpositionPreviewResponse | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -562,10 +329,10 @@ function ImposingStudioContent() {
     const mmVal = toMm(valUnit, unit);
     if (field === "w") {
       it.w = mmVal;
-      if (it.locked) it.h = mmVal / it.ratio;
+      if (it.locked && it.ratio) it.h = mmVal / it.ratio;
     } else {
       it.h = mmVal;
-      if (it.locked) it.w = mmVal * it.ratio;
+      if (it.locked && it.ratio) it.w = mmVal * it.ratio;
     }
     setItems(newItems);
   };
