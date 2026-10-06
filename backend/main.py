@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from settings_api import router as settings_router
-from imposing_api import router as imposing_router
+from imposing_api import router as imposing_router, _pregen_all_thumbnails
 from book_scan_api import router as book_scan_router
 from fastapi import UploadFile, File, Form, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +15,14 @@ from engines.preflight import run_preflight
 from engines.contour_engine import generate_contour_cut_svg, analyze_image_for_contour
 from engines.flipbook_worker import generate_flipbook_task, generate_html_content, export_flipbook_task
 from engines.helpers import apply_print_binding_padding
+from engines.asset_inspector import analyze_universal_asset
 import time
 from typing import List, Dict, Any
 
-app = FastAPI(title="ESSR PA API")
+import signal
+import threading
+
+app = FastAPI(title="Flint Prepress API")
 app.include_router(settings_router)
 app.include_router(imposing_router)
 app.include_router(book_scan_router)
@@ -69,7 +73,80 @@ def evict_stale_caches():
 @app.get("/")
 def read_root():
     evict_stale_caches()
-    return {"status": "ok", "message": "ESSR PA Backend Running"}
+    return {"status": "ok", "message": "Flint Prepress API Running"}
+
+@app.post("/api/inspect")
+async def inspect_asset(file: UploadFile = File(...)):
+    """
+    Universal ingest & triage endpoint:
+    Saves file to temp_uploads, extracts prepress metrics (pages, dimensions, colorspace),
+    generates a high-resolution preview thumbnail, and registers the file for immediate
+    handover across Imposing, Contour, Flipbook, and Book Studio.
+    """
+    os.makedirs("temp_uploads", exist_ok=True)
+    file_id = str(uuid.uuid4())[:12]
+    ext = os.path.splitext(file.filename)[1].lower()
+    if not ext:
+        ext = ".pdf"
+    
+    full_file_id = f"{file_id}{ext}"
+    file_path = f"temp_uploads/{full_file_id}"
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    CACHE_TIMESTAMPS[file_id] = time.time()
+    CACHE_TIMESTAMPS[full_file_id] = time.time()
+    CONTOUR_CACHE[file_id] = file_path
+    CONTOUR_CACHE[full_file_id] = file_path
+
+    # Run pure analysis engine
+    analysis = analyze_universal_asset(file_path, file.filename)
+    analysis["file_id"] = full_file_id
+    analysis["file_path"] = file_path
+
+    # Generate preview thumbnail
+    thumb_p0_filename = f"{file_id}_thumb_p0.jpg"
+    thumb_p0_disk_path = f"temp_uploads/{thumb_p0_filename}"
+    thumb_filename = f"{file_id}_thumb.jpg"
+    thumb_disk_path = f"temp_uploads/{thumb_filename}"
+    try:
+        if ext == ".pdf":
+            doc = fitz.open(file_path)
+            num_pages = len(doc)
+            if num_pages > 0:
+                pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.72, 0.72))
+                pix.save(thumb_p0_disk_path)
+                pix.save(thumb_disk_path)
+                analysis["thumbnail_url"] = f"/temp_uploads/{thumb_filename}"
+            doc.close()
+
+            # For multi-page PDFs (books), pre-generate ALL remaining page thumbnails
+            # in background thread for instant disk cache hits in Imposing Studio
+            if num_pages > 1:
+                t = threading.Thread(
+                    target=_pregen_all_thumbnails,
+                    args=(file_path, full_file_id, num_pages),
+                    daemon=True,
+                    name=f"thumb-pregen-{file_id}"
+                )
+                t.start()
+        else:
+            img = cv2.imread(file_path)
+            if img is not None:
+                h_img, w_img = img.shape[:2]
+                scale = min(720.0 / max(1, w_img), 720.0 / max(1, h_img))
+                if scale < 1.0:
+                    img = cv2.resize(img, (int(w_img * scale), int(h_img * scale)))
+                cv2.imwrite(thumb_p0_disk_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                cv2.imwrite(thumb_disk_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                analysis["thumbnail_url"] = f"/temp_uploads/{thumb_filename}"
+    except Exception as e_thumb:
+        print(f"Notice: thumbnail generation failed: {e_thumb}")
+
+    return {
+        "success": True,
+        "analysis": analysis
+    }
 
 @app.post("/api/preflight")
 async def analyze_pdfs(files: List[UploadFile] = File(...)):
@@ -383,3 +460,23 @@ async def export_contour_svg(
         media_type="image/svg+xml",
         headers={"Content-Disposition": f'attachment; filename="cut_contour_{file_id}.svg"'}
     )
+
+@app.post("/api/shutdown")
+def shutdown_app():
+    """Trigger graceful shutdown of Flint services."""
+    def _delayed_exit():
+        time.sleep(0.5)
+        # Cleanly stop systemd services and any background workers
+        os.system("systemctl --user stop flint-backend flint-celery flint-frontend 2>/dev/null || true")
+        os.system("pkill -9 -f 'uvicorn.*8000' 2>/dev/null || true")
+        os.system("pkill -9 -f 'celery -A celery_app worker' 2>/dev/null || true")
+        os.system("pkill -9 -f 'next-server' 2>/dev/null || true")
+        os.system("pkill -9 -f 'next dev' 2>/dev/null || true")
+        try:
+            os.kill(os.getpid(), signal.SIGKILL)
+        except OSError:
+            pass
+
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+    return {"status": "shutting_down", "message": "Flint services are stopping..."}
+

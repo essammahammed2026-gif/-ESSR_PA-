@@ -195,19 +195,48 @@ async def upload_imposing_file(file: UploadFile = File(...)):
         "thumb": f"/api/imposing/thumbnail/{file_id}{ext}/0"
     }
 
+def resolve_temp_file(file_id: str) -> Optional[str]:
+    if not file_id:
+        return None
+    safe_name = os.path.basename(file_id)
+    # 1. Exact match in temp_uploads
+    p = os.path.join("temp_uploads", safe_name)
+    if os.path.exists(p) and os.path.isfile(p):
+        return p
+    # 2. Check with common extensions
+    for ext in [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff"]:
+        p_ext = os.path.join("temp_uploads", f"{safe_name}{ext}")
+        if os.path.exists(p_ext) and os.path.isfile(p_ext):
+            return p_ext
+    # 3. Check if safe_name is a prefix or contains prefix
+    stem = os.path.splitext(safe_name)[0]
+    if os.path.exists("temp_uploads"):
+        for fname in os.listdir("temp_uploads"):
+            if fname.startswith(f"{stem}.") or fname.startswith(f"{stem}_") or fname.startswith(f"{safe_name}_"):
+                full = os.path.join("temp_uploads", fname)
+                if os.path.isfile(full) and not ("_thumb_" in fname or fname.endswith("_thumb.jpg")):
+                    return full
+    return None
+
 @router.get("/api/imposing/thumbnail/{file_id}/{page_num}")
 def get_imposing_thumbnail(file_id: str, page_num: int):
     safe_file_id = os.path.basename(file_id)
-    thumb_filename = f"{os.path.splitext(safe_file_id)[0]}_thumb_p{page_num}.jpg"
+    stem = os.path.splitext(safe_file_id)[0]
+    thumb_filename = f"{stem}_thumb_p{page_num}.jpg"
     thumb_path = os.path.join("temp_uploads", thumb_filename)
     if os.path.exists(thumb_path):
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
-    src_path = os.path.join("temp_uploads", safe_file_id)
-    if not os.path.exists(src_path):
+    src_path = resolve_temp_file(file_id)
+    if not src_path or not os.path.exists(src_path):
         raise HTTPException(status_code=404, detail="File not found")
 
-    ext = os.path.splitext(safe_file_id)[1].lower()
+    actual_stem = os.path.splitext(os.path.basename(src_path))[0]
+    actual_thumb_path = os.path.join("temp_uploads", f"{actual_stem}_thumb_p{page_num}.jpg")
+    if os.path.exists(actual_thumb_path):
+        return FileResponse(actual_thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    ext = os.path.splitext(src_path)[1].lower()
     if ext == ".pdf":
         try:
             doc = fitz.open(src_path)
@@ -215,6 +244,8 @@ def get_imposing_thumbnail(file_id: str, page_num: int):
             # High-fidelity preview resolution (approx 150 DPI, 0.72 scale)
             pix = doc[p].get_pixmap(matrix=fitz.Matrix(0.72, 0.72))
             pix.save(thumb_path)
+            if actual_thumb_path != thumb_path:
+                pix.save(actual_thumb_path)
             doc.close()
             return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
@@ -229,6 +260,8 @@ def get_imposing_thumbnail(file_id: str, page_num: int):
                 if scale < 1.0:
                     img = cv2.resize(img, (int(w_img * scale), int(h_img * scale)))
                 cv2.imwrite(thumb_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                if actual_thumb_path != thumb_path:
+                    cv2.imwrite(actual_thumb_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Image thumbnail error: {e}")
@@ -237,7 +270,7 @@ def get_imposing_thumbnail(file_id: str, page_num: int):
 def build_sheet_specs(items: List[ImposingItem]) -> List[SheetArtworkSpec]:
     specs = []
     for item in items:
-        path = f"temp_uploads/{item.file_id}"
+        path = resolve_temp_file(item.file_id) or f"temp_uploads/{item.file_id}"
         w = item.w if item.w is not None else get_dimensions_mm(path)[0]
         h = item.h if item.h is not None else get_dimensions_mm(path)[1]
         # fit_mode is authoritative; keep_aspect is derived for backward compat
@@ -295,7 +328,7 @@ def build_sheet_specs(items: List[ImposingItem]) -> List[SheetArtworkSpec]:
 def build_roll_specs(items: List[ImposingItem]) -> List[RollArtworkSpec]:
     specs = []
     for item in items:
-        path = f"temp_uploads/{item.file_id}"
+        path = resolve_temp_file(item.file_id) or f"temp_uploads/{item.file_id}"
         w = item.w if item.w is not None else get_dimensions_mm(path)[0]
         h = item.h if item.h is not None else get_dimensions_mm(path)[1]
         fit_mode = item.fit_mode or "stretch"
@@ -562,7 +595,7 @@ def export_imposing(req: ImposingRequest):
                 for placed in placed_list:
                     try:
                         file_id = getattr(placed, 'file_id', '')
-                        file_path = f"temp_uploads/{file_id}" if file_id else f"temp_uploads/{req.items[0].file_id}"
+                        file_path = resolve_temp_file(file_id) or (resolve_temp_file(req.items[0].file_id) if req.items else None) or f"temp_uploads/{file_id}"
                         rect = fitz.Rect(
                             placed.x_mm / 25.4 * 72.0,
                             placed.y_mm / 25.4 * 72.0,
@@ -688,7 +721,7 @@ def export_imposing_svg(req: ImposingRequest):
                     w_mm=placed.w_mm,
                     h_mm=placed.h_mm,
                     rotated=getattr(placed, 'rotated', False),
-                    pdf_path=f"temp_uploads/{file_id}",
+                    pdf_path=resolve_temp_file(file_id) or f"temp_uploads/{file_id}",
                     keep_aspect=getattr(placed, 'keep_aspect', False),
                     fill_color=getattr(placed, 'fill_color', '#FFFFFF'),
                     page_num=getattr(placed, 'page_num', 0),

@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Desktop Menu Launcher & Graceful Shutdown Reliability**:
+  - Fixed orphaned `uvicorn` processes lingering on port 8000 when stopping services through `/api/shutdown` or systemd.
+  - Added `-m 2` maximum timeout on backend and frontend healthcheck requests in [`start.sh`](start.sh) to prevent launcher freezes during app menu launch.
+  - Added automated port recovery (`fuser -k` / `pkill`) in [`start.sh`](start.sh) to ensure ports 8000 and 3000 are cleanly reclaimed before service start.
+  - Improved Hyprland window focus matching to target `Flint`, `Prepress`, or port `3000` in Zen Browser.
+
+- **Fixed Preloaded PDF Resolution & Blank Export in Imposing Studio**:
+  - Resolved file identification mismatch where `/api/inspect` saved assets with randomized prefixes without file extension, preventing Imposing Studio from locating the uploaded PDF on disk.
+  - Added `resolve_temp_file()` in `imposing_api.py` to robustly resolve file paths across exact names, file extensions, and upload prefix variations.
+  - Added background pregeneration of multi-page PDF thumbnails during universal inspect so all book pages render instantly in the imposing preview canvas.
+  - Initialized default press sheet dimensions (SRA3: 320 × 450 mm) so that imposing calculation and layout preview fire immediately upon loading preloaded artwork.
+
+- **Concise On-Hover Tool & Studio Descriptions**:
+  - Removed persistent static description paragraphs from studio tiles and dispatch recommendations on the Dashboard Hub (`/`).
+  - Implemented concise, streamlined tooltips that only appear on hover over the tool or studio name.
+  - Shortened all descriptions across the asset inspection engine, dashboard tiles, and sidebar navigation items into concise, actionable summaries.
+
+- Implemented **Prepress Triage Desk & Universal Ingest Hub** (`/`):
+  - **Universal Format Inspection Engine (`engines/asset_inspector.py`)**:
+    - Automatically inspects single/multi-page PDFs, high-res PNGs, JPEGs, TIFFs, and WEBPs.
+    - Accurately measures physical trim dimensions in millimeters (`mm`), page counts, aspect ratios, embedded raster counts, alpha transparency channels, and color space models.
+  - **Intelligent Pre-Loaded Studio Dispatch (`POST /api/inspect`)**:
+    - Generates high-resolution raster previews synchronously and registers server cache IDs.
+    - Dispatches users to target studios with their artwork already pre-loaded into state via URL parameters (Imposing, Contour, and Book Studio).
+  - **Eliminated AI-Stock Design & De-Cluttered Visuals**:
+    - Replaced redundant marketing metrics cards and duplicate studio links with a functional dropzone, live technical asset inspection strip, and recent file recall.
+    - Refined typography hierarchy: consistent weights, disciplined monospace metrics (`tabular-nums`), and removed noisy micro-badges.
 - Implemented **Two-Mode Imposition Architecture (Book & Publication Mode vs. Gang Run & Sticker Nesting Mode)** in Imposing Studio:
   - **Streamlined Operator UI & Layout De-Cluttering**:
     - **Quiet Imposing 2-Step Workflow Architecture**: Split Book Mode into an intuitive 2-stage prepress pipeline:

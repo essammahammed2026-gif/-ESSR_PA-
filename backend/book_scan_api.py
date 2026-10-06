@@ -82,6 +82,7 @@ async def init_book_scan_session(
     file_odds: Optional[UploadFile] = File(None),
     file_evens: Optional[UploadFile] = File(None),
     file_single: Optional[UploadFile] = File(None),
+    existing_file_path: Optional[str] = Form(None),
 ):
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(TEMP_DIR, session_id)
@@ -112,11 +113,16 @@ async def init_book_scan_session(
             spread_split_pos=spread_split_pos
         )
     else:
-        if not file_single:
+        if not file_single and not existing_file_path:
             raise HTTPException(status_code=400, detail="Single PDF file is required in single mode.")
-        single_path = os.path.join(session_dir, f"single_{file_single.filename}")
-        with open(single_path, "wb") as f:
-            shutil.copyfileobj(file_single.file, f)
+        if file_single:
+            single_path = os.path.join(session_dir, f"single_{file_single.filename}")
+            with open(single_path, "wb") as f:
+                shutil.copyfileobj(file_single.file, f)
+        else:
+            if not os.path.exists(existing_file_path):
+                raise HTTPException(status_code=404, detail="Referenced file does not exist on server.")
+            single_path = existing_file_path
 
         single_doc = fitz.open(single_path)
         pages = BookScanEngine.collate_scans(

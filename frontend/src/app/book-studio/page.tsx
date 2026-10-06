@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { 
   RotateCw, 
   Trash2, 
@@ -25,7 +26,7 @@ interface BookPage {
   label: string;
 }
 
-export default function BookStudioPage() {
+function BookStudioContent() {
   // Mode selection
   const [scanMode, setScanMode] = useState<"dual" | "single">("dual");
   const [isSpread, setIsSpread] = useState<boolean>(false);
@@ -60,6 +61,41 @@ export default function BookStudioPage() {
 
   // Drag-and-drop / reordering
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+
+  const searchParams = useSearchParams();
+
+  // Preload file if routed from Hub
+  useEffect(() => {
+    const filePathParam = searchParams.get("file_path");
+    if (filePathParam && !sessionId && !isInitializing) {
+      setScanMode("single");
+      setIsInitializing(true);
+      const formData = new FormData();
+      formData.append("mode", "single");
+      formData.append("is_spread", "false");
+      formData.append("odds_order", "forward");
+      formData.append("evens_order", "reverse");
+      formData.append("spread_split_pos", "0.5");
+      formData.append("existing_file_path", filePathParam);
+
+      fetch(API_BASE_URL + "/api/book-scan/init-session", {
+        method: "POST",
+        body: formData,
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.session_id) {
+            setSessionId(data.session_id);
+            setPages(data.pages || []);
+            if (data.pages && data.pages.length > 0) {
+              setSelectedPageId(data.pages[0].id);
+            }
+          }
+        })
+        .catch((err) => console.error("Book preload failed:", err))
+        .finally(() => setIsInitializing(false));
+    }
+  }, [searchParams, sessionId, isInitializing]);
 
   const handleInitSession = async () => {
     setIsInitializing(true);
@@ -755,5 +791,13 @@ export default function BookStudioPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function BookStudioPage() {
+  return (
+    <Suspense fallback={null}>
+      <BookStudioContent />
+    </Suspense>
   );
 }

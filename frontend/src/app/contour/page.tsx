@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { 
   Scissors, 
   Download, 
@@ -107,7 +108,7 @@ interface DetectedProfile {
   };
 }
 
-export default function ContourStudio() {
+function ContourStudioContent() {
   const [fileId, setFileId] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -133,6 +134,68 @@ export default function ContourStudio() {
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
   const isFirstRender = useRef(true);
   const lastGeneratedKey = useRef<string | null>(null);
+  const searchParams = useSearchParams();
+
+  const generateContour = useCallback(async (
+    id: string, 
+    offset: string, 
+    thresh: string, 
+    smooth: string, 
+    holes: boolean, 
+    matte: boolean, 
+    color: string
+  ) => {
+    setIsGenerating(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file_id", id);
+    formData.append("offset_val", offset);
+    formData.append("threshold", thresh);
+    formData.append("smoothing_factor", smooth);
+    formData.append("keep_holes", String(holes));
+    formData.append("add_white_matte", String(matte));
+    formData.append("stroke_color", color);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/contour/generate`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Ensure relative asset URLs in SVG point to the centralized API
+        const displaySvg = (data.svg as string).replace(
+          /(href|xlink:href)\s*=\s*["'](\/temp_uploads\/[^"']+)["']/g,
+          (_match, attr, path) => `${attr}="${getApiUrl(path)}"`
+        );
+        setSvgContent(displaySvg);
+      } else {
+        setError(data.error || "Failed to generate die-cut path.");
+      }
+    } catch {
+      setError("Network error communicating with die-cut engine.");
+    } finally {
+      setIsGenerating(false);
+    }
+  }, []);
+
+  // Preload artwork if routed from Hub
+  useEffect(() => {
+    const fileIdParam = searchParams.get("file_id");
+    if (fileIdParam && !fileId) {
+      setFileId(fileIdParam);
+      generateContour(
+        fileIdParam,
+        offsetVal,
+        threshold,
+        smoothing,
+        keepHoles,
+        addWhiteMatte,
+        strokeColor
+      );
+    }
+  }, [searchParams, generateContour, fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor]);
 
   // Mouse wheel pan & zoom with non-passive event listener
   useEffect(() => {
@@ -193,50 +256,6 @@ export default function ContourStudio() {
   const handleMouseUp = () => {
     setIsDragging(false);
   };
-
-  const generateContour = useCallback(async (
-    id: string, 
-    offset: string, 
-    thresh: string, 
-    smooth: string, 
-    holes: boolean, 
-    matte: boolean, 
-    color: string
-  ) => {
-    setIsGenerating(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.append("file_id", id);
-    formData.append("offset_val", offset);
-    formData.append("threshold", thresh);
-    formData.append("smoothing_factor", smooth);
-    formData.append("keep_holes", String(holes));
-    formData.append("add_white_matte", String(matte));
-    formData.append("stroke_color", color);
-
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/contour/generate`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (data.success) {
-        // Ensure relative asset URLs in SVG point to the centralized API
-        const displaySvg = (data.svg as string).replace(
-          /(href|xlink:href)\s*=\s*["'](\/temp_uploads\/[^"']+)["']/g,
-          (_match, attr, path) => `${attr}="${getApiUrl(path)}"`
-        );
-        setSvgContent(displaySvg);
-      } else {
-        setError(data.error || "Failed to generate die-cut path.");
-      }
-    } catch {
-      setError("Network error communicating with die-cut engine.");
-    } finally {
-      setIsGenerating(false);
-    }
-  }, []);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -704,5 +723,13 @@ export default function ContourStudio() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ContourStudio() {
+  return (
+    <Suspense fallback={null}>
+      <ContourStudioContent />
+    </Suspense>
   );
 }

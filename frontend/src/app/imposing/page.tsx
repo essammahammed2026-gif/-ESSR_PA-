@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { 
   Upload, 
   Download, 
@@ -250,16 +251,16 @@ const BOOK_TRIM_PRESETS = [
   { name: "Pocket (108 × 175 mm)", w: 108, h: 175 },
 ];
 
-export default function ImposingStudio() {
+function ImposingStudioContent() {
   const [jobMode, setJobMode] = useState<"book" | "gang">("book");
   const [selectedBookIdx, setSelectedBookIdx] = useState(0);
   const [items, setItems] = useState<ImposingItem[]>([]);
   const [mode, setMode] = useState<"Sheet" | "Roll">("Sheet");
   const [unit, setUnit] = useState("mm");
   
-  const [sheetW, setSheetW] = useState(0);
-  const [sheetH, setSheetH] = useState(0);
-  const [sheetPreset, setSheetPreset] = useState("");
+  const [sheetW, setSheetW] = useState(320);
+  const [sheetH, setSheetH] = useState(450);
+  const [sheetPreset, setSheetPreset] = useState("320,450");
   
   const [margin, setMargin] = useState(10.0);
   const [gap, setGap] = useState(5.0);
@@ -278,7 +279,12 @@ export default function ImposingStudio() {
     fetch(`${API_BASE_URL}/api/settings`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.sheets) setDbSheets(data.sheets);
+        if (data.sheets) {
+          setDbSheets(data.sheets);
+          setSheetW(prev => prev > 0 ? prev : (data.sheets[0]?.width || 320));
+          setSheetH(prev => prev > 0 ? prev : (data.sheets[0]?.height || 450));
+          setSheetPreset(prev => prev ? prev : (data.sheets[0] ? `${data.sheets[0].width},${data.sheets[0].height}` : "320,450"));
+        }
         if (data.rolls) setDbRolls(data.rolls);
         if (data.imposing) {
           if (data.imposing.default_sheet_unit) setUnit(data.imposing.default_sheet_unit);
@@ -292,6 +298,54 @@ export default function ImposingStudio() {
       })
       .catch(() => {});
   }, []);
+
+  const searchParams = useSearchParams();
+
+  // Preload file if directed from Command Center / Hub
+  useEffect(() => {
+    const fileIdParam = searchParams.get("file_id");
+    const nameParam = searchParams.get("name") || "Preloaded Artwork";
+    const wParam = parseFloat(searchParams.get("w") || "0");
+    const hParam = parseFloat(searchParams.get("h") || "0");
+    const pageCountParam = parseInt(searchParams.get("page_count") || "1", 10);
+    const modeParam = searchParams.get("job_mode");
+
+    if (fileIdParam && wParam > 0 && hParam > 0) {
+      const isBook = pageCountParam > 1;
+      if (modeParam === "gang" || modeParam === "book") {
+        setJobMode(modeParam);
+      } else {
+        setJobMode(isBook ? "book" : "gang");
+      }
+
+      setSheetW(prev => prev > 0 ? prev : 320);
+      setSheetH(prev => prev > 0 ? prev : 450);
+      setSheetPreset(prev => prev ? prev : "320,450");
+
+      setItems([{
+        file_id: fileIdParam,
+        name: nameParam,
+        w: wParam,
+        h: hParam,
+        copies: 1,
+        ratio: wParam / hParam,
+        locked: true,
+        keep_aspect: false,
+        fill_color: "#FFFFFF",
+        original_w: wParam,
+        original_h: hParam,
+        page_count: pageCountParam,
+        is_book: isBook,
+        page_range: "all",
+        fit_mode: "stretch",
+        page_rotation: isBook ? "cw" : "none",
+        bleed_mode: "none",
+        bleed_mm: 0.0,
+        bleed_color: "#FFFFFF",
+        bleed_type: "outside"
+      }]);
+    }
+  }, [searchParams]);
 
   const [isUploading, setIsUploading] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -2235,5 +2289,13 @@ export default function ImposingStudio() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ImposingStudio() {
+  return (
+    <Suspense fallback={null}>
+      <ImposingStudioContent />
+    </Suspense>
   );
 }
