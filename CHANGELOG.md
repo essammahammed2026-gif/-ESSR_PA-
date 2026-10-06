@@ -8,8 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Imposing Studio UI Refactor**:
+  - Unified Book and Gang mode control logic in `page.tsx` into a single shared interface.
+  - Replaced the custom EyeDropper `<canvas>` polyfill with the native HTML5 `<input type="color">` picker, removing over 50 lines of fallback code and leveraging native GTK/Windows pickers.
+  - Extracted the interactive sheet canvas and layout preview into a standalone `<PreviewViewport />` component, reducing `page.tsx` line count by over 1,000 lines while maintaining stability and zero React re-render loops.
 
-- **Desktop Menu Launcher & Graceful Shutdown Reliability**:
+- **Local-First Architecture & Native Desktop Migration (Tauri v2 Integration)**:
+  - **Removed Celery & Redis dependencies**: Transitioned background processing (multi-page renders, PDF imposition, export synthesis, flipbook rasterization) entirely to FastAPI's native `BackgroundTasks` and `asyncio` execution pool, enabling zero-dependency native execution across Linux and Windows without Docker or WSL.
+  - **Cleaned Requirements & Service Scripts**: Removed `celery` and `redis` from [`backend/requirements.txt`](backend/requirements.txt), deleted legacy `celery_app.py`, and streamlined [`start.sh`](start.sh) service orchestrator.
+  - **Tauri v2 Desktop Packaging Scaffold**: Configured Tauri v2 desktop application bundle with Next.js webview frontend, Python FastAPI sidecar orchestrator, and strict TypeScript IPC / API data models.
   - Fixed orphaned `uvicorn` processes lingering on port 8000 when stopping services through `/api/shutdown` or systemd.
   - Added `-m 2` maximum timeout on backend and frontend healthcheck requests in [`start.sh`](start.sh) to prevent launcher freezes during app menu launch.
   - Added automated port recovery (`fuser -k` / `pkill`) in [`start.sh`](start.sh) to ensure ports 8000 and 3000 are cleanly reclaimed before service start.
