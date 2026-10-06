@@ -20,8 +20,7 @@ import {
   RotateCcw,
   SlidersHorizontal,
   LayoutDashboard,
-  Pipette,
-  Scissors,
+    Scissors,
   BookOpen,
   ChevronDown,
   ChevronUp,
@@ -31,7 +30,7 @@ import {
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
-import { NumberControl, ArtworkColorPicker, toUnit, toMm } from "@/components/imposing/controls";
+import { NumberControl, toUnit, toMm } from "@/components/imposing/controls";
 import { ImposingItem, ImpositionPreviewResponse } from "@/types/prepress";
 import { useImpositionState } from "@/hooks/useImpositionState";
 
@@ -49,7 +48,9 @@ function ImposingStudioContent() {
     jobMode, setJobMode,
     selectedBookIdx, setSelectedBookIdx,
     items, setItems,
-    mode, setMode,
+    mode,
+    autoRotateSheet,
+    
     unit, setUnit,
     sheetW, setSheetW,
     sheetH, setSheetH,
@@ -60,10 +61,10 @@ function ImposingStudioContent() {
     borderColor, setBorderColor,
     cropMarks, setCropMarks,
     align, setAlign,
-    autoRotateSheet, setAutoRotateSheet,
+    
     uniformOrientation, setUniformOrientation,
     showAdvanced, setShowAdvanced,
-    dbSheets, dbRolls
+    dbSheets
   } = useImpositionState();
 
   const searchParams = useSearchParams();
@@ -127,26 +128,8 @@ function ImposingStudioContent() {
   const dragStart = useRef({ x: 0, y: 0 });
   const canvasRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pickingColorFor, setPickingColorFor] = useState<{setter: (color: string) => void} | null>(null);
   const [showPageOverlay, setShowPageOverlay] = useState(false);
   const [bookStep, setBookStep] = useState<1 | 2>(1);
-  
-  const handleEyeDropper = async (setter: (color: string) => void) => {
-    // @ts-expect-error EyeDropper is a new browser API not yet in standard TS types
-    if (!window.EyeDropper) {
-      // Fallback for browsers like Firefox (Zen)
-      setPickingColorFor({ setter });
-      return;
-    }
-    try {
-      // @ts-expect-error EyeDropper is a new browser API not yet in standard TS types
-      const eyeDropper = new window.EyeDropper();
-      const result = await eyeDropper.open();
-      setter(result.sRGBHex);
-    } catch {
-      // User canceled
-    }
-  };
   
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -303,11 +286,6 @@ function ImposingStudioContent() {
     }
   };
 
-  const updateItemCopies = (idx: number, copies: number) => {
-    const newItems = [...items];
-    newItems[idx].copies = copies;
-    setItems(newItems);
-  };
 
   const updateItemFields = (idx: number, updates: Partial<ImposingItem>) => {
     setItems(prev => {
@@ -509,41 +487,6 @@ function ImposingStudioContent() {
 
   return (
     <div className="w-full space-y-3 pb-4">
-      {/* Native Eyedropper Fallback Modal */}
-      {pickingColorFor && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 md:p-8">
-          <div className="bg-[#0B0F19] border border-[#2E3648] shadow-2xl rounded-xl p-5 w-full max-w-6xl flex flex-col max-h-[90vh]">
-            <div className="flex justify-between items-center mb-5 border-b border-[#242A38] pb-3">
-              <h3 className="text-white font-medium text-sm md:text-base">Pick a color from your artwork</h3>
-              <button 
-                onClick={() => setPickingColorFor(null)}
-                className="text-slate-400 hover:text-white transition-colors text-xs font-semibold px-4 py-1.5 rounded bg-slate-800 hover:bg-slate-700"
-              >
-                Cancel
-              </button>
-            </div>
-            {items.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center py-10">Upload artwork first to pick colors from it.</p>
-            ) : (
-              <div className="flex-1 overflow-y-auto overflow-x-hidden p-2">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start justify-items-center">
-                  {items.map(item => (
-                    <ArtworkColorPicker 
-                      key={item.file_id} 
-                      fileId={item.file_id} 
-                      onSelect={(color) => {
-                        pickingColorFor.setter(color);
-                        setPickingColorFor(null);
-                      }} 
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Compact Studio Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
         <div className="flex flex-wrap items-center gap-3">
@@ -627,10 +570,10 @@ function ImposingStudioContent() {
       <div className="flex flex-col lg:flex-row gap-3.5 items-start">
         {/* Left Control Sidebar */}
         <div className="w-full lg:w-[350px] xl:w-[370px] shrink-0 space-y-3">
-          {jobMode === "book" ? (
-            /* =========================================================================
+          
+            {/* =========================================================================
                MODE A: BOOK & PUBLICATION IMPOSITION (De-cluttered & Operator-Friendly)
-               ========================================================================= */
+               ========================================================================= */}
             <div className="bg-[#181D27] p-3.5 rounded-xl border border-[#242A38] space-y-3.5 shadow-sm">
               {/* Header */}
               <div className="flex justify-between items-center pb-2 border-b border-[#242A38]">
@@ -760,6 +703,30 @@ function ImposingStudioContent() {
                           </button>
                         </div>
 
+
+                        {/* Copies selector */}
+                        <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#242A38]">
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">Copies:</span>
+                          <div className="flex items-center space-x-1 shrink-0">
+                            <button 
+                              type="button"
+                              onClick={() => updateItemField(activeIdx, 'copies', Math.max(1, (book.copies || 1) - 1))}
+                              className="w-5 h-5 bg-[#232936] hover:bg-[#2E3648] text-slate-300 rounded text-xs font-bold"
+                            >
+                              -
+                            </button>
+                            <span className="w-7 text-center font-mono font-bold text-xs text-white">
+                              {book.copies || 1}
+                            </span>
+                            <button 
+                              type="button"
+                              onClick={() => updateItemField(activeIdx, 'copies', (book.copies || 1) + 1)}
+                              className="w-5 h-5 bg-[#232936] hover:bg-[#2E3648] text-slate-300 rounded text-xs font-bold"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
                         {/* Page Range selector */}
                         <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#242A38]">
                           <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">Page Range:</span>
@@ -1006,14 +973,7 @@ function ImposingStudioContent() {
                                         onChange={(e) => updateItemField(activeIdx, 'bleed_color', e.target.value)} 
                                         className="w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent" 
                                       />
-                                      <button 
-                                        type="button"
-                                        onClick={() => handleEyeDropper((c) => updateItemField(activeIdx, 'bleed_color', c))} 
-                                        className="p-1 hover:bg-[#2E3648] rounded text-slate-400 hover:text-emerald-400 transition-colors" 
-                                        title="Pick color from page"
-                                      >
-                                        <Pipette size={13} />
-                                      </button>
+                                      
                                       <span className="text-[10px] text-slate-300 font-mono uppercase">
                                         {book.bleed_color || '#FFFFFF'}
                                       </span>
@@ -1200,14 +1160,7 @@ function ImposingStudioContent() {
                                         onChange={(e) => setBorderColor(e.target.value)} 
                                         className="w-5 h-5 rounded cursor-pointer border-0 p-0" 
                                       />
-                                      <button 
-                                        type="button"
-                                        onClick={() => handleEyeDropper(setBorderColor)} 
-                                        className="p-1 hover:bg-slate-700 rounded text-slate-400" 
-                                        title="Pick color from screen"
-                                      >
-                                        <Pipette size={12} />
-                                      </button>
+                                      
                                       <span className="text-[10px] text-slate-400 font-mono uppercase">{borderColor}</span>
                                     </div>
                                   )}
@@ -1232,482 +1185,6 @@ function ImposingStudioContent() {
                 })()
               )}
             </div>
-          ) : (
-            /* =========================================================================
-               MODE B: GANG RUN & STICKER NESTING (De-cluttered & Operator-Friendly)
-               ========================================================================= */
-            <div className="bg-[#181D27] p-3.5 rounded-xl border border-[#242A38] space-y-3.5 shadow-sm">
-              {/* Header */}
-              <div className="flex justify-between items-center pb-2 border-b border-[#242A38]">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-1.5">
-                  <LayoutDashboard size={14} className="text-emerald-400" />
-                  <span>Gang Run Setup</span>
-                </span>
-                <select 
-                  value={unit} 
-                  onChange={(e) => setUnit(e.target.value)} 
-                  className="text-xs bg-[#131720] border border-[#2E3648] text-slate-300 rounded px-2 py-0.5 outline-none font-medium cursor-pointer"
-                >
-                  <option value="mm">mm</option>
-                  <option value="cm">cm</option>
-                  <option value="in">inch</option>
-                </select>
-              </div>
-
-              {/* Sheet vs Roll Toggle */}
-              <div className="flex space-x-1 p-1 bg-[#131720] rounded-lg border border-[#2E3648]">
-                <button 
-                  type="button"
-                  className={`flex-1 text-xs py-1.5 rounded-md font-semibold transition-all ${
-                    mode === "Sheet" 
-                      ? "bg-emerald-600 text-white shadow-sm" 
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                  onClick={() => { setMode("Sheet"); setSheetPreset("320,450"); }}
-                >
-                  Cut Sheet
-                </button>
-                <button 
-                  type="button"
-                  className={`flex-1 text-xs py-1.5 rounded-md font-semibold transition-all ${
-                    mode === "Roll" 
-                      ? "bg-emerald-600 text-white shadow-sm" 
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                  onClick={() => { setMode("Roll"); setSheetPreset("600"); }}
-                >
-                  Continuous Roll
-                </button>
-              </div>
-
-              {/* Press Media Preset */}
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-semibold text-slate-300">
-                  {mode === "Sheet" ? "Press Sheet Preset" : "Roll Width"}
-                </label>
-                <select 
-                  value={sheetPreset} 
-                  onChange={(e) => setSheetPreset(e.target.value)} 
-                  className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-2 rounded-lg outline-none cursor-pointer"
-                >
-                  <option value="">-- Select media preset --</option>
-                  {mode === "Sheet" ? (
-                    <>
-                      {(dbSheets.length > 0 ? dbSheets : [
-                        { name: "SRA3", width: 320, height: 450 },
-                        { name: "A3", width: 297, height: 420 },
-                        { name: "B2", width: 480, height: 650 },
-                        { name: "A4", width: 210, height: 297 }
-                      ]).map((s, idx) => (
-                        <option key={idx} value={`${s.width},${s.height}`}>
-                          {s.name} ({s.width} × {s.height} mm)
-                        </option>
-                      ))}
-                    </>
-                  ) : (
-                    <>
-                      {(dbRolls.length > 0 ? dbRolls : [
-                        { name: "60cm Roll", width: 600 },
-                        { name: "100cm Roll", width: 1000 },
-                        { name: "160cm Wide Roll", width: 1600 }
-                      ]).map((r, idx) => (
-                        <option key={idx} value={`${r.width}`}>
-                          {r.name} ({r.width} mm)
-                        </option>
-                      ))}
-                    </>
-                  )}
-                  <option value="custom">Custom Dimensions...</option>
-                </select>
-
-                {/* Inline W x H */}
-                <div className="flex items-center gap-1.5">
-                  <div className="flex-1 flex items-center bg-[#131720] border border-[#2E3648] rounded-lg px-2 py-1">
-                    <span className="text-[10px] text-slate-400 mr-1 font-mono uppercase">W</span>
-                    <input 
-                      type="number" 
-                      value={toUnit(sheetW, unit)} 
-                      onChange={(e) => { 
-                        setSheetPreset("custom"); 
-                        setSheetW(toMm(parseFloat(e.target.value) || 1, unit)); 
-                      }} 
-                      className="w-full text-xs bg-transparent text-center text-white outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                    />
-                    <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                  </div>
-
-                  {mode === "Sheet" && (
-                    <button 
-                      type="button"
-                      onClick={() => { setSheetPreset("custom"); setSheetW(sheetH); setSheetH(sheetW); }} 
-                      className="p-1.5 bg-[#232936] hover:bg-[#2E3648] rounded-lg text-slate-300 transition-colors border border-[#2E3648]" 
-                      title="Rotate Sheet 90° (Swap W/H)"
-                    >
-                      <ArrowRightLeft size={13} />
-                    </button>
-                  )}
-
-                  <div className="flex-1 flex items-center bg-[#131720] border border-[#2E3648] rounded-lg px-2 py-1">
-                    <span className="text-[10px] text-slate-400 mr-1 font-mono uppercase">
-                      {mode === "Sheet" ? "H" : "Seg"}
-                    </span>
-                    <input 
-                      type="number" 
-                      value={toUnit(sheetH, unit)} 
-                      onChange={(e) => { 
-                        setSheetPreset("custom"); 
-                        setSheetH(toMm(parseFloat(e.target.value) || 1, unit)); 
-                      }} 
-                      className="w-full text-xs bg-transparent text-center text-white outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                    />
-                    <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Items Queue (Compact List) */}
-              <div className="pt-2 border-t border-[#242A38] space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-[11px] font-semibold text-slate-300">
-                    Artwork Queue ({items.length})
-                  </span>
-                  <label className="cursor-pointer text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors">
-                    <Upload size={10} />
-                    <span>+ Add File</span>
-                    <input 
-                      type="file" 
-                      multiple
-                      accept="image/*,application/pdf" 
-                      className="hidden" 
-                      onChange={handleFileUpload} 
-                      disabled={isUploading}
-                    />
-                  </label>
-                </div>
-
-                {items.length === 0 ? (
-                  <p className="text-[11px] text-slate-500 text-center py-4 bg-[#131720] rounded-lg border border-[#2E3648]">
-                    No artwork items uploaded.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
-                    {items.map((it, idx) => (
-                      <div key={idx} className="p-2 bg-[#131720] border border-[#2E3648] rounded-lg flex items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-slate-200 truncate" title={it.name}>{it.name}</p>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {toUnit(it.w, unit)} × {toUnit(it.h, unit)} {unit}
-                          </span>
-                        </div>
-                        
-                        {/* Copies stepper */}
-                        <div className="flex items-center space-x-1 shrink-0">
-                          <button 
-                            type="button"
-                            onClick={() => updateItemCopies(idx, Math.max(1, it.copies - 1))}
-                            className="w-5 h-5 bg-[#232936] hover:bg-[#2E3648] text-slate-300 rounded text-xs font-bold"
-                          >
-                            -
-                          </button>
-                          <span className="w-7 text-center font-mono font-bold text-xs text-white">
-                            {it.copies}
-                          </span>
-                          <button 
-                            type="button"
-                            onClick={() => updateItemCopies(idx, it.copies + 1)}
-                            className="w-5 h-5 bg-[#232936] hover:bg-[#2E3648] text-slate-300 rounded text-xs font-bold"
-                          >
-                            +
-                          </button>
-                        </div>
-
-                        <button 
-                          type="button"
-                          onClick={() => removeItem(idx)} 
-                          className="text-slate-400 hover:text-red-400 transition-colors p-1"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Essential Toggles */}
-              <div className="pt-2 border-t border-[#242A38] space-y-2">
-                <label className="flex items-center space-x-2.5 p-2 bg-[#131720] border border-[#2E3648] hover:border-emerald-600/50 rounded-lg cursor-pointer transition-colors">
-                  <input 
-                    type="checkbox" 
-                    checked={cropMarks} 
-                    onChange={(e) => setCropMarks(e.target.checked)} 
-                    className="rounded bg-[#181D27] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                  />
-                  <span className="text-xs font-semibold text-slate-200">Prepress Corner Crop Marks</span>
-                </label>
-
-                {mode === "Sheet" && (
-                  <label className="flex items-center space-x-2.5 p-2 bg-[#131720] border border-[#2E3648] hover:border-emerald-600/50 rounded-lg cursor-pointer transition-colors">
-                    <input 
-                      type="checkbox" 
-                      checked={uniformOrientation} 
-                      onChange={(e) => setUniformOrientation(e.target.checked)} 
-                      className="rounded bg-[#181D27] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                    />
-                    <span className="text-xs font-semibold text-slate-200">Guillotine Cut (Same Orientation)</span>
-                  </label>
-                )}
-
-                {/* Batch Bleed for Gang Run */}
-                {items.length > 0 && (() => {
-                  const anyBleed = items.some(it => (it.bleed_mode ?? 'none') !== 'none' && (it.bleed_mm ?? 0) > 0);
-                  const firstWithBleed = items.find(it => (it.bleed_mode ?? 'none') !== 'none' && (it.bleed_mm ?? 0) > 0) || items[0];
-                  const currentMode = firstWithBleed.bleed_mode === 'solid' ? 'solid' : 'mirror';
-                  const currentBleedMm = firstWithBleed.bleed_mm || 3.0;
-                  const currentColor = firstWithBleed.bleed_color || '#FFFFFF';
-
-                  return (
-                    <div className="p-2.5 bg-[#131720] border border-[#2E3648] rounded-lg space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center space-x-2.5 cursor-pointer">
-                          <input 
-                            type="checkbox" 
-                            checked={anyBleed} 
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setItems(prev => prev.map(it => ({
-                                ...it,
-                                bleed_mode: checked ? (it.bleed_mode === 'solid' ? 'solid' : 'mirror') : 'none',
-                                bleed_mm: checked ? (it.bleed_mm || 3.0) : 0,
-                                bleed_type: it.bleed_type || 'outside'
-                              })));
-                            }} 
-                            className="rounded bg-[#181D27] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                          />
-                          <span className="text-xs font-semibold text-slate-200">Bleed Extension</span>
-                        </label>
-
-                        {anyBleed && (
-                          <div className="flex items-center space-x-1">
-                            <input 
-                              type="number" 
-                              min="0.5" 
-                              max="20" 
-                              step="0.5"
-                              value={currentBleedMm} 
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setItems(prev => prev.map(it => ({ ...it, bleed_mm: val })));
-                              }} 
-                              className="w-12 text-xs font-mono font-bold bg-[#181D27] border border-[#2E3648] text-emerald-400 text-center rounded px-1 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                            <span className="text-[10px] text-slate-400 font-mono">mm</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {anyBleed && (
-                        <div className="space-y-2 pt-1 border-t border-[#242A38]">
-                          {/* Bleed Mode: Mirrored vs Solid Color */}
-                          <div>
-                            <span className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">Bleed Method</span>
-                            <div className="grid grid-cols-2 gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setItems(prev => prev.map(it => ({ ...it, bleed_mode: 'mirror' })));
-                                }}
-                                className={`text-[11px] py-1 px-2 rounded-md border font-medium flex items-center justify-center space-x-1 transition-colors ${
-                                  currentMode === 'mirror'
-                                    ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold'
-                                    : 'bg-[#181D27] text-slate-400 border-[#2E3648] hover:text-white'
-                                }`}
-                              >
-                                <span>🪞 Mirrored Edge</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setItems(prev => prev.map(it => ({ ...it, bleed_mode: 'solid' })));
-                                }}
-                                className={`text-[11px] py-1 px-2 rounded-md border font-medium flex items-center justify-center space-x-1 transition-colors ${
-                                  currentMode === 'solid'
-                                    ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold'
-                                    : 'bg-[#181D27] text-slate-400 border-[#2E3648] hover:text-white'
-                                }`}
-                              >
-                                <span>🎨 Solid Color</span>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Bleed Placement (Inside vs Outside) */}
-                          <div className="flex items-center justify-between text-xs pt-1">
-                            <span className="text-[10px] font-semibold text-slate-400 uppercase">Bleed Type</span>
-                            <div className="flex space-x-1">
-                              {(['outside', 'inside'] as const).map((bType) => {
-                                const currentType = firstWithBleed.bleed_type || 'outside';
-                                return (
-                                  <button
-                                    key={bType}
-                                    type="button"
-                                    onClick={() => {
-                                      setItems(prev => prev.map(it => ({ ...it, bleed_type: bType })));
-                                    }}
-                                    className={`text-[10px] px-2.5 py-1 rounded border transition-colors capitalize ${
-                                      currentType === bType
-                                        ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold'
-                                        : 'bg-[#181D27] text-slate-400 border-[#2E3648] hover:text-white'
-                                    }`}
-                                  >
-                                    {bType}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          {/* Color Picker & Eyedropper for Solid Bleed */}
-                          {currentMode === 'solid' && (
-                            <div className="flex items-center justify-between p-1.5 bg-[#181D27] rounded border border-[#2E3648]">
-                              <span className="text-[10px] text-slate-400 font-medium">Bleed Fill Color</span>
-                              <div className="flex items-center space-x-2">
-                                <input 
-                                  type="color" 
-                                  value={currentColor} 
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setItems(prev => prev.map(it => ({ ...it, bleed_color: val })));
-                                  }} 
-                                  className="w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent" 
-                                />
-                                <button 
-                                  type="button"
-                                  onClick={() => handleEyeDropper((c) => {
-                                    setItems(prev => prev.map(it => ({ ...it, bleed_color: c })));
-                                  })} 
-                                  className="p-1 hover:bg-[#2E3648] rounded text-slate-400 hover:text-emerald-400 transition-colors" 
-                                  title="Pick color from page"
-                                >
-                                  <Pipette size={13} />
-                                </button>
-                                <span className="text-[10px] text-slate-300 font-mono uppercase">
-                                  {currentColor}
-                                </span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Advanced Options Accordion */}
-              <div className="pt-1 border-t border-[#242A38]">
-                <button
-                  type="button"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="w-full flex items-center justify-between py-2 px-2.5 bg-[#131720] hover:bg-[#1A202C] border border-[#2E3648] rounded-lg text-xs font-semibold text-slate-300 transition-colors"
-                >
-                  <span className="flex items-center space-x-1.5">
-                    <Settings2 size={13} className="text-emerald-400" />
-                    <span>Advanced Options</span>
-                  </span>
-                  {showAdvanced ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-                </button>
-
-                {showAdvanced && (
-                  <div className="pt-2.5 space-y-3 bg-[#131720]/50 p-2.5 rounded-lg border border-[#242A38] mt-2">
-                    {/* Margins & Gaps */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <NumberControl 
-                        label={`Gripper (${unit})`} 
-                        value_mm={margin} 
-                        unit={unit} 
-                        min_mm={0} 
-                        max_mm={100} 
-                        step={unit === "cm" ? 0.25 : unit === "in" ? 0.1 : 2.5} 
-                        onChange={setMargin} 
-                      />
-                      <NumberControl 
-                        label={`Gutter Gap (${unit})`} 
-                        value_mm={gap} 
-                        unit={unit} 
-                        min_mm={0} 
-                        max_mm={50} 
-                        step={unit === "cm" ? 0.25 : unit === "in" ? 0.1 : 2.5} 
-                        onChange={setGap} 
-                      />
-                    </div>
-
-                    {/* Auto Rotate Sheet */}
-                    {mode === "Sheet" && (
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={autoRotateSheet} 
-                          onChange={(e) => setAutoRotateSheet(e.target.checked)} 
-                          className="rounded bg-[#131720] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                        />
-                        <span className="text-[11px] text-slate-300">Auto-Rotate Sheet for Max Yield</span>
-                      </label>
-                    )}
-
-                    {/* Sheet Alignment */}
-                    <div className="flex items-center justify-between text-xs pt-1 border-t border-[#242A38]">
-                      <span className="text-[10px] font-semibold text-slate-400 uppercase">Alignment</span>
-                      <div className="grid grid-cols-3 gap-1 w-14 bg-[#0B0F19] p-1 border border-[#2E3648] rounded">
-                        {["Top Left", "Top Center", "Top Right", "Left", "Center", "Right", "Bottom Left", "Bottom Center", "Bottom Right"].map(a => (
-                          <button
-                            key={a}
-                            type="button"
-                            title={a}
-                            onClick={() => setAlign(a)}
-                            className={`w-3 h-3 rounded-xs transition-colors border ${align === a ? 'bg-emerald-500 border-emerald-400' : 'bg-[#131720] border-[#2E3648]'}`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Cut Outline */}
-                    <div className="space-y-1 pt-1 border-t border-[#242A38]">
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={drawBorder} 
-                          onChange={(e) => setDrawBorder(e.target.checked)} 
-                          className="rounded bg-[#131720] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                        />
-                        <span className="text-[11px] text-slate-300">Show Cut Outline / Die-line</span>
-                      </label>
-                      {drawBorder && (
-                        <div className="flex items-center space-x-2 pl-5 pt-0.5">
-                          <input 
-                            type="color" 
-                            value={borderColor} 
-                            onChange={(e) => setBorderColor(e.target.value)} 
-                            className="w-5 h-5 rounded cursor-pointer border-0 p-0" 
-                          />
-                          <button 
-                            type="button"
-                            onClick={() => handleEyeDropper(setBorderColor)} 
-                            className="p-1 hover:bg-slate-700 rounded text-slate-400" 
-                            title="Pick color from screen"
-                          >
-                            <Pipette size={12} />
-                          </button>
-                          <span className="text-[10px] text-slate-400 font-mono uppercase">{borderColor}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-            </div>
-          )}
         </div>
 
         {/* Live Sheet Viewport (Dynamic sizing to match the sheet with room to pan) */}
