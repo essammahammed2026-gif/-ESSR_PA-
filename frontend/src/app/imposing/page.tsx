@@ -3,59 +3,33 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { 
-  Upload, 
-  Download, 
-  Loader2, 
-  Trash2, 
-  Link as LinkIcon, 
-  Unlink, 
-  ArrowRightLeft,
-  RotateCcw,
-  LayoutDashboard,
-    Scissors,
-  BookOpen,
-  ChevronDown,
-  ChevronUp,
-  Settings2,
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
-import { NumberControl, toUnit, toMm } from "@/components/imposing/controls";
 import { ImposingItem, ImpositionPreviewResponse } from "@/types/prepress";
 import { useImpositionState } from "@/hooks/useImpositionState";
 import { PreviewViewport } from "@/components/imposing/PreviewViewport";
+import { LeftAssetPanel } from "@/components/imposing/LeftAssetPanel";
+import { RightControlPanel } from "@/components/imposing/RightControlPanel";
 
-const BOOK_TRIM_PRESETS = [
-  { name: "A5 (148 × 210 mm)", w: 148, h: 210 },
-  { name: "A4 (210 × 297 mm)", w: 210, h: 297 },
-  { name: "B5 (176 × 250 mm)", w: 176, h: 250 },
-  { name: "Novel 6×9\" (152.4 × 228.6 mm)", w: 152.4, h: 228.6 },
-  { name: "Digest 5.5×8.5\" (139.7 × 215.9 mm)", w: 139.7, h: 215.9 },
-  { name: "Pocket (108 × 175 mm)", w: 108, h: 175 },
-];
+
 
 function ImposingStudioContent() {
   const {
     jobMode, setJobMode,
-    selectedBookIdx, setSelectedBookIdx,
     items, setItems,
     mode,
     autoRotateSheet,
     
-    unit, setUnit,
+    unit,
     sheetW, setSheetW,
     sheetH, setSheetH,
     sheetPreset, setSheetPreset,
     margin, setMargin,
     gap, setGap,
-    drawBorder, setDrawBorder,
-    borderColor, setBorderColor,
-    cropMarks, setCropMarks,
-    align, setAlign,
-    
-    uniformOrientation, setUniformOrientation,
-    showAdvanced, setShowAdvanced,
-    dbSheets
+    drawBorder,
+    borderColor,
+    cropMarks, setCropMarks, align, uniformOrientation,
   } = useImpositionState();
 
   const searchParams = useSearchParams();
@@ -109,14 +83,10 @@ function ImposingStudioContent() {
   const [isUploading, setIsUploading] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [isExportingSvg, setIsExportingSvg] = useState(false);
-  
   const [previewData, setPreviewData] = useState<ImpositionPreviewResponse | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [bookStep, setBookStep] = useState<1 | 2>(1);
-  
-
+  const bookStep = 2;
   useEffect(() => {
     if (!sheetPreset || sheetPreset === "custom") return;
     if (mode === "Sheet") {
@@ -197,54 +167,6 @@ function ImposingStudioContent() {
     }
   };
 
-
-  const updateItemFields = (idx: number, updates: Partial<ImposingItem>) => {
-    setItems(prev => {
-      const next = [...prev];
-      if (next[idx]) {
-        next[idx] = { ...next[idx], ...updates };
-      }
-      return next;
-    });
-  };
-
-  const updateItemField = <K extends keyof ImposingItem>(idx: number, field: K, val: ImposingItem[K]) => {
-    updateItemFields(idx, { [field]: val });
-  };
-
-  const updateItemSize = (idx: number, field: "w" | "h", valUnit: number) => {
-    const newItems = [...items];
-    const it = newItems[idx];
-    const mmVal = toMm(valUnit, unit);
-    if (field === "w") {
-      it.w = mmVal;
-      if (it.locked && it.ratio) it.h = mmVal / it.ratio;
-    } else {
-      it.h = mmVal;
-      if (it.locked && it.ratio) it.w = mmVal * it.ratio;
-    }
-    setItems(newItems);
-  };
-
-  const resetItemSize = (idx: number) => {
-    const newItems = [...items];
-    const it = newItems[idx];
-    if (it.original_w !== undefined && it.original_h !== undefined) {
-      it.w = it.original_w;
-      it.h = it.original_h;
-      it.ratio = it.original_w / it.original_h;
-      setItems(newItems);
-    }
-  };
-  
-  const toggleLock = (idx: number) => {
-    const newItems = [...items];
-    newItems[idx].locked = !newItems[idx].locked;
-    if (newItems[idx].locked) {
-      newItems[idx].ratio = newItems[idx].w / newItems[idx].h;
-    }
-    setItems(newItems);
-  };
   
   const removeItem = (idx: number) => {
     const newItems = [...items];
@@ -335,53 +257,6 @@ function ImposingStudioContent() {
     }
   };
 
-  const handleExportSvg = async () => {
-    if (items.length === 0 || !sheetW || !sheetH || sheetW <= 0 || sheetH <= 0) return;
-    setIsExportingSvg(true);
-    setError(null);
-    
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/imposing/export-svg`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items, 
-          job_mode: jobMode,
-          mode, 
-          sheet_w: sheetW, 
-          sheet_h: sheetH, 
-          margin, 
-          gap, 
-          draw_border: drawBorder, 
-          border_color: borderColor, 
-          crop_marks: cropMarks, 
-          align, 
-          auto_rotate_sheet: autoRotateSheet,
-          uniform_orientation: uniformOrientation,
-          page_index: currentPage
-        })
-      });
-      
-      if (!res.ok) throw new Error("SVG Export failed");
-      
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      const sheetSuffix = previewData && previewData.preview_pages && previewData.preview_pages.length > 1 
-        ? `_Sheet_${currentPage + 1}` 
-        : "";
-      link.download = `Imposed_Cut${sheetSuffix}_${Date.now()}.svg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch {
-      setError("Failed to export layered cut SVG.");
-    } finally {
-      setIsExportingSvg(false);
-    }
-  };
 
   // Debounced auto-preview (350ms)
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -397,724 +272,70 @@ function ImposingStudioContent() {
   }, [items, jobMode, mode, sheetW, sheetH, margin, gap, align, drawBorder, borderColor, cropMarks, autoRotateSheet, handlePreview]);
 
   return (
-    <div className="w-full space-y-3 pb-4">
-      {/* Compact Studio Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center space-x-2">
-            <LayoutDashboard className="text-emerald-400" size={20} />
-            <h1 className="text-base md:text-lg font-bold tracking-tight text-white">
-              Imposing Studio
-            </h1>
-          </div>
-
-          {/* Mode Switcher */}
-          <div className="flex bg-[#131720] p-0.5 rounded-lg border border-[#2E3648]">
-            <button 
-              type="button"
-              onClick={() => setJobMode("book")}
-              className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                jobMode === "book" 
-                  ? "bg-emerald-600 text-white shadow-sm" 
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <BookOpen size={13} />
-              <span>Book & Publication</span>
-            </button>
-            <button 
-              type="button"
-              onClick={() => setJobMode("gang")}
-              className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                jobMode === "gang" 
-                  ? "bg-emerald-600 text-white shadow-sm" 
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <LayoutDashboard size={13} />
-              <span>Gang Run & Stickers</span>
-            </button>
-          </div>
-
-          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
-            {jobMode === "book"
-              ? "Sequential publication layout with outward bleed & opposing page auto-alignment"
-              : "Auto-nesting layout engine for offset press sheets and wide-format rolls"}
-          </span>
-        </div>
-
-        <div className="flex items-center space-x-2 self-start lg:self-auto shrink-0">
-          <label className="cursor-pointer px-3.5 py-1.5 bg-[#131720] hover:bg-[#232936] text-emerald-400 border border-[#2E3648] hover:border-emerald-500/50 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm">
-            {isUploading ? <Loader2 className="animate-spin" size={14} /> : <Upload size={14} />}
-            <span>Add Artwork</span>
-            <input 
-              type="file" 
-              multiple
-              accept="image/*,application/pdf" 
-              className="hidden" 
-              onChange={handleFileUpload} 
-              disabled={isUploading}
-            />
-          </label>
-
-          <button 
-            onClick={handleExportSvg}
-            disabled={items.length === 0 || isExportingSvg}
-            className="px-3.5 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm disabled:opacity-40"
-            title="Export layered SVG for digital cutting plotters (Artwork + CutContour layers)"
-          >
-            {isExportingSvg ? <Loader2 className="animate-spin" size={14} /> : <Scissors size={14} />}
-            <span>Export Cut SVG</span>
-          </button>
-
-          <button 
-            onClick={handleExport}
-            disabled={items.length === 0 || isExporting}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm disabled:opacity-40"
-          >
-            {isExporting ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />}
-            <span>Export Print PDF</span>
-          </button>
-        </div>
+    <div className="flex flex-col h-[calc(100vh-2rem)] space-y-2">
+      {/* Top Header */}
+      <div className="flex items-center justify-between pb-2 border-b border-[#242A38]">
+         <div className="flex items-center space-x-2 text-sm text-slate-300">
+            <span className="text-blue-400 cursor-pointer">Hub</span>
+            <span className="text-slate-500">/</span>
+            <span className="font-semibold text-white">Imposition & PDF Studio</span>
+         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-3.5 items-start">
-        {/* Left Control Sidebar */}
-        <div className="w-full lg:w-[350px] xl:w-[370px] shrink-0 space-y-3">
-          
-            {/* =========================================================================
-               MODE A: BOOK & PUBLICATION IMPOSITION (De-cluttered & Operator-Friendly)
-               ========================================================================= */}
-            <div className="bg-[#181D27] p-3.5 rounded-xl border border-[#242A38] space-y-3.5 shadow-sm">
-              {/* Header */}
-              <div className="flex justify-between items-center pb-2 border-b border-[#242A38]">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-1.5">
-                  <BookOpen size={14} className="text-emerald-400" />
-                  <span>Publication Setup</span>
-                </span>
-                <select 
-                  value={unit} 
-                  onChange={(e) => setUnit(e.target.value)} 
-                  className="text-xs bg-[#131720] border border-[#2E3648] text-slate-300 rounded px-2 py-0.5 outline-none font-medium cursor-pointer"
-                >
-                  <option value="mm">mm</option>
-                  <option value="cm">cm</option>
-                  <option value="in">inch</option>
-                </select>
-              </div>
-
-              {/* 1. Document / Trim Size Section */}
-              {items.length === 0 ? (
-                <div className="p-5 bg-[#131720] border border-dashed border-[#2E3648] rounded-xl text-center space-y-2.5">
-                  <div className="w-10 h-10 rounded-full bg-emerald-950/60 border border-emerald-700/50 flex items-center justify-center mx-auto text-emerald-400">
-                    <BookOpen size={20} />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-200">No PDF Loaded</h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Upload a book PDF to impose sequential pages</p>
-                  </div>
-                  <label className="cursor-pointer inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm">
-                    <Upload size={13} />
-                    <span>Upload Book PDF</span>
-                    <input 
-                      type="file" 
-                      accept="application/pdf" 
-                      className="hidden" 
-                      onChange={handleFileUpload} 
-                      disabled={isUploading}
-                    />
-                  </label>
-                </div>
-              ) : (
-                (() => {
-                  const activeIdx = (selectedBookIdx < items.length && selectedBookIdx >= 0) ? selectedBookIdx : 0;
-                  const book = items[activeIdx];
-                  if (!book) return null;
-
-                  const currentBookPreset = BOOK_TRIM_PRESETS.find(
-                    p => Math.abs(p.w - book.w) < 0.5 && Math.abs(p.h - book.h) < 0.5
-                  )?.name || "custom";
-
-                  const hasBleed = (book.bleed_mode ?? 'none') !== 'none' && (book.bleed_mm ?? 0) > 0;
-
-                  return (
-                    <div className="space-y-3">
-                      {/* Book Switcher Tabs if multiple items */}
-                      {items.length > 1 && (
-                        <div className="flex gap-1 overflow-x-auto pb-1">
-                          {items.map((it, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => setSelectedBookIdx(idx)}
-                              className={`text-[10px] px-2 py-0.5 rounded font-medium truncate max-w-[120px] border transition-colors ${
-                                activeIdx === idx
-                                  ? "bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold"
-                                  : "bg-[#131720] text-slate-400 border-[#2E3648] hover:text-white"
-                              }`}
-                              title={it.name}
-                            >
-                              {it.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Step 1 vs Step 2 Stepper (Quiet Imposing style) */}
-                      <div className="flex rounded-lg bg-[#131720] p-1 border border-[#2E3648] gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setBookStep(1)}
-                          className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all ${
-                            bookStep === 1
-                              ? 'bg-emerald-600 text-white shadow-sm'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <span className="w-4 h-4 rounded-full bg-black/30 text-[10px] flex items-center justify-center font-mono">1</span>
-                          <span>Trim & Bleed</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBookStep(2)}
-                          className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all ${
-                            bookStep === 2
-                              ? 'bg-emerald-600 text-white shadow-sm'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <span className="w-4 h-4 rounded-full bg-black/30 text-[10px] flex items-center justify-center font-mono">2</span>
-                          <span>Sheet Impose</span>
-                        </button>
-                      </div>
-
-                      {/* Active File Box: Name, Pages, Original Size & Page Range */}
-                      <div className="p-2.5 bg-[#131720] border border-[#2E3648] rounded-lg space-y-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-semibold text-slate-200 truncate" title={book.name}>{book.name}</p>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-800/60 font-semibold">
-                                {book.page_count || 1} Pages (Sequential)
-                              </span>
-                              {book.original_w !== undefined && book.original_h !== undefined && (
-                                <span className="text-[10px] text-slate-400 font-mono">
-                                  Original: {toUnit(book.original_w, unit)} × {toUnit(book.original_h, unit)} {unit}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => removeItem(activeIdx)}
-                            className="text-slate-400 hover:text-red-400 transition-colors p-1 shrink-0"
-                            title="Remove Book"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-
-
-                        {/* Copies selector */}
-                        <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#242A38]">
-                          <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">Copies:</span>
-                          <div className="flex items-center space-x-1 shrink-0">
-                            <button 
-                              type="button"
-                              onClick={() => updateItemField(activeIdx, 'copies', Math.max(1, (book.copies || 1) - 1))}
-                              className="w-5 h-5 bg-[#232936] hover:bg-[#2E3648] text-slate-300 rounded text-xs font-bold"
-                            >
-                              -
-                            </button>
-                            <span className="w-7 text-center font-mono font-bold text-xs text-white">
-                              {book.copies || 1}
-                            </span>
-                            <button 
-                              type="button"
-                              onClick={() => updateItemField(activeIdx, 'copies', (book.copies || 1) + 1)}
-                              className="w-5 h-5 bg-[#232936] hover:bg-[#2E3648] text-slate-300 rounded text-xs font-bold"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                        {/* Page Range selector */}
-                        <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#242A38]">
-                          <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">Page Range:</span>
-                          <input 
-                            type="text" 
-                            value={book.page_range || "all"} 
-                            onChange={(e) => updateItemField(activeIdx, 'page_range', e.target.value)}
-                            placeholder="all or 1-16, 17-32"
-                            className="flex-1 text-xs font-mono bg-[#181D27] border border-[#2E3648] text-emerald-400 px-2 py-0.5 rounded outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => updateItemField(activeIdx, 'page_range', 'all')}
-                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
-                              (book.page_range === 'all' || !book.page_range) 
-                                ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-medium' 
-                                : 'bg-[#181D27] text-slate-400 border-[#2E3648] hover:text-white'
-                            }`}
-                          >
-                            All
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* =========================================================
-                          STEP 1: PAGE TRIM, FIT & BLEED EXTENSION
-                          ========================================================= */}
-                      {bookStep === 1 && (
-                        <div className="space-y-3">
-                          {/* Finished Book Trim Size */}
-                          <div className="space-y-1.5">
-                            <div className="flex justify-between items-center">
-                              <label className="block text-[11px] font-semibold text-slate-300">Finished Book Trim Size</label>
-                              {book.original_w !== undefined && book.original_h !== undefined && (
-                                <button
-                                  type="button"
-                                  onClick={() => resetItemSize(activeIdx)}
-                                  className="text-[9px] text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-1"
-                                  title="Reset trim dimensions to original PDF size"
-                                >
-                                  <RotateCcw size={9} />
-                                  <span>Reset</span>
-                                </button>
-                              )}
-                            </div>
-                            <select 
-                              value={currentBookPreset} 
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (val !== "custom") {
-                                  const p = BOOK_TRIM_PRESETS.find(item => item.name === val);
-                                  if (p) {
-                                    updateItemFields(activeIdx, { w: p.w, h: p.h, ratio: p.w / p.h });
-                                  }
-                                }
-                              }} 
-                              className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-2 rounded-lg outline-none cursor-pointer"
-                            >
-                              {BOOK_TRIM_PRESETS.map((p, pIdx) => (
-                                <option key={pIdx} value={p.name}>{p.name}</option>
-                              ))}
-                              <option value="custom">Custom Trim...</option>
-                            </select>
-
-                            {/* Inline W x H */}
-                            <div className="flex items-center gap-1.5">
-                              <div className="flex-1 flex items-center bg-[#131720] border border-[#2E3648] rounded-lg px-2 py-1">
-                                <span className="text-[10px] text-slate-400 mr-1 font-mono uppercase">W</span>
-                                <input 
-                                  type="number" 
-                                  value={toUnit(book.w, unit)} 
-                                  onChange={(e) => updateItemSize(activeIdx, "w", parseFloat(e.target.value) || 1)} 
-                                  className="w-full text-xs bg-transparent text-center text-white outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                                />
-                                <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                              </div>
-
-                              <button 
-                                type="button"
-                                onClick={() => toggleLock(activeIdx)} 
-                                className={`p-1.5 rounded-lg border transition-colors ${
-                                  book.locked 
-                                    ? "bg-emerald-950/60 border-emerald-700/60 text-emerald-400" 
-                                    : "bg-[#131720] border-[#2E3648] text-slate-500 hover:text-white"
-                                }`}
-                                title={book.locked ? "Aspect ratio locked" : "Aspect ratio unlocked"}
-                              >
-                                {book.locked ? <LinkIcon size={12}/> : <Unlink size={12}/>}
-                              </button>
-
-                              <div className="flex-1 flex items-center bg-[#131720] border border-[#2E3648] rounded-lg px-2 py-1">
-                                <span className="text-[10px] text-slate-400 mr-1 font-mono uppercase">H</span>
-                                <input 
-                                  type="number" 
-                                  value={toUnit(book.h, unit)} 
-                                  onChange={(e) => updateItemSize(activeIdx, "h", parseFloat(e.target.value) || 1)} 
-                                  className="w-full text-xs bg-transparent text-center text-white outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                                />
-                                <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                              </div>
-
-                              <button 
-                                type="button"
-                                onClick={() => {
-                                  updateItemFields(activeIdx, { w: book.h, h: book.w, ratio: book.h / book.w });
-                                }} 
-                                className="p-1.5 bg-[#232936] hover:bg-[#2E3648] rounded-lg text-slate-300 transition-colors border border-[#2E3648]" 
-                                title="Swap Trim Width / Height"
-                              >
-                                <ArrowRightLeft size={13} />
-                              </button>
-                            </div>
-
-                            {/* Content Fit Mode */}
-                            <div className="space-y-1 pt-1.5">
-                              <label className="text-[10px] font-semibold text-slate-400 uppercase block">Content Fit Mode</label>
-                              <div className="flex space-x-1">
-                                {(['stretch', 'fit', 'crop'] as const).map((fitMode) => (
-                                  <button
-                                    key={fitMode}
-                                    type="button"
-                                    onClick={() => updateItemFields(activeIdx, { fit_mode: fitMode, keep_aspect: fitMode === 'fit' })}
-                                    className={`flex-1 text-[10px] py-1 rounded border transition-colors font-medium capitalize ${
-                                      (book.fit_mode ?? 'stretch') === fitMode
-                                        ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold'
-                                        : 'bg-[#131720] text-slate-400 border-[#2E3648] hover:text-white'
-                                    }`}
-                                  >
-                                    {fitMode}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Auto-orient Landscape Pages */}
-                          <label className="flex items-start space-x-2.5 p-2 bg-[#131720] border border-[#2E3648] hover:border-emerald-600/50 rounded-lg cursor-pointer transition-colors">
-                            <input 
-                              type="checkbox" 
-                              checked={book.page_rotation === 'cw'} 
-                              onChange={(e) => updateItemField(activeIdx, 'page_rotation', e.target.checked ? 'cw' : 'none')}
-                              className="mt-0.5 rounded bg-[#181D27] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                            />
-                            <div className="text-xs">
-                              <span className="font-semibold text-slate-200 block">Auto-orient landscape pages</span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5 leading-snug">
-                                Turns landscape pages 90° CW to match book trim; portrait stays upright.
-                              </span>
-                            </div>
-                          </label>
-
-                          {/* Bleed Controls */}
-                          <div className="p-2.5 bg-[#131720] border border-[#2E3648] rounded-lg space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <label className="flex items-center space-x-2.5 cursor-pointer">
-                                <input 
-                                  type="checkbox" 
-                                  checked={hasBleed} 
-                                  onChange={(e) => {
-                                    updateItemFields(activeIdx, {
-                                      bleed_mode: e.target.checked ? (book.bleed_mode === 'solid' ? 'solid' : 'mirror') : 'none',
-                                      bleed_mm: e.target.checked ? (book.bleed_mm || 3.0) : 0,
-                                      bleed_type: book.bleed_type || 'outside'
-                                    });
-                                  }} 
-                                  className="rounded bg-[#181D27] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                                />
-                                <span className="text-xs font-semibold text-slate-200">Bleed Extension</span>
-                              </label>
-
-                              {hasBleed && (
-                                <div className="flex items-center space-x-1">
-                                  <input 
-                                    type="number" 
-                                    min="0.5" 
-                                    max="20" 
-                                    step="0.5"
-                                    value={book.bleed_mm || 3.0} 
-                                    onChange={(e) => updateItemField(activeIdx, 'bleed_mm', parseFloat(e.target.value) || 0)} 
-                                    className="w-12 text-xs font-mono font-bold bg-[#181D27] border border-[#2E3648] text-emerald-400 text-center rounded px-1 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                  />
-                                  <span className="text-[10px] text-slate-400 font-mono">mm</span>
-                                </div>
-                              )}
-                            </div>
-
-                            {hasBleed && (
-                              <div className="space-y-2 pt-1 border-t border-[#242A38]">
-                                <div>
-                                  <span className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">Bleed Method</span>
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => updateItemField(activeIdx, 'bleed_mode', 'mirror')}
-                                      className={`text-[11px] py-1 px-2 rounded-md border font-medium flex items-center justify-center space-x-1 transition-colors ${
-                                        (book.bleed_mode ?? 'mirror') === 'mirror'
-                                          ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold'
-                                          : 'bg-[#181D27] text-slate-400 border-[#2E3648] hover:text-white'
-                                      }`}
-                                    >
-                                      <span>🪞 Mirrored Edge</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => updateItemField(activeIdx, 'bleed_mode', 'solid')}
-                                      className={`text-[11px] py-1 px-2 rounded-md border font-medium flex items-center justify-center space-x-1 transition-colors ${
-                                        book.bleed_mode === 'solid'
-                                          ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold'
-                                          : 'bg-[#181D27] text-slate-400 border-[#2E3648] hover:text-white'
-                                      }`}
-                                    >
-                                      <span>🎨 Solid Color</span>
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center justify-between text-xs pt-1">
-                                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Bleed Type</span>
-                                  <div className="flex space-x-1">
-                                    {(['outside', 'inside'] as const).map((bType) => (
-                                      <button
-                                        key={bType}
-                                        type="button"
-                                        onClick={() => updateItemField(activeIdx, 'bleed_type', bType)}
-                                        className={`text-[10px] px-2.5 py-1 rounded border transition-colors capitalize ${
-                                          (book.bleed_type ?? 'outside') === bType
-                                            ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold'
-                                            : 'bg-[#181D27] text-slate-400 border-[#2E3648] hover:text-white'
-                                        }`}
-                                      >
-                                        {bType}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                {book.bleed_mode === 'solid' && (
-                                  <div className="flex items-center justify-between p-1.5 bg-[#181D27] rounded border border-[#2E3648]">
-                                    <span className="text-[10px] text-slate-400 font-medium">Bleed Fill Color</span>
-                                    <div className="flex items-center space-x-2">
-                                      <input 
-                                        type="color" 
-                                        value={book.bleed_color || '#FFFFFF'} 
-                                        onChange={(e) => updateItemField(activeIdx, 'bleed_color', e.target.value)} 
-                                        className="w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent" 
-                                      />
-                                      
-                                      <span className="text-[10px] text-slate-300 font-mono uppercase">
-                                        {book.bleed_color || '#FFFFFF'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Next Step Button */}
-                          <button
-                            type="button"
-                            onClick={() => setBookStep(2)}
-                            className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center space-x-2 transition-colors shadow-sm"
-                          >
-                            <span>Proceed to Step 2: Sheet Impose</span>
-                            <ArrowRightLeft size={13} />
-                          </button>
-                        </div>
-                      )}
-
-                      {/* =========================================================
-                          STEP 2: TARGET PRESS SHEET, MARKS & STEP & REPEAT
-                          ========================================================= */}
-                      {bookStep === 2 && (
-                        <div className="space-y-3">
-                          {/* Target Press Sheet Section */}
-                          <div className="space-y-1.5">
-                            <label className="block text-[11px] font-semibold text-slate-300">Target Press Sheet</label>
-                            <select 
-                              value={sheetPreset} 
-                              onChange={(e) => setSheetPreset(e.target.value)} 
-                              className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-2 rounded-lg outline-none cursor-pointer"
-                            >
-                              <option value="">-- Select a press sheet --</option>
-                              {(dbSheets.length > 0 ? dbSheets : [
-                                { name: "SRA3", width: 320, height: 450 },
-                                { name: "A3", width: 297, height: 420 },
-                                { name: "B2", width: 480, height: 650 },
-                                { name: "33×48 cm", width: 330, height: 480 },
-                                { name: "A4", width: 210, height: 297 }
-                              ]).map((s, idx) => (
-                                <option key={idx} value={`${s.width},${s.height}`}>
-                                  {s.name} ({s.width} × {s.height} mm)
-                                </option>
-                              ))}
-                              <option value="custom">Custom Dimensions...</option>
-                            </select>
-
-                            {/* Inline Sheet W x H */}
-                            <div className="flex items-center gap-1.5">
-                              <div className="flex-1 flex items-center bg-[#131720] border border-[#2E3648] rounded-lg px-2 py-1">
-                                <span className="text-[10px] text-slate-400 mr-1 font-mono uppercase">W</span>
-                                <input 
-                                  type="number" 
-                                  value={toUnit(sheetW, unit)} 
-                                  onChange={(e) => { 
-                                    setSheetPreset("custom"); 
-                                    setSheetW(toMm(parseFloat(e.target.value) || 1, unit)); 
-                                  }} 
-                                  className="w-full text-xs bg-transparent text-center text-white outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                                />
-                                <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                              </div>
-
-                              <button 
-                                type="button"
-                                onClick={() => { setSheetPreset("custom"); setSheetW(sheetH); setSheetH(sheetW); }} 
-                                className="p-1.5 bg-[#232936] hover:bg-[#2E3648] rounded-lg text-slate-300 transition-colors border border-[#2E3648]" 
-                                title="Rotate Press Sheet 90° (Swap W/H)"
-                              >
-                                <ArrowRightLeft size={13} />
-                              </button>
-
-                              <div className="flex-1 flex items-center bg-[#131720] border border-[#2E3648] rounded-lg px-2 py-1">
-                                <span className="text-[10px] text-slate-400 mr-1 font-mono uppercase">H</span>
-                                <input 
-                                  type="number" 
-                                  value={toUnit(sheetH, unit)} 
-                                  onChange={(e) => { 
-                                    setSheetPreset("custom"); 
-                                    setSheetH(toMm(parseFloat(e.target.value) || 1, unit)); 
-                                  }} 
-                                  className="w-full text-xs bg-transparent text-center text-white outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                                />
-                                <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Prepress Crop Marks */}
-                          <label className="flex items-center space-x-2.5 p-2 bg-[#131720] border border-[#2E3648] hover:border-emerald-600/50 rounded-lg cursor-pointer transition-colors">
-                            <input 
-                              type="checkbox" 
-                              checked={cropMarks} 
-                              onChange={(e) => setCropMarks(e.target.checked)} 
-                              className="rounded bg-[#181D27] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                            />
-                            <span className="text-xs font-semibold text-slate-200">Prepress Corner Crop Marks</span>
-                          </label>
-
-                          {/* Step 2 Advanced Tuning (Margins, Gutters, Alignment, Die-lines) */}
-                          <div>
-                            <button
-                              type="button"
-                              onClick={() => setShowAdvanced(!showAdvanced)}
-                              className="w-full flex items-center justify-between py-2 px-2.5 bg-[#131720] hover:bg-[#1A202C] border border-[#2E3648] rounded-lg text-xs font-semibold text-slate-300 transition-colors"
-                            >
-                              <span className="flex items-center space-x-1.5">
-                                <Settings2 size={13} className="text-emerald-400" />
-                                <span>Press Sheet Margins & Marks</span>
-                              </span>
-                              {showAdvanced ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-                            </button>
-
-                            {showAdvanced && (
-                              <div className="pt-2.5 space-y-3 bg-[#131720]/50 p-2.5 rounded-lg border border-[#242A38] mt-2">
-                                {/* Margins & Gaps */}
-                                <div className="grid grid-cols-2 gap-2">
-                                  <NumberControl 
-                                    label={`Gripper (${unit})`} 
-                                    value_mm={margin} 
-                                    unit={unit} 
-                                    min_mm={0} 
-                                    max_mm={100} 
-                                    step={unit === "cm" ? 0.25 : unit === "in" ? 0.1 : 2.5} 
-                                    onChange={setMargin} 
-                                  />
-                                  <NumberControl 
-                                    label={`Gutter Gap (${unit})`} 
-                                    value_mm={gap} 
-                                    unit={unit} 
-                                    min_mm={0} 
-                                    max_mm={50} 
-                                    step={unit === "cm" ? 0.25 : unit === "in" ? 0.1 : 2.5} 
-                                    onChange={setGap} 
-                                  />
-                                </div>
-
-                                {/* Polar / Guillotine cut checkbox */}
-                                <label className="flex items-center space-x-2 cursor-pointer">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={uniformOrientation} 
-                                    onChange={(e) => setUniformOrientation(e.target.checked)} 
-                                    className="rounded bg-[#131720] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                                  />
-                                  <span className="text-[11px] text-slate-300">Guillotine Cut (Same Orientation)</span>
-                                </label>
-
-                                {/* Sheet Alignment */}
-                                <div className="flex items-center justify-between text-xs pt-1 border-t border-[#242A38]">
-                                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Alignment</span>
-                                  <div className="grid grid-cols-3 gap-1 w-14 bg-[#0B0F19] p-1 border border-[#2E3648] rounded">
-                                    {["Top Left", "Top Center", "Top Right", "Left", "Center", "Right", "Bottom Left", "Bottom Center", "Bottom Right"].map(a => (
-                                      <button
-                                        key={a}
-                                        type="button"
-                                        title={a}
-                                        onClick={() => setAlign(a)}
-                                        className={`w-3 h-3 rounded-xs transition-colors border ${align === a ? 'bg-emerald-500 border-emerald-400' : 'bg-[#131720] border-[#2E3648]'}`}
-                                      />
-                                    ))}
-                                  </div>
-                                </div>
-
-                                {/* Cut Outline die-line */}
-                                <div className="space-y-1 pt-1 border-t border-[#242A38]">
-                                  <label className="flex items-center space-x-2 cursor-pointer">
-                                    <input 
-                                      type="checkbox" 
-                                      checked={drawBorder} 
-                                      onChange={(e) => setDrawBorder(e.target.checked)} 
-                                      className="rounded bg-[#131720] border-[#2E3648] text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-                                    />
-                                    <span className="text-[11px] text-slate-300">Show Cut Outline / Die-line</span>
-                                  </label>
-                                  {drawBorder && (
-                                    <div className="flex items-center space-x-2 pl-5 pt-0.5">
-                                      <input 
-                                        type="color" 
-                                        value={borderColor} 
-                                        onChange={(e) => setBorderColor(e.target.value)} 
-                                        className="w-5 h-5 rounded cursor-pointer border-0 p-0" 
-                                      />
-                                      
-                                      <span className="text-[10px] text-slate-400 font-mono uppercase">{borderColor}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Back to Step 1 */}
-                          <button
-                            type="button"
-                            onClick={() => setBookStep(1)}
-                            className="w-full py-1.5 px-3 bg-[#131720] hover:bg-[#1C2230] border border-[#2E3648] text-slate-300 rounded-lg text-xs font-medium transition-colors"
-                          >
-                            ← Back to Step 1: Trim & Bleed
-                          </button>
-                        </div>
-                      )}
-
-                    </div>
-                  );
-                })()
-              )}
-            </div>
+      <div className="flex-1 flex flex-col lg:flex-row gap-3 min-h-0">
+        {/* Left Panel */}
+        <div className="w-full lg:w-[280px] xl:w-[300px] shrink-0 h-full">
+           <LeftAssetPanel 
+             items={items}
+             handleFileUpload={handleFileUpload}
+             isUploading={isUploading}
+             removeItem={removeItem}
+           />
         </div>
 
-        {/* Live Sheet Viewport */}
-        <PreviewViewport
-          previewData={previewData}
-          items={items}
-          jobMode={jobMode}
-          bookStep={bookStep}
-          isPreviewing={isPreviewing}
-          sheetW={sheetW}
-          sheetH={sheetH}
-          margin={margin}
-          drawBorder={drawBorder}
-          borderColor={borderColor}
-          cropMarks={cropMarks}
-          error={error}
-          currentPage={currentPage}
-          setCurrentPage={setCurrentPage}
-        />
+        {/* Center Canvas */}
+        <div className="flex-1 h-full min-w-0">
+           <PreviewViewport
+             previewData={previewData}
+             items={items}
+             jobMode={jobMode}
+             bookStep={bookStep}
+             isPreviewing={isPreviewing}
+             sheetW={sheetW}
+             sheetH={sheetH}
+             margin={margin}
+             drawBorder={drawBorder}
+             borderColor={borderColor}
+             cropMarks={cropMarks}
+             error={error}
+             currentPage={currentPage}
+             setCurrentPage={setCurrentPage}
+           />
+        </div>
+
+        {/* Right Panel */}
+        <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 h-full overflow-y-auto">
+           <RightControlPanel
+              jobMode={jobMode}
+              setJobMode={setJobMode}
+              items={items}
+              sheetPreset={sheetPreset}
+              setSheetPreset={setSheetPreset}
+              sheetW={sheetW}
+              setSheetW={setSheetW}
+              sheetH={sheetH}
+              setSheetH={setSheetH}
+              unit={unit}
+              gap={gap}
+              setGap={setGap}
+              margin={margin}
+              setMargin={setMargin}
+              handleExport={handleExport}
+              isExporting={isExporting}
+              cropMarks={cropMarks}
+              setCropMarks={setCropMarks}
+           />
+        </div>
       </div>
     </div>
   );
