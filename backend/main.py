@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from settings_api import router as settings_router
 from imposing_api import router as imposing_router, _pregen_all_thumbnails
 from book_scan_api import router as book_scan_router
-from fastapi import UploadFile, File, Form, BackgroundTasks, HTTPException
+from fastapi import UploadFile, File, Form, BackgroundTasks, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import shutil
@@ -16,6 +16,7 @@ from engines.contour_engine import generate_contour_cut_svg, analyze_image_for_c
 from engines.flipbook_worker import generate_flipbook_task, generate_html_content, export_flipbook_task
 from engines.helpers import apply_print_binding_padding
 from engines.asset_inspector import analyze_universal_asset
+from engines.report_generator import generate_prepress_report_pdf
 import time
 from typing import List, Dict, Any
 
@@ -45,6 +46,7 @@ TASK_STATES: Dict[str, Any] = {}
 PROJECT_CACHE: Dict[str, Any] = {}
 CONTOUR_CACHE: Dict[str, str] = {}
 CONTOUR_PREVIEWS: Dict[str, str] = {}
+INSPECT_CACHE: Dict[str, Any] = {}
 CACHE_TIMESTAMPS: Dict[str, float] = {}
 
 CACHE_TTL_SECONDS = 7200  # 2 hours eviction window
@@ -56,6 +58,7 @@ def evict_stale_caches():
     for k in stale_keys:
         CACHE_TIMESTAMPS.pop(k, None)
         PROJECT_CACHE.pop(k, None)
+        INSPECT_CACHE.pop(k, None)
         TASK_STATES.pop(k, None)
         f_path = CONTOUR_CACHE.pop(k, None)
         if f_path and os.path.exists(f_path):
@@ -143,32 +146,129 @@ async def inspect_asset(file: UploadFile = File(...)):
     except Exception as e_thumb:
         print(f"Notice: thumbnail generation failed: {e_thumb}")
 
+    if "pages" in analysis and analysis["pages"]:
+        for page_item in analysis["pages"]:
+            p_num = page_item["page_num"]
+            page_item["thumb_url"] = f"/api/imposing/thumbnail/{full_file_id}/{p_num}"
+    else:
+        analysis["pages"] = [{
+            "page_num": 0,
+            "width_mm": analysis.get("width_mm", 0.0),
+            "height_mm": analysis.get("height_mm", 0.0),
+            "aspect_ratio": analysis.get("aspect_ratio", 1.0),
+            "thumb_url": f"/api/imposing/thumbnail/{full_file_id}/0"
+        }]
+
+    INSPECT_CACHE[full_file_id] = analysis
+    INSPECT_CACHE[file_id] = analysis
+
     return {
         "success": True,
         "analysis": analysis
     }
 
+@app.get("/api/inspect/report-pdf/{file_id}")
+async def get_report_pdf(file_id: str):
+    """
+    Generates and downloads an executive A4 Prepress Quality Audit Report PDF.
+    """
+    analysis = INSPECT_CACHE.get(file_id)
+    if not analysis:
+        # Check if file exists on disk and re-inspect
+        file_path = f"temp_uploads/{file_id}"
+        if not os.path.exists(file_path):
+            for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]:
+                if os.path.exists(f"temp_uploads/{file_id}{test_ext}"):
+                    file_path = f"temp_uploads/{file_id}{test_ext}"
+                    break
+        if os.path.exists(file_path):
+            analysis = analyze_universal_asset(file_path, os.path.basename(file_path))
+            INSPECT_CACHE[file_id] = analysis
+
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analyzed asset not found")
+
+    pdf_bytes = generate_prepress_report_pdf(analysis)
+    safe_name = os.path.splitext(analysis.get("filename", "Artwork"))[0].replace(" ", "_")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="Prepress_Audit_Report_{safe_name}.pdf"'
+        }
+    )
+
+@app.post("/api/inspect/export-report-pdf")
+async def export_report_pdf(request: Request):
+    """
+    Exports an executive PDF Prepress Report from client-provided analysis payload or cached ID.
+    """
+    data = await request.json()
+    analysis = data.get("analysis")
+    if not analysis and "file_id" in data:
+        fid = data["file_id"]
+        analysis = INSPECT_CACHE.get(fid)
+        if not analysis:
+            file_path = f"temp_uploads/{fid}"
+            if os.path.exists(file_path):
+                analysis = analyze_universal_asset(file_path, os.path.basename(file_path))
+
+    if not analysis:
+        raise HTTPException(status_code=400, detail="Missing analysis data for PDF report generation")
+
+    pdf_bytes = generate_prepress_report_pdf(analysis)
+    safe_name = os.path.splitext(analysis.get("filename", "Artwork"))[0].replace(" ", "_")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="Prepress_Audit_Report_{safe_name}.pdf"'
+        }
+    )
+
 @app.post("/api/preflight")
-async def analyze_pdfs(files: List[UploadFile] = File(...)):
+async def analyze_pdfs(
+    files: List[UploadFile] = File(default=[]),
+    existing_file_id: str = Form(None)
+):
     saved_paths = []
+    to_delete = []
     try:
-        for file in files:
-            file_path = f"temp_uploads/{file.filename}"
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            saved_paths.append(file_path)
+        if files:
+            for file in files:
+                file_path = f"temp_uploads/{file.filename}"
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                saved_paths.append(file_path)
+                to_delete.append(file_path)
+        elif existing_file_id:
+            file_path = f"temp_uploads/{existing_file_id}"
+            if not os.path.exists(file_path):
+                for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]:
+                    if os.path.exists(f"temp_uploads/{existing_file_id}{test_ext}"):
+                        file_path = f"temp_uploads/{existing_file_id}{test_ext}"
+                        break
+            if os.path.exists(file_path):
+                saved_paths.append(file_path)
+
+        if not saved_paths:
+            raise HTTPException(status_code=400, detail="No files provided for preflight")
             
         result = run_preflight(saved_paths)
         return result
     finally:
-        for path in saved_paths:
+        for path in to_delete:
             if os.path.exists(path):
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
 @app.post("/api/flipbook")
 async def create_flipbook(
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] = File(default=[]),
+    existing_file_id: str = Form(None),
     dpi: int = Form(101),
     eco_mode: bool = Form(False),
     direction: str = Form("Left to Right (LTR)"),
@@ -183,11 +283,24 @@ async def create_flipbook(
     saved_paths = []
     task_id = str(uuid.uuid4())[:12]
     
-    for file in files:
-        file_path = f"temp_uploads/{task_id}_{file.filename}"
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        saved_paths.append(file_path)
+    if files:
+        for file in files:
+            file_path = f"temp_uploads/{task_id}_{file.filename}"
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            saved_paths.append(file_path)
+    elif existing_file_id:
+        file_path = f"temp_uploads/{existing_file_id}"
+        if not os.path.exists(file_path):
+            for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]:
+                if os.path.exists(f"temp_uploads/{existing_file_id}{test_ext}"):
+                    file_path = f"temp_uploads/{existing_file_id}{test_ext}"
+                    break
+        if os.path.exists(file_path):
+            saved_paths.append(file_path)
+
+    if not saved_paths:
+        raise HTTPException(status_code=400, detail="No files provided for flipbook")
         
     output_filename = f"flipbook_{task_id}.html"
     output_path = f"public_flipbooks/{output_filename}"
@@ -467,9 +580,8 @@ def shutdown_app():
     def _delayed_exit():
         time.sleep(0.5)
         # Cleanly stop systemd services and any background workers
-        os.system("systemctl --user stop flint-backend flint-celery flint-frontend 2>/dev/null || true")
+        os.system("systemctl --user stop flint-backend flint-frontend 2>/dev/null || true")
         os.system("pkill -9 -f 'uvicorn.*8000' 2>/dev/null || true")
-        os.system("pkill -9 -f 'celery -A celery_app worker' 2>/dev/null || true")
         os.system("pkill -9 -f 'next-server' 2>/dev/null || true")
         os.system("pkill -9 -f 'next dev' 2>/dev/null || true")
         try:

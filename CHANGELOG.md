@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Bug Fixes**:
+  - **Asset Ingest Cache NameError**: Defined [`INSPECT_CACHE`](backend/main.py#L49) in [`main.py`](backend/main.py) and added it to cache eviction pruning. Resolved an unhandled 500 `NameError: name 'INSPECT_CACHE' is not defined` on `POST /api/inspect` that caused browsers (specifically Zen Browser / Firefox) to drop CORS headers and fail file uploads with `TypeError: NetworkError when attempting to fetch resource`.
+
+- **Home Rework & Granular Prepress Audit Report**:
+  - **Simplified Home Dashboard**: Renamed the triage hub to **Home**, removed superfluous marketing copy, streamlined the dropzone, and integrated active progress bars during asset analysis and studio launch.
+  - **Sidebar Logo Toggle & Breadcrumb Fixes**: Removed the burger menu icon in [`layout.tsx`](frontend/src/app/layout.tsx) so clicking the Flint logo directly opens and closes the sidebar. Replaced unlinked breadcrumb headers across all studio workspaces with functional `<Link href="/">Home</Link>` paths.
+  - **Master/Detail Prepress Audit Report**: Implemented a side-by-side inspection layout in [`page.tsx`](frontend/src/app/page.tsx). Left panel displays asset thumbnail, specifications, and instant preloaded studio launchers. Right panel displays an itemized technical audit checklist:
+    - **Page Geometry & Trim Uniformity**: Itemizes exact page ranges for each dimension group (e.g. Pages 1–10: 210 × 297 mm A4, Page 11: 420 × 297 mm A3).
+    - **Image Resolution (DPI)**: Scans every embedded image across all pages, itemizing exact page numbers, DPI values, and pixel dimensions for images below 300 DPI.
+    - **Bleed Margins & TrimBox**: Checks TrimBox vs BleedBox, reports detected bleed in millimeters, and lists all page numbers lacking bleed margins.
+    - **Color Space & Separation**: Identifies primary colorspace, reports RGB page numbers needing CMYK plate conversion, and lists spot colors.
+  - **Executive PDF Report Export**: Added [`engines/report_generator.py`](backend/engines/report_generator.py) and backend routes (`GET /api/inspect/report-pdf/{file_id}`, `POST /api/inspect/export-report-pdf`), allowing operators to generate and download a printable, executive-ready A4 PDF Prepress Quality Audit Report to send to clients or team members.
+  - **Instant Studio Preloading**: Pre-passes analyzed artwork parameters and IDs across all studios (Imposing, Contour, Book Studio, Flipbook, Preflight) to eliminate redundant uploads and duplicate processing bars.
+
+- **Icon-Only Collapsed Sidebar & Typography Upgrade**:
+  - **Collapsed Icon Rail by Default**: Reconfigured [`layout.tsx`](frontend/src/app/layout.tsx) sidebar to initialize in collapsed icon-rail mode (`w-14`), expanding the available workspace canvas.
+  - **Instant Studio Tooltips on Hover**: Added floating hover tooltips with directional pointer carets for all studios, settings, and shutdown actions, displaying the studio name cleanly without canvas jitter.
+  - **Flattened Studio Hierarchy**: Removed categorical grouping headers (`Overview`, `Prepress & Ingest`, `Production & Finishing`, `Digital Proofing`) in favor of a single unified studio list.
+  - **Removed Tag Noise**: Stripped all decorative badge tags (`SVG`, `PDF`, `Bleed`, `Gang`) from sidebar items, retaining pure studio names.
+  - **Space-Efficient Typography**: Switched typeface to **Roboto** (weights 300, 400, 500, 700) with `-0.012em` letter tracking in [`globals.css`](frontend/src/app/globals.css), creating clean vertical proportions and compact horizontal footprint across prepress controls and data fields.
+
+- **Granular Page-Level Imposition & Deck Manipulation**:
+  - **Data Models**: Introduced [`ImposingPage`](frontend/src/types/prepress.ts), `ImposingPageMeta`, and `ImposingUploadResponse` in `types/prepress.ts`.
+  - **Thumbnail & Page Metadata Ingestion**: Updated `analyze_universal_asset` in `engines/asset_inspector.py`, `POST /api/inspect`, and `POST /api/imposing/upload` in `imposing_api.py` to extract and return per-page dimensions, aspect ratios, and thumbnail URLs. Added `GET /api/imposing/pages/{file_id}` for instant on-demand page retrieval.
+  - **Interactive Page Deck (`LeftAssetPanel`)**: Replaced placeholder chips with live thumbnail cards supporting drag-and-drop reordering, per-page rotation (90° CW/CCW), exclusion/inclusion toggling, page duplication, and real-time active count indicators.
+  - **State & Packer Integration**: Implemented `reorderPages`, `rotatePage`, `toggleDeletePage`, `duplicatePage`, and `getItemsForLayout()` in `useImpositionState` and `page.tsx`, directly feeding page order and rotations into the 2D packing engine and debounced sheet preview.
+  - **Prepress Marks Integration**: Wired registration marks (`regMarks`) across [`RightControlPanel`](frontend/src/components/imposing/RightControlPanel.tsx), [`PreviewViewport`](frontend/src/components/imposing/PreviewViewport.tsx), and backend PDF/SVG export engines (`SheetGangExporter.export_pdf` and `export_svg`).
+  - **Manual Rows × Columns Override**: Added interactive manual grid controls (`rows`, `cols`) with an Auto-Fit toggle in [`RightControlPanel`](frontend/src/components/imposing/RightControlPanel.tsx). Integrated the grid override into `MaxRectsSheetPacker.pack_sheets` in [`backend/engines/sheet_packer.py`](backend/engines/sheet_packer.py), allowing operators to lock explicit grid layouts alongside auto-packing. Wired parameters across `ImposingRequest` in [`imposing_api.py`](backend/imposing_api.py) and debounced preview/export triggers.
+
 - **Imposing Studio UI Refactor**:
   - Unified Book and Gang mode control logic in `page.tsx` into a single shared interface.
   - Replaced the custom EyeDropper `<canvas>` polyfill with the native HTML5 `<input type="color">` picker, removing over 50 lines of fallback code and leveraging native GTK/Windows pickers.

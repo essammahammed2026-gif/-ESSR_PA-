@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { 
   FileCheck, 
   Upload, 
@@ -27,11 +28,40 @@ interface PreflightData {
   low_dpi_warnings: number;
 }
 
-export default function PreflightCenterPage() {
+function PreflightCenterContent() {
+  const searchParams = useSearchParams();
   const [files, setFiles] = useState<File[]>([]);
   const [result, setResult] = useState<PreflightData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Preload file if routed from Home
+  useEffect(() => {
+    const fileIdParam = searchParams.get("file_id");
+    if (fileIdParam && !result && !loading) {
+      setLoading(true);
+      setError(null);
+      const formData = new FormData();
+      formData.append("existing_file_id", fileIdParam);
+
+      fetch(`${API_BASE_URL}/api/preflight`, {
+        method: "POST",
+        body: formData,
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            setResult(data.data);
+          } else {
+            setError(data.error || "Preflight analysis failed.");
+          }
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Network error during preflight");
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [searchParams, result, loading]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -103,12 +133,19 @@ export default function PreflightCenterPage() {
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-4 pb-6">
+      {/* Breadcrumb Header */}
+      <div className="flex items-center space-x-2 text-xs text-slate-400 pb-1">
+        <Link href="/" className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors">Home</Link>
+        <span>/</span>
+        <span className="text-white font-medium">Preflight Studio</span>
+      </div>
+
       {/* Compact Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
         <div className="flex items-center space-x-2.5">
           <FileCheck className="text-blue-400" size={20} />
           <h1 className="text-base md:text-lg font-bold tracking-tight text-white">
-            PDF Preflight Center
+            Preflight Studio
           </h1>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-700/50">
             ISO 12647
@@ -323,5 +360,13 @@ export default function PreflightCenterPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function PreflightCenterPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-xs text-slate-400">Loading Preflight Studio...</div>}>
+      <PreflightCenterContent />
+    </Suspense>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, Suspense } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { 
   RotateCw, 
@@ -258,6 +259,13 @@ function BookStudioContent() {
 
   return (
     <div className="w-full space-y-3 pb-4">
+      {/* Breadcrumb Header */}
+      <div className="flex items-center space-x-2 text-xs text-slate-400 pb-1">
+        <Link href="/" className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors">Home</Link>
+        <span>/</span>
+        <span className="text-white font-medium">Book Studio</span>
+      </div>
+
       {/* Compact Studio Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center space-x-2.5">

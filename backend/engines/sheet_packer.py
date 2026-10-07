@@ -93,7 +93,9 @@ class MaxRectsSheetPacker:
         artworks: List[SheetArtworkSpec],
         allow_rotation: bool = True,
         uniform_orientation: bool = True,
-        job_mode: str = "gang"
+        job_mode: str = "gang",
+        rows: int = 0,
+        cols: int = 0
     ) -> List[SingleSheetResult]:
         usable_x = margin_l_mm
         usable_y = margin_t_mm
@@ -170,6 +172,80 @@ class MaxRectsSheetPacker:
 
         sheets_results: List[SingleSheetResult] = []
         sheet_index = 1
+
+        # MANUAL ROWS x COLUMNS GRID OVERRIDE
+        # If user explicitly specifies rows > 0 or cols > 0, generate a strict grid layout
+        if (rows and rows > 0) or (cols and cols > 0):
+            req_cols = max(1, cols) if (cols and cols > 0) else None
+            req_rows = max(1, rows) if (rows and rows > 0) else None
+
+            sample_w = unplaced_items[0]["w"]
+            sample_h = unplaced_items[0]["h"]
+
+            # Compute unspecified dimension from sheet bounds if only one is specified
+            eff_gap = gap_mm
+            if req_cols is None:
+                req_cols = max(1, int((usable_w + eff_gap) // (sample_w + eff_gap))) if (sample_w + eff_gap) > 0 else 1
+            if req_rows is None:
+                req_rows = max(1, int((usable_h + eff_gap) // (sample_h + eff_gap))) if (sample_h + eff_gap) > 0 else 1
+
+            capacity_per_sheet = req_cols * req_rows
+            total_items = len(unplaced_items)
+            curr_idx = 0
+
+            while curr_idx < total_items:
+                chunk = unplaced_items[curr_idx:curr_idx + capacity_per_sheet]
+                chunk_placed: List[PlacedSheetItem] = []
+
+                for idx_in_sheet, itm in enumerate(chunk):
+                    r_idx = idx_in_sheet // req_cols
+                    c_idx = idx_in_sheet % req_cols
+
+                    cell_x = usable_x + c_idx * (itm["w"] + gap_mm)
+                    cell_y = usable_y + r_idx * (itm["h"] + gap_mm)
+
+                    chunk_placed.append(PlacedSheetItem(
+                        item_id=itm["item_id"],
+                        name=itm["name"],
+                        sheet_index=sheet_index,
+                        x_mm=cell_x,
+                        y_mm=cell_y,
+                        w_mm=itm["w"],
+                        h_mm=itm["h"],
+                        rotated=bool(itm.get("forced_rot")),
+                        pdf_path=itm["pdf_path"],
+                        shape_type=itm["shape_type"],
+                        keep_aspect=itm["keep_aspect"],
+                        fill_color=itm["fill_color"],
+                        page_num=itm.get("page_num", 0),
+                        file_id=itm.get("file_id", ""),
+                        fit_mode=itm.get("fit_mode", "stretch"),
+                        page_rotation=itm.get("page_rotation", "none"),
+                        bleed_mode=itm.get("bleed_mode", "none"),
+                        bleed_mm=itm.get("bleed_mm", 0.0),
+                        bleed_color=itm.get("bleed_color", "#FFFFFF"),
+                        bleed_type=itm.get("bleed_type", "inside"),
+                        target_w_mm=itm.get("target_w_mm", 0.0),
+                        target_h_mm=itm.get("target_h_mm", 0.0),
+                    ))
+
+                used_area = sum((p.w_mm * p.h_mm) for p in chunk_placed) / 1000000.0
+                total_sheet_area = (sheet_w_mm * sheet_h_mm) / 1000000.0
+                eff = (used_area / total_sheet_area) * 100.0 if total_sheet_area > 0 else 0.0
+
+                sheets_results.append(SingleSheetResult(
+                    sheet_index=sheet_index,
+                    sheet_w_mm=sheet_w_mm,
+                    sheet_h_mm=sheet_h_mm,
+                    placed_items=chunk_placed,
+                    used_area_m2=used_area,
+                    efficiency_pct=eff
+                ))
+
+                curr_idx += capacity_per_sheet
+                sheet_index += 1
+
+            return sheets_results
 
         # FAST PATH FOR BOOK IMPOSITION:
         # In book mode, all pages have identical target trim dimensions and are placed sequentially.

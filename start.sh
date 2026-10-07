@@ -14,7 +14,6 @@ RUN_DIR="$PROJECT_DIR/.run"
 mkdir -p "$RUN_DIR"
 
 BACKEND_PID_FILE="$RUN_DIR/backend.pid"
-CELERY_PID_FILE="$RUN_DIR/celery.pid"
 FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
 
 is_backend_running() {
@@ -54,13 +53,7 @@ start_services() {
     echo "Starting Flint Prepress Studio..."
     command -v notify-send >/dev/null 2>&1 && notify-send -i flint "Flint" "Starting Prepress Studio..." || true
 
-    # 1. Redis
-    if ! redis-cli ping >/dev/null 2>&1; then
-        echo "=> Starting Redis server..."
-        redis-server --daemonize yes 2>/dev/null || true
-    fi
-
-    # 2. Backend
+    # 1. Backend
     if ! is_backend_running; then
         echo "=> Starting Backend API (Port 8000)..."
         systemctl --user stop flint-backend 2>/dev/null || true
@@ -69,14 +62,7 @@ start_services() {
         systemd-run --user --unit=flint-backend bash -c "cd '$PROJECT_DIR/backend' && source .venv/bin/activate && exec uvicorn main:app --reload --host 0.0.0.0 --port 8000" >/dev/null 2>&1
     fi
 
-    # 3. Celery Worker
-    if [ ! -f "$CELERY_PID_FILE" ] || ! kill -0 "$(cat "$CELERY_PID_FILE" 2>/dev/null)" 2>/dev/null; then
-        echo "=> Starting Celery Worker..."
-        systemctl --user stop flint-celery 2>/dev/null || true
-        systemd-run --user --unit=flint-celery bash -c "cd '$PROJECT_DIR/backend' && source .venv/bin/activate && exec celery -A celery_app worker --concurrency=2 --loglevel=info" >/dev/null 2>&1
-    fi
-
-    # 4. Frontend
+    # 2. Frontend
     if ! is_frontend_running; then
         echo "=> Starting Frontend UI (Port 3000)..."
         systemctl --user stop flint-frontend 2>/dev/null || true
@@ -103,11 +89,10 @@ stop_services() {
     echo "Stopping Flint services..."
     command -v notify-send >/dev/null 2>&1 && notify-send -i flint "Flint" "Shutting down services..." || true
 
-    systemctl --user stop flint-backend flint-celery flint-frontend 2>/dev/null || true
+    systemctl --user stop flint-backend flint-frontend 2>/dev/null || true
 
     # Cleanup any lingering processes on ports 8000 and 3000
     pkill -f "uvicorn main:app.*8000" 2>/dev/null || true
-    pkill -f "celery -A celery_app worker" 2>/dev/null || true
     pkill -f "next-server" 2>/dev/null || true
     pkill -f "next dev" 2>/dev/null || true
 
@@ -142,7 +127,6 @@ case "$1" in
         echo "=== Flint Status ==="
         echo -n "Backend  (8000): " && (is_backend_running && echo "ONLINE" || echo "OFFLINE")
         echo -n "Frontend (3000): " && (is_frontend_running && echo "ONLINE" || echo "OFFLINE")
-        echo -n "Redis    (6379): " && (redis-cli ping >/dev/null 2>&1 && echo "ONLINE" || echo "OFFLINE")
         ;;
     *)
         # Default foreground mode (like classic ./start.sh)

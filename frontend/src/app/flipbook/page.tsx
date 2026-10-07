@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { 
   BookOpen, 
   Loader2, 
@@ -14,7 +16,8 @@ import {
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
-export default function FlipbookStudio() {
+function FlipbookStudioContent() {
+  const searchParams = useSearchParams();
   const [files, setFiles] = useState<File[]>([]);
   const [numPages, setNumPages] = useState<number>(0);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -32,6 +35,43 @@ export default function FlipbookStudio() {
   const [magPadChoice, setMagPadChoice] = useState("At the very end");
   const [addFlyleaves, setAddFlyleaves] = useState(false);
   const [pageRange, setPageRange] = useState("");
+
+  // Preload file if routed from Home
+  useEffect(() => {
+    const fileIdParam = searchParams.get("file_id");
+    if (fileIdParam && !taskId && !isGenerating && !resultUrl) {
+      setIsGenerating(true);
+      setProgress(15);
+      setStatusMsg("Loading preloaded artwork into 3D Flipbook engine...");
+      const formData = new FormData();
+      formData.append("existing_file_id", fileIdParam);
+      formData.append("dpi", "72");
+      formData.append("direction", direction);
+      formData.append("binding_style", bindingStyle);
+      formData.append("bg_texture", "Dark Mode");
+      formData.append("mag_pad_choice", "At the very end");
+      formData.append("add_flyleaves", "false");
+      formData.append("export_mode", "Folder Assets (Ultra-Fast & Light HTML)");
+
+      fetch(`${API_BASE_URL}/api/flipbook`, {
+        method: "POST",
+        body: formData,
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.task_id) {
+            setTaskId(data.task_id);
+          } else {
+            setError(data.error || "Failed to initialize flipbook.");
+            setIsGenerating(false);
+          }
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Error initializing flipbook");
+          setIsGenerating(false);
+        });
+    }
+  }, [searchParams, taskId, isGenerating, resultUrl, direction, bindingStyle]);
 
   // Export Modal State
   const [showExportModal, setShowExportModal] = useState(false);
@@ -309,6 +349,13 @@ export default function FlipbookStudio() {
 
   return (
     <div className="w-full space-y-3 pb-4">
+      {/* Breadcrumb Header */}
+      <div className="flex items-center space-x-2 text-xs text-slate-400 pb-1">
+        <Link href="/" className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors">Home</Link>
+        <span>/</span>
+        <span className="text-white font-medium">Flipbook Studio</span>
+      </div>
+
       {/* Compact Studio Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
         <div className="flex items-center space-x-2.5">
@@ -640,5 +687,13 @@ export default function FlipbookStudio() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function FlipbookStudio() {
+  return (
+    <Suspense fallback={<div className="p-6 text-xs text-slate-400">Loading Flipbook Studio...</div>}>
+      <FlipbookStudioContent />
+    </Suspense>
   );
 }

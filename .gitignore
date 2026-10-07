@@ -43,3 +43,12 @@ Thumbs.db
 *.avif
 dump.rdb
 .run/
+test_material/
+
+# Rust / Tauri
+**/target/
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+frontend/src-tauri/binaries/*
+!frontend/src-tauri/binaries/.gitkeep
+

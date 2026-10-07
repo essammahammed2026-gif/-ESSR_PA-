@@ -24,6 +24,13 @@ interface RightControlPanelProps {
   isExporting: boolean;
   cropMarks: boolean;
   setCropMarks: (c: boolean) => void;
+  regMarks: boolean;
+  setRegMarks: (r: boolean) => void;
+  rows?: number | null;
+  setRows?: (r: number | null) => void;
+  cols?: number | null;
+  setCols?: (c: number | null) => void;
+  handlePreview?: () => void;
 }
 
 export function RightControlPanel({
@@ -42,7 +49,14 @@ export function RightControlPanel({
   handleExport,
   isExporting,
   cropMarks,
-  setCropMarks
+  setCropMarks,
+  regMarks,
+  setRegMarks,
+  rows,
+  setRows,
+  cols,
+  setCols,
+  handlePreview
 }: RightControlPanelProps) {
 
   // For the manual rows/cols vs auto, we'll mock the rows/cols for now as read-only or auto
@@ -121,20 +135,60 @@ export function RightControlPanel({
       <div className="bg-[#181D27] rounded-xl border border-[#242A38] p-3 shadow-sm space-y-3">
         <div className="flex justify-between items-center border-b border-[#242A38] pb-2">
            <div className="text-xs font-bold text-slate-300">Layout & Grid</div>
-           <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-800/50">Auto-Fit Active</span>
+           <button 
+             type="button"
+             onClick={() => {
+               if (rows || cols) {
+                 setRows?.(null);
+                 setCols?.(null);
+               } else {
+                 setRows?.(2);
+                 setCols?.(2);
+               }
+             }}
+             className={`text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+               !rows && !cols
+                 ? "text-emerald-400 bg-emerald-950/50 border-emerald-800/50 hover:bg-emerald-900/50"
+                 : "text-amber-400 bg-amber-950/50 border-amber-800/50 hover:bg-amber-900/50"
+             }`}
+           >
+             {!rows && !cols ? "Auto-Fit Active" : "Manual Grid Locked"}
+           </button>
         </div>
         
-        <div className="flex items-center justify-between opacity-50 pointer-events-none">
+        <div className="flex items-center justify-between">
           <label className="text-xs text-slate-300">Rows</label>
-          <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded px-2 py-1 w-16">
-            <input type="number" value={2} readOnly className="w-full bg-transparent text-white text-xs text-right outline-none" />
+          <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded px-2 py-1 w-20">
+            <input 
+              type="number" 
+              min={1}
+              max={50}
+              placeholder="Auto"
+              value={rows ?? ""} 
+              onChange={(e) => {
+                const val = e.target.value === "" ? null : Math.max(1, parseInt(e.target.value, 10) || 1);
+                setRows?.(val);
+              }}
+              className="w-full bg-transparent text-white text-xs text-right outline-none placeholder:text-slate-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+            />
           </div>
         </div>
 
-        <div className="flex items-center justify-between opacity-50 pointer-events-none">
+        <div className="flex items-center justify-between">
           <label className="text-xs text-slate-300">Columns</label>
-          <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded px-2 py-1 w-16">
-            <input type="number" value={4} readOnly className="w-full bg-transparent text-white text-xs text-right outline-none" />
+          <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded px-2 py-1 w-20">
+            <input 
+              type="number" 
+              min={1}
+              max={50}
+              placeholder="Auto"
+              value={cols ?? ""} 
+              onChange={(e) => {
+                const val = e.target.value === "" ? null : Math.max(1, parseInt(e.target.value, 10) || 1);
+                setCols?.(val);
+              }}
+              className="w-full bg-transparent text-white text-xs text-right outline-none placeholder:text-slate-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+            />
           </div>
         </div>
 
@@ -192,7 +246,12 @@ export function RightControlPanel({
               <span className="text-[11px] text-slate-400">Color Bars</span>
            </label>
            <label className="flex items-center space-x-2 cursor-pointer">
-              <input type="checkbox" defaultChecked className="rounded bg-[#131720] border-[#2E3648] text-blue-500 focus:ring-blue-500" />
+              <input 
+                type="checkbox" 
+                checked={regMarks} 
+                onChange={(e) => setRegMarks(e.target.checked)} 
+                className="rounded bg-[#131720] border-[#2E3648] text-blue-500 focus:ring-blue-500" 
+              />
               <span className="text-[11px] text-slate-300">Register Marks</span>
            </label>
            <label className="flex items-center space-x-2 cursor-pointer opacity-50">
@@ -211,12 +270,13 @@ export function RightControlPanel({
          <button 
            onClick={handleExport}
            disabled={isExporting}
-           className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors shadow-sm disabled:opacity-50"
+           className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
          >
             {isExporting ? "Exporting PDF..." : "Process & Export PDF"}
          </button>
          <button 
-           className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors shadow-sm"
+           onClick={handlePreview}
+           className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors shadow-sm cursor-pointer"
          >
             Apply to Sheet
          </button>

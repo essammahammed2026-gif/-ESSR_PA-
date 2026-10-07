@@ -8,7 +8,10 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 
 ```text
 +--------------------------------------------------------------+
-|               Next.js 14 App Router (Port 3000)              |
+|                Tauri v2 Desktop Application Shell            |
+|   Native Windowing * IPC * Python Sidecar Process Lifecycle  |
++--------------------------------------------------------------+
+|               Next.js 14 App Router Webview                  |
 |   React 18 * TypeScript Strict * Tailwind CSS * Lucide       |
 |                                                              |
 |   Studios:                                                   |
@@ -25,22 +28,15 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
                                | Client: src/lib/api.ts
                                v
 +--------------------------------------------------------------+
-|                  FastAPI Backend (Port 8000)                 |
+|             FastAPI Sidecar Backend (Local Process)          |
 |   Uvicorn * PyMuPDF * OpenCV * NumPy * Pydantic              |
+|   Native In-Process BackgroundTasks & Asyncio Worker Pool    |
 |                                                              |
 |   Routers:                                                   |
 |   main.py          /api/preflight, /api/contour, /api/flipbook|
 |   imposing_api.py  /api/imposing (upload, preview, export)   |
 |   book_scan_api.py /init-session, thumbnails, reorder, export|
 |   settings_api.py  /api/settings (presets CRUD)              |
-+------------------------------+-------------------------------+
-                               |
-                               | Async Task Delegation
-                               v
-+--------------------------------------------------------------+
-|            Background Worker & Broker (Optional)             |
-|   Celery Worker (concurrency=2) * Redis (redis://localhost)  |
-|   Long-running rasterization, batch OCR, multi-page renders  |
 +--------------------------------------------------------------+
 ```
 
@@ -48,21 +44,22 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 
 ## Core Components
 
-### 1. Frontend (`frontend/`)
+### 1. Desktop Shell (`src-tauri/`)
+* **Framework:** Tauri v2.
+* **Architecture:** Self-contained native binary hosting the Next.js frontend webview and orchestrating the FastAPI Python backend as a bundled sidecar executable. Zero external daemon or broker dependencies (runs natively across Linux and Windows without Docker or WSL).
+
+### 2. Frontend (`frontend/`)
 * **Framework:** Next.js 14 (App Router) with React 18 and strict TypeScript.
 * **Styling & Components:** Tailwind CSS, shadcn/base-ui primitives, Lucide icons.
 * **Imposition Workflow:** Features a dual-mode workflow separating **Book & Publication Imposition** (sequential page ordering, book trim presets, outward bleed synthesis, opposing page auto-alignment) from **Gang Run & Sticker Nesting** (MaxRects 2D bin packing, multi-file queue, continuous roll and cut-sheet ganging).
 * **API Communication:** All requests route through `src/lib/api.ts` (`API_BASE_URL` dynamically configured via `NEXT_PUBLIC_API_URL`, defaulting to `http://localhost:8000`).
 * **Reactive Throttling:** Real-time sliders (margins, gaps, thresholds, offsets) are throttled using `src/lib/useDebounce.ts` (350ms) to prevent network flooding and server load spikes.
 
-### 2. Backend (`backend/`)
-* **API Framework:** FastAPI running on Uvicorn.
+### 3. Backend & Engine (`backend/`)
+* **API Framework:** FastAPI running on Uvicorn as a local sidecar.
+* **Task Processing:** Replaced external message brokers (Celery & Redis) with FastAPI's native `BackgroundTasks` and `asyncio` execution pool, processing multi-page rendering, contour vectorization, gang run nesting, and export tasks strictly within the local process.
 * **Prepress Engines (`backend/engines/`):** Pure functional modules executing geometry, computer vision, raster/vector transformations, and PDF synthesis.
 * **API Documentation:** Interactive OpenAPI documentation is automatically served by FastAPI at `http://localhost:8000/docs`.
-
-### 3. Asynchronous Worker (`celery_app.py`)
-* Backed by Redis at `redis://localhost:6379/0`.
-* Handles CPU-intensive tasks such as generating large multi-page flipbooks or heavy batch exports without blocking the main event loop.
 
 ---
 

@@ -15,7 +15,7 @@
    * Keep TypeScript strict mode enabled.
    * Do NOT introduce `any` types. Provide explicit typed interfaces for API models and component states.
 4. **Backend Architecture (Routers Thin, Engines Pure):**
-   * Keep FastAPI routers in `main.py`, `imposing_api.py`, etc., thin (HTTP validation, response formatting, Celery task dispatch).
+   * Keep FastAPI routers in `main.py`, `imposing_api.py`, etc., thin (HTTP validation, response formatting, background task dispatch).
    * Put business, math, CV, and PDF generation logic in `backend/engines/` as pure, testable functions.
 5. **Zero-Retention File Policy:**
    * Do not commit test images, sample PDFs, uploaded files, or generated flipbooks/bundles.

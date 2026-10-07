@@ -82,10 +82,13 @@ class ImposingRequest(BaseModel):
     draw_border: bool = False
     border_color: str = "#000000"
     crop_marks: bool = False
+    reg_marks: bool = False
     align: str = "Center"
     nesting_mode: str = "Grid"
     auto_rotate_sheet: bool = True
     uniform_orientation: bool = True
+    rows: Optional[int] = None
+    cols: Optional[int] = None
     page_index: Optional[int] = 0
 
 def get_dimensions_mm(file_path: str):
@@ -140,6 +143,7 @@ async def upload_imposing_file(file: UploadFile = File(...)):
     page_count = 1
     w, h = 100.0, 100.0
     thumb_path = f"temp_uploads/{file_id}_thumb_p0.jpg"
+    pages_meta = []
     
     if ext == ".pdf":
         try:
@@ -152,6 +156,18 @@ async def upload_imposing_file(file: UploadFile = File(...)):
                 # Render page 0 thumbnail synchronously at 0.72 scale (~150 DPI) for crisp preview
                 pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.72, 0.72))
                 pix.save(thumb_path)
+                
+                for p in range(page_count):
+                    p_rect = doc[p].rect
+                    pw = round((p_rect.width / 72.0) * 25.4, 2)
+                    ph = round((p_rect.height / 72.0) * 25.4, 2)
+                    pages_meta.append({
+                        "page_num": p,
+                        "width_mm": pw,
+                        "height_mm": ph,
+                        "aspect_ratio": round(pw / ph, 3) if ph > 0 else 1.0,
+                        "thumb_url": f"/api/imposing/thumbnail/{file_id}{ext}/{p}"
+                    })
             doc.close()
 
             # For multi-page PDFs (books), pre-generate ALL remaining page thumbnails
@@ -170,6 +186,13 @@ async def upload_imposing_file(file: UploadFile = File(...)):
         except Exception as e:
             print(f"PDF upload parsing error: {e}")
             w, h = get_dimensions_mm(file_path)
+            pages_meta.append({
+                "page_num": 0,
+                "width_mm": round(w, 2),
+                "height_mm": round(h, 2),
+                "aspect_ratio": round(w / h, 3) if h > 0 else 1.0,
+                "thumb_url": f"/api/imposing/thumbnail/{file_id}{ext}/0"
+            })
     else:
         w, h = get_dimensions_mm(file_path)
         try:
@@ -183,6 +206,13 @@ async def upload_imposing_file(file: UploadFile = File(...)):
                 cv2.imwrite(thumb_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
         except:
             thumb_path = ""
+        pages_meta.append({
+            "page_num": 0,
+            "width_mm": round(w, 2),
+            "height_mm": round(h, 2),
+            "aspect_ratio": round(w / h, 3) if h > 0 else 1.0,
+            "thumb_url": f"/api/imposing/thumbnail/{file_id}{ext}/0"
+        })
 
     return {
         "success": True,
@@ -192,8 +222,58 @@ async def upload_imposing_file(file: UploadFile = File(...)):
         "h": round(h, 2),
         "page_count": page_count,
         "is_book": page_count > 1,
-        "thumb": f"/api/imposing/thumbnail/{file_id}{ext}/0"
+        "thumb": f"/api/imposing/thumbnail/{file_id}{ext}/0",
+        "pages": pages_meta
     }
+
+@router.get("/api/imposing/pages/{file_id}")
+def get_imposing_file_pages(file_id: str):
+    file_path = resolve_temp_file(file_id)
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    ext = os.path.splitext(file_path)[1].lower()
+    pages_meta = []
+    
+    if ext == ".pdf":
+        try:
+            doc = fitz.open(file_path)
+            page_count = len(doc)
+            for p in range(page_count):
+                rect = doc[p].rect
+                pw = round((rect.width / 72.0) * 25.4, 2)
+                ph = round((rect.height / 72.0) * 25.4, 2)
+                pages_meta.append({
+                    "page_num": p,
+                    "width_mm": pw,
+                    "height_mm": ph,
+                    "aspect_ratio": round(pw / ph, 3) if ph > 0 else 1.0,
+                    "thumb_url": f"/api/imposing/thumbnail/{os.path.basename(file_path)}/{p}"
+                })
+            doc.close()
+            return {
+                "success": True,
+                "file_id": os.path.basename(file_path),
+                "page_count": page_count,
+                "pages": pages_meta
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to inspect PDF: {str(e)}")
+    else:
+        w, h = get_dimensions_mm(file_path)
+        pages_meta.append({
+            "page_num": 0,
+            "width_mm": round(w, 2),
+            "height_mm": round(h, 2),
+            "aspect_ratio": round(w / h, 3) if h > 0 else 1.0,
+            "thumb_url": f"/api/imposing/thumbnail/{os.path.basename(file_path)}/0"
+        })
+        return {
+            "success": True,
+            "file_id": os.path.basename(file_path),
+            "page_count": 1,
+            "pages": pages_meta
+        }
 
 def resolve_temp_file(file_id: str) -> Optional[str]:
     if not file_id:
@@ -405,7 +485,9 @@ def preview_imposing(req: ImposingRequest):
                 artworks=specs,
                 allow_rotation=req.auto_rotate_sheet,
                 uniform_orientation=req.uniform_orientation,
-                job_mode=req.job_mode
+                job_mode=req.job_mode,
+                rows=req.rows or 0,
+                cols=req.cols or 0
             )
             
             pages = len(results)
@@ -554,7 +636,9 @@ def export_imposing(req: ImposingRequest):
                 margin_t_mm=req.margin, margin_b_mm=req.margin,
                 gap_mm=req.gap, artworks=specs, allow_rotation=req.auto_rotate_sheet,
                 uniform_orientation=req.uniform_orientation,
-                job_mode=req.job_mode
+                job_mode=req.job_mode,
+                rows=req.rows or 0,
+                cols=req.cols or 0
             )
             
             for res in results:
@@ -564,7 +648,7 @@ def export_imposing(req: ImposingRequest):
                 sheet_results=results,
                 output_pdf_path=out_path,
                 show_crop_marks=req.crop_marks,
-                show_reg_marks=False,
+                show_reg_marks=req.reg_marks,
                 draw_cut_contour=False,
                 draw_border=req.draw_border,
                 border_color=req.border_color
@@ -685,7 +769,7 @@ def export_imposing_svg(req: ImposingRequest):
                 sheet=target_sheet,
                 output_svg_path=out_path,
                 show_crop_marks=req.crop_marks,
-                show_reg_marks=False,
+                show_reg_marks=req.reg_marks,
                 draw_border=req.draw_border,
                 border_color=req.border_color
             )
@@ -739,7 +823,7 @@ def export_imposing_svg(req: ImposingRequest):
                 sheet=target_sheet,
                 output_svg_path=out_path,
                 show_crop_marks=req.crop_marks,
-                show_reg_marks=False,
+                show_reg_marks=req.reg_marks,
                 draw_border=req.draw_border,
                 border_color=req.border_color
             )

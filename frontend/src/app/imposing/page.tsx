@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { 
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
-import { ImposingItem, ImpositionPreviewResponse } from "@/types/prepress";
+import { ImposingItem, ImposingPage, ImpositionPreviewResponse, PageRotation } from "@/types/prepress";
 import { useImpositionState } from "@/hooks/useImpositionState";
 import { PreviewViewport } from "@/components/imposing/PreviewViewport";
 import { LeftAssetPanel } from "@/components/imposing/LeftAssetPanel";
@@ -18,6 +19,12 @@ function ImposingStudioContent() {
   const {
     jobMode, setJobMode,
     items, setItems,
+    pages, setPages,
+    reorderPages,
+    rotatePage,
+    toggleDeletePage,
+    duplicatePage,
+    clearAllPages,
     mode,
     autoRotateSheet,
     
@@ -29,7 +36,11 @@ function ImposingStudioContent() {
     gap, setGap,
     drawBorder,
     borderColor,
-    cropMarks, setCropMarks, align, uniformOrientation,
+    cropMarks, setCropMarks,
+    regMarks, setRegMarks,
+    rows, setRows,
+    cols, setCols,
+    align, uniformOrientation,
   } = useImpositionState();
 
   const searchParams = useSearchParams();
@@ -77,8 +88,63 @@ function ImposingStudioContent() {
         bleed_color: "#FFFFFF",
         bleed_type: "outside"
       }]);
+
+      // Retrieve granular pages from backend API
+      fetch(`${API_BASE_URL}/api/imposing/pages/${fileIdParam}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.pages && Array.isArray(data.pages)) {
+            setPages(data.pages.map((p: { page_num: number; width_mm: number; height_mm: number; thumb_url: string }) => ({
+              id: `${fileIdParam}_p${p.page_num}`,
+              file_id: fileIdParam,
+              name: nameParam,
+              original_page_num: p.page_num,
+              display_page_num: p.page_num + 1,
+              w: p.width_mm || wParam,
+              h: p.height_mm || hParam,
+              rotation: 0 as const,
+              is_deleted: false,
+              thumb_url: p.thumb_url || `/api/imposing/thumbnail/${fileIdParam}/${p.page_num}`,
+            })));
+          } else {
+            const fallbackList = [];
+            for (let i = 0; i < pageCountParam; i++) {
+              fallbackList.push({
+                id: `${fileIdParam}_p${i}`,
+                file_id: fileIdParam,
+                name: nameParam,
+                original_page_num: i,
+                display_page_num: i + 1,
+                w: wParam,
+                h: hParam,
+                rotation: 0 as const,
+                is_deleted: false,
+                thumb_url: `/api/imposing/thumbnail/${fileIdParam}/${i}`,
+              });
+            }
+            setPages(fallbackList);
+          }
+        })
+        .catch(() => {
+          const fallbackList = [];
+          for (let i = 0; i < pageCountParam; i++) {
+            fallbackList.push({
+              id: `${fileIdParam}_p${i}`,
+              file_id: fileIdParam,
+              name: nameParam,
+              original_page_num: i,
+              display_page_num: i + 1,
+              w: wParam,
+              h: hParam,
+              rotation: 0 as const,
+              is_deleted: false,
+              thumb_url: `/api/imposing/thumbnail/${fileIdParam}/${i}`,
+            });
+          }
+          setPages(fallbackList);
+        });
     }
-  }, [searchParams]);
+  }, [searchParams, setJobMode, setItems, setPages, setSheetH, setSheetPreset, setSheetW]);
 
   const [isUploading, setIsUploading] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -98,7 +164,7 @@ function ImposingStudioContent() {
     } else {
       setSheetW(parseFloat(sheetPreset));
     }
-  }, [sheetPreset, mode]);
+  }, [sheetPreset, mode, setSheetH, setSheetW]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -121,6 +187,7 @@ function ImposingStudioContent() {
       const results = await Promise.all(uploadPromises);
       
       const newItems: ImposingItem[] = [];
+      const newPages: ImposingPage[] = [];
       let hasBookUpload = false;
       for (const data of results) {
         if (data.success) {
@@ -133,7 +200,7 @@ function ImposingStudioContent() {
             h: data.h, 
             copies: 1, 
             ratio: data.w / data.h, 
-            locked: true,
+            locked: true, 
             keep_aspect: false,
             fill_color: "#FFFFFF",
             original_w: data.w,
@@ -148,6 +215,39 @@ function ImposingStudioContent() {
             bleed_color: "#FFFFFF",
             bleed_type: "outside"
           });
+
+          if (data.pages && Array.isArray(data.pages)) {
+            data.pages.forEach((p: { page_num: number; width_mm: number; height_mm: number; thumb_url: string }) => {
+              newPages.push({
+                id: `${data.file_id}_p${p.page_num}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                file_id: data.file_id,
+                name: data.name,
+                original_page_num: p.page_num,
+                display_page_num: p.page_num + 1,
+                w: p.width_mm || data.w,
+                h: p.height_mm || data.h,
+                rotation: 0 as const,
+                is_deleted: false,
+                thumb_url: p.thumb_url || `/api/imposing/thumbnail/${data.file_id}/${p.page_num}`,
+              });
+            });
+          } else {
+            const count = data.page_count || 1;
+            for (let i = 0; i < count; i++) {
+              newPages.push({
+                id: `${data.file_id}_p${i}_${Date.now()}`,
+                file_id: data.file_id,
+                name: data.name,
+                original_page_num: i,
+                display_page_num: i + 1,
+                w: data.w,
+                h: data.h,
+                rotation: 0 as const,
+                is_deleted: false,
+                thumb_url: `/api/imposing/thumbnail/${data.file_id}/${i}`,
+              });
+            }
+          }
         } else {
           setError(prev => prev ? `${prev}\n${data.error}` : data.error);
         }
@@ -158,6 +258,7 @@ function ImposingStudioContent() {
           setJobMode("book");
         }
         setItems(prev => [...prev, ...newItems]);
+        setPages(prev => [...prev, ...newPages]);
       }
     } catch {
       setError("Failed to upload files to imposing server.");
@@ -167,15 +268,39 @@ function ImposingStudioContent() {
     }
   };
 
-  
-  const removeItem = (idx: number) => {
-    const newItems = [...items];
-    newItems.splice(idx, 1);
-    setItems(newItems);
-  };
+  const getItemsForLayout = useCallback((): ImposingItem[] => {
+    const activePages = pages.filter(p => !p.is_deleted);
+    if (activePages.length === 0) {
+      return items;
+    }
+    return activePages.map((p) => {
+      const baseItem = items.find((it) => it.file_id === p.file_id) || items[0];
+      const pageRot: PageRotation =
+        p.rotation === 90 ? "cw" : p.rotation === 270 ? "ccw" : "none";
+      return {
+        file_id: p.file_id,
+        name: p.name || baseItem?.name || "Page",
+        w: baseItem?.w || p.w,
+        h: baseItem?.h || p.h,
+        copies: 1,
+        ratio: (baseItem?.w || p.w) / (baseItem?.h || p.h),
+        page_count: 1,
+        page_num: p.original_page_num,
+        fit_mode: baseItem?.fit_mode || "stretch",
+        page_rotation: pageRot,
+        bleed_mode: baseItem?.bleed_mode || "none",
+        bleed_mm: baseItem?.bleed_mm || 0,
+        bleed_color: baseItem?.bleed_color || "#FFFFFF",
+        bleed_type: baseItem?.bleed_type || "outside",
+        keep_aspect: baseItem?.keep_aspect || false,
+        fill_color: baseItem?.fill_color || "#FFFFFF",
+      };
+    });
+  }, [items, pages]);
 
   const handlePreview = useCallback(async () => {
-    if (items.length === 0 || !sheetW || !sheetH || sheetW <= 0 || sheetH <= 0) return;
+    const layoutItems = getItemsForLayout();
+    if (layoutItems.length === 0 || !sheetW || !sheetH || sheetW <= 0 || sheetH <= 0) return;
     setIsPreviewing(true);
     setError(null);
     
@@ -184,7 +309,7 @@ function ImposingStudioContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items, 
+          items: layoutItems, 
           job_mode: jobMode,
           mode, 
           sheet_w: sheetW, 
@@ -194,6 +319,9 @@ function ImposingStudioContent() {
           draw_border: drawBorder, 
           border_color: borderColor, 
           crop_marks: cropMarks, 
+          reg_marks: regMarks,
+          rows: rows ?? undefined,
+          cols: cols ?? undefined,
           align, 
           auto_rotate_sheet: autoRotateSheet,
           uniform_orientation: uniformOrientation
@@ -211,10 +339,11 @@ function ImposingStudioContent() {
     } finally {
       setIsPreviewing(false);
     }
-  }, [items, jobMode, mode, sheetW, sheetH, margin, gap, drawBorder, borderColor, cropMarks, align, autoRotateSheet, uniformOrientation]);
+  }, [getItemsForLayout, jobMode, mode, sheetW, sheetH, margin, gap, drawBorder, borderColor, cropMarks, regMarks, rows, cols, align, autoRotateSheet, uniformOrientation]);
 
   const handleExport = async () => {
-    if (items.length === 0 || !sheetW || !sheetH || sheetW <= 0 || sheetH <= 0) return;
+    const layoutItems = getItemsForLayout();
+    if (layoutItems.length === 0 || !sheetW || !sheetH || sheetW <= 0 || sheetH <= 0) return;
     setIsExporting(true);
     setError(null);
     
@@ -223,7 +352,7 @@ function ImposingStudioContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items, 
+          items: layoutItems, 
           job_mode: jobMode,
           mode, 
           sheet_w: sheetW, 
@@ -233,6 +362,9 @@ function ImposingStudioContent() {
           draw_border: drawBorder, 
           border_color: borderColor, 
           crop_marks: cropMarks, 
+          reg_marks: regMarks,
+          rows: rows ?? undefined,
+          cols: cols ?? undefined,
           align, 
           auto_rotate_sheet: autoRotateSheet,
           uniform_orientation: uniformOrientation
@@ -257,11 +389,10 @@ function ImposingStudioContent() {
     }
   };
 
-
   // Debounced auto-preview (350ms)
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    if (items.length === 0) return;
+    if (items.length === 0 && pages.length === 0) return;
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => { 
       handlePreview(); 
@@ -269,16 +400,18 @@ function ImposingStudioContent() {
     return () => { 
       if (typingTimeout.current) clearTimeout(typingTimeout.current); 
     };
-  }, [items, jobMode, mode, sheetW, sheetH, margin, gap, align, drawBorder, borderColor, cropMarks, autoRotateSheet, handlePreview]);
+  }, [items, pages, jobMode, mode, sheetW, sheetH, margin, gap, rows, cols, align, drawBorder, borderColor, cropMarks, autoRotateSheet, handlePreview]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-2rem)] space-y-2">
       {/* Top Header */}
       <div className="flex items-center justify-between pb-2 border-b border-[#242A38]">
          <div className="flex items-center space-x-2 text-sm text-slate-300">
-            <span className="text-blue-400 cursor-pointer">Hub</span>
+            <Link href="/" className="text-cyan-400 hover:text-cyan-300 transition-colors font-medium">
+              Home
+            </Link>
             <span className="text-slate-500">/</span>
-            <span className="font-semibold text-white">Imposition & PDF Studio</span>
+            <span className="font-semibold text-white">Imposing Studio</span>
          </div>
       </div>
 
@@ -287,9 +420,14 @@ function ImposingStudioContent() {
         <div className="w-full lg:w-[280px] xl:w-[300px] shrink-0 h-full">
            <LeftAssetPanel 
              items={items}
+             pages={pages}
              handleFileUpload={handleFileUpload}
              isUploading={isUploading}
-             removeItem={removeItem}
+             reorderPages={reorderPages}
+             rotatePage={rotatePage}
+             toggleDeletePage={toggleDeletePage}
+             duplicatePage={duplicatePage}
+             clearAllPages={clearAllPages}
            />
         </div>
 
@@ -307,6 +445,7 @@ function ImposingStudioContent() {
              drawBorder={drawBorder}
              borderColor={borderColor}
              cropMarks={cropMarks}
+             regMarks={regMarks}
              error={error}
              currentPage={currentPage}
              setCurrentPage={setCurrentPage}
@@ -334,6 +473,13 @@ function ImposingStudioContent() {
               isExporting={isExporting}
               cropMarks={cropMarks}
               setCropMarks={setCropMarks}
+              regMarks={regMarks}
+              setRegMarks={setRegMarks}
+              rows={rows}
+              setRows={setRows}
+              cols={cols}
+              setCols={setCols}
+              handlePreview={handlePreview}
            />
         </div>
       </div>

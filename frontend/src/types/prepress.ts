@@ -45,6 +45,48 @@ export interface ImposingItem {
 }
 
 /**
+ * Individual page specification for fine-grained page-level imposition
+ */
+export interface ImposingPage {
+  id: string;
+  file_id: string;
+  name?: string;
+  original_page_num: number;
+  display_page_num?: number;
+  w: number;
+  h: number;
+  rotation: 0 | 90 | 180 | 270;
+  is_deleted: boolean;
+  thumb_url: string;
+}
+
+/**
+ * Metadata for a single page returned by upload and inspect endpoints
+ */
+export interface ImposingPageMeta {
+  page_num: number;
+  width_mm: number;
+  height_mm: number;
+  aspect_ratio?: number;
+  thumb_url: string;
+}
+
+/**
+ * Response returned from /api/imposing/upload and /api/imposing/pages/{file_id}
+ */
+export interface ImposingUploadResponse {
+  success: boolean;
+  file_id: string;
+  name: string;
+  w: number;
+  h: number;
+  page_count: number;
+  is_book: boolean;
+  thumb: string;
+  pages: ImposingPageMeta[];
+}
+
+/**
  * Prepress margin and gutter parameters
  */
 export interface PrepressMargins {

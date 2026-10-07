@@ -1,6 +1,6 @@
 "use client";
 
-import { Inter } from "next/font/google";
+import { Roboto } from "next/font/google";
 import "./globals.css";
 import React, { useState } from "react";
 import Link from "next/link";
@@ -13,47 +13,53 @@ import {
   Scissors, 
   LayoutDashboard, 
   Settings, 
-  Menu, 
   Layers,
   Power
 } from "lucide-react";
 
-const inter = Inter({ subsets: ["latin"] });
+const font = Roboto({ 
+  weight: ["300", "400", "500", "700"], 
+  subsets: ["latin"],
+  display: "swap",
+});
 
 interface NavItemProps {
   href: string;
   icon: React.ReactNode;
   label: string;
-  badge?: string;
-  description?: string;
   isCollapsed: boolean;
   pathname: string;
 }
 
-const NavItem = ({ href, icon, label, badge, description, isCollapsed, pathname }: NavItemProps) => {
+const NavItem = ({ href, icon, label, isCollapsed, pathname }: NavItemProps) => {
   const isActive = pathname === href || (pathname.startsWith(href) && href !== "/");
   return (
-    <Link 
-      href={href}
-      className={`flex items-center justify-between px-2.5 py-2 rounded-lg transition-all group relative text-xs ${
-        isActive 
-          ? "bg-cyan-500/10 text-cyan-400 font-medium border border-cyan-500/20 shadow-sm" 
-          : "text-slate-400 hover:bg-[#1E2330] hover:text-slate-200"
-      }`}
-      title={description ? `${label} — ${description}` : label}
-    >
-      <div className="flex items-center space-x-2.5 min-w-0">
+    <div className="relative group flex items-center justify-center">
+      <Link 
+        href={href}
+        className={`flex items-center ${
+          isCollapsed ? "justify-center w-10 h-10" : "px-2.5 py-2 w-full space-x-2.5"
+        } rounded-lg transition-all text-xs ${
+          isActive 
+            ? "bg-cyan-500/15 text-cyan-400 font-medium border border-cyan-500/30 shadow-sm shadow-cyan-950/40" 
+            : "text-slate-400 hover:bg-[#1E2330] hover:text-slate-200 border border-transparent"
+        }`}
+        title={label}
+      >
         <div className={`shrink-0 transition-colors ${isActive ? "text-cyan-400" : "text-slate-400 group-hover:text-slate-200"}`}>
           {icon}
         </div>
         {!isCollapsed && <span className="truncate">{label}</span>}
-      </div>
-      {!isCollapsed && badge && (
-        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#131720] text-slate-400 border border-[#2B3344]">
-          {badge}
-        </span>
+      </Link>
+
+      {/* Floating tooltip on hover when collapsed */}
+      {isCollapsed && (
+        <div className="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-[#1B212D] text-slate-100 text-xs font-medium rounded-md shadow-2xl border border-[#2E374A] whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-150 z-50 flex items-center shadow-black/80">
+          <span>{label}</span>
+          <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1B212D]" />
+        </div>
       )}
-    </Link>
+    </div>
   );
 };
 
@@ -62,7 +68,7 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [isShuttingDown, setIsShuttingDown] = useState(false);
   const [showShutdownConfirm, setShowShutdownConfirm] = useState(false);
   const pathname = usePathname();
@@ -83,109 +89,82 @@ export default function RootLayout({
 
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} flex h-screen bg-[#12151B] text-slate-200 overflow-hidden antialiased`}>
+      <body className={`${font.className} flex h-screen bg-[#12151B] text-slate-200 overflow-hidden antialiased`}>
         {/* Left Sidebar */}
         <aside 
           className={`flex flex-col border-r border-[#242A38] transition-all duration-300 ${
             isSidebarCollapsed ? "w-14" : "w-56"
-          } bg-[#181D27] shrink-0`}
+          } bg-[#181D27] shrink-0 z-30`}
         >
-          {/* Brand Header */}
-          <div className="h-12 flex items-center justify-between px-3 border-b border-[#242A38]">
-            {!isSidebarCollapsed && (
-              <div className="flex items-center space-x-2.5">
-                <div className="w-7 h-7 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
-                  <Image src="/flint_mark.png" alt="Flint" width={28} height={28} className="object-contain" priority />
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <span className="font-extrabold text-sm tracking-tight text-white">
-                    FLINT
-                  </span>
-                  <span className="text-[8px] font-mono uppercase px-1 py-0.2 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/50">
-                    STUDIO
-                  </span>
-                </div>
-              </div>
-            )}
-            {isSidebarCollapsed && (
-              <div className="w-7 h-7 rounded-lg overflow-hidden flex items-center justify-center mx-auto">
-                <Image src="/flint_mark.png" alt="Flint" width={26} height={26} className="object-contain" priority />
-              </div>
-            )}
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
-              title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          {/* Brand Header - Clicking Logo Toggles Sidebar */}
+          <div className="h-12 flex items-center border-b border-[#242A38] px-2.5">
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              className="w-full flex items-center transition-all group/logo focus:outline-none"
+              title={isSidebarCollapsed ? "Click to expand sidebar" : "Click to collapse sidebar"}
             >
-              <Menu size={16} />
+              {!isSidebarCollapsed ? (
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-lg overflow-hidden flex items-center justify-center shrink-0 group-hover/logo:scale-105 transition-transform">
+                    <Image src="/flint_mark.png" alt="Flint" width={28} height={28} className="object-contain" priority />
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="font-extrabold text-sm tracking-tight text-white group-hover/logo:text-cyan-400 transition-colors">
+                      FLINT
+                    </span>
+                    <span className="text-[8px] font-mono uppercase px-1 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/50">
+                      STUDIO
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full flex items-center justify-center relative group">
+                  <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center group-hover/logo:ring-2 group-hover/logo:ring-cyan-500/40 transition-all">
+                    <Image src="/flint_mark.png" alt="Flint" width={26} height={26} className="object-contain" priority />
+                  </div>
+                  <div className="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-[#1B212D] text-slate-100 text-xs font-medium rounded-md shadow-2xl border border-[#2E374A] whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-150 z-50 flex items-center shadow-black/80">
+                    <span className="font-semibold text-cyan-400">Expand Sidebar</span>
+                    <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1B212D]" />
+                  </div>
+                </div>
+              )}
             </button>
           </div>
           
-          {/* Navigation Links */}
-          <div className="flex-1 overflow-y-auto py-2.5 px-2 space-y-3">
-            <div>
-              {!isSidebarCollapsed && (
-                <div className="px-2.5 mb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wider">
-                  Overview
-                </div>
-              )}
-              <nav className="space-y-0.5">
-                <NavItem href="/" icon={<Home size={16}/>} label="Triage & Hub" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              </nav>
-            </div>
-
-            <div>
-              {!isSidebarCollapsed && (
-                <div className="px-2.5 mb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wider">
-                  Prepress & Ingest
-                </div>
-              )}
-              <nav className="space-y-0.5">
-                <NavItem href="/book-studio" icon={<BookOpen size={16}/>} label="Scanned Book Studio" badge="Bleed" description="Spread split, deskew & bleed synthesis" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-                <NavItem href="/preflight" icon={<FileCheck size={16}/>} label="PDF Preflight Center" description="TrimBox, BleedBox & DPI validation" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              </nav>
-            </div>
-
-            <div>
-              {!isSidebarCollapsed && (
-                <div className="px-2.5 mb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wider">
-                  Production & Finishing
-                </div>
-              )}
-              <nav className="space-y-0.5">
-                <NavItem href="/imposing" icon={<LayoutDashboard size={16}/>} label="Imposing Studio" badge="Gang" description="Sheet & roll layout with crop marks" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-                <NavItem href="/contour" icon={<Scissors size={16}/>} label="Contour Cut Studio" badge="SVG" description="Cutlines & white ink underbase" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              </nav>
-            </div>
-
-            <div>
-              {!isSidebarCollapsed && (
-                <div className="px-2.5 mb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wider">
-                  Digital Proofing
-                </div>
-              )}
-              <nav className="space-y-0.5">
-                <NavItem href="/flipbook" icon={<Layers size={16}/>} label="Flipbook Studio" description="3D interactive page-turn proofing" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              </nav>
-            </div>
+          {/* Navigation Links (Ungrouped Studio List) */}
+          <div className={`flex-1 ${isSidebarCollapsed ? "overflow-visible" : "overflow-y-auto"} py-2.5 px-2`}>
+            <nav className="space-y-1">
+              <NavItem href="/" icon={<Home size={18}/>} label="Home" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/book-studio" icon={<BookOpen size={18}/>} label="Book Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/preflight" icon={<FileCheck size={18}/>} label="Preflight Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/imposing" icon={<LayoutDashboard size={18}/>} label="Imposing Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/contour" icon={<Scissors size={18}/>} label="Contour Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/flipbook" icon={<Layers size={18}/>} label="Flipbook Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+            </nav>
           </div>
           
           {/* Settings & Shutdown Footer */}
-          <div className="p-2 border-t border-[#242A38] space-y-1">
-            <NavItem href="/settings" icon={<Settings size={16}/>} label="Settings & Stocks" description="Press sheets, roll media & presets" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+          <div className={`p-2 border-t border-[#242A38] space-y-1 ${isSidebarCollapsed ? "overflow-visible" : ""}`}>
+            <NavItem href="/settings" icon={<Settings size={18}/>} label="Settings" isCollapsed={isSidebarCollapsed} pathname={pathname} />
             
-            <button
-              onClick={() => setShowShutdownConfirm(true)}
-              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg transition-all text-xs text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 group"
-              title={isSidebarCollapsed ? "Shut Down Flint" : ""}
-            >
-              <div className="flex items-center space-x-2.5 min-w-0">
-                <div className="shrink-0 text-rose-400 group-hover:text-rose-300">
-                  <Power size={16} />
-                </div>
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={() => setShowShutdownConfirm(true)}
+                className={`flex items-center ${
+                  isSidebarCollapsed ? "justify-center w-10 h-10" : "px-2.5 py-2 w-full space-x-2.5"
+                } rounded-lg transition-all text-xs text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 border border-transparent`}
+                title="Shut Down App"
+              >
+                <Power size={18} className="shrink-0 text-rose-400 group-hover:text-rose-300" />
                 {!isSidebarCollapsed && <span className="truncate font-medium">Shut Down App</span>}
-              </div>
-            </button>
+              </button>
+              {isSidebarCollapsed && (
+                <div className="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-[#1B212D] text-rose-300 text-xs font-medium rounded-md shadow-2xl border border-rose-500/30 whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-150 z-50 flex items-center shadow-black/80">
+                  <span>Shut Down App</span>
+                  <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1B212D]" />
+                </div>
+              )}
+            </div>
           </div>
         </aside>
         

@@ -29,6 +29,7 @@ export interface PreviewViewportProps {
   drawBorder: boolean;
   borderColor: string;
   cropMarks: boolean;
+  regMarks?: boolean;
   error: string | null;
   currentPage: number;
   setCurrentPage: React.Dispatch<React.SetStateAction<number>>;
@@ -46,6 +47,7 @@ export function PreviewViewport({
   drawBorder,
   borderColor,
   cropMarks,
+  regMarks = false,
   error,
   currentPage,
   setCurrentPage
@@ -286,6 +288,32 @@ export function PreviewViewport({
                   bottom: `${margin}px`,
                 }}
               />
+
+              {/* Registration Corner Marks */}
+              {regMarks && (
+                <>
+                  <div className="absolute top-1.5 left-1.5 w-3.5 h-3.5 pointer-events-none flex items-center justify-center">
+                    <div className="absolute w-2.5 h-2.5 rounded-full border border-black" />
+                    <div className="absolute w-3.5 h-[1px] bg-black" />
+                    <div className="absolute w-[1px] h-3.5 bg-black" />
+                  </div>
+                  <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 pointer-events-none flex items-center justify-center">
+                    <div className="absolute w-2.5 h-2.5 rounded-full border border-black" />
+                    <div className="absolute w-3.5 h-[1px] bg-black" />
+                    <div className="absolute w-[1px] h-3.5 bg-black" />
+                  </div>
+                  <div className="absolute bottom-1.5 left-1.5 w-3.5 h-3.5 pointer-events-none flex items-center justify-center">
+                    <div className="absolute w-2.5 h-2.5 rounded-full border border-black" />
+                    <div className="absolute w-3.5 h-[1px] bg-black" />
+                    <div className="absolute w-[1px] h-3.5 bg-black" />
+                  </div>
+                  <div className="absolute bottom-1.5 right-1.5 w-3.5 h-3.5 pointer-events-none flex items-center justify-center">
+                    <div className="absolute w-2.5 h-2.5 rounded-full border border-black" />
+                    <div className="absolute w-3.5 h-[1px] bg-black" />
+                    <div className="absolute w-[1px] h-3.5 bg-black" />
+                  </div>
+                </>
+              )}
 
               {/* Imposed Box Items */}
               {previewData.preview_pages[currentPage].boxes.map((box, i) => {
