@@ -15,27 +15,28 @@ A modular, high-performance web-to-print and prepress automation suite built wit
 
 ---
 
-## Quickstart (Under 5 Minutes)
+## Quickstart & Work Machine Setup Guide
 
-### Prerequisites
-* **Python 3.10+** (with virtual environment in `backend/.venv`)
-* **Node.js 18+** & **npm**
-* **Redis** (for background Celery tasks)
+### 1. Prerequisites (Any OS)
+* **Git**: [git-scm.com](https://git-scm.com/)
+* **Python 3.10+**: [python.org](https://www.python.org/downloads/) *(On Windows, check "Add Python to PATH")*
+* **Node.js 18+ LTS** & **npm**: [nodejs.org](https://nodejs.org/)
 
-### One-Command Launch (Unified)
-The project includes an all-in-one runner that spins up FastAPI, Next.js, Redis, and Celery concurrently:
+Zero external database or message broker dependencies required (all task queues run via native in-process background tasks).
 
+---
+
+### 2. Setting Up on a New Machine (Work PC)
+
+#### Step 1: Clone the Repository
 ```bash
-./start.sh
+git clone https://github.com/essammahammed2026-gif/-ESSR_PA-.git
+cd -ESSR_PA-
 ```
 
-* **Frontend:** [http://localhost:3000](http://localhost:3000)
-* **Backend API:** [http://localhost:8000](http://localhost:8000)
-* **Interactive API Docs (Swagger):** [http://localhost:8000/docs](http://localhost:8000/docs)
+#### Step 2: Set Up & Run the Backend (Terminal 1)
 
-### Manual Setup
-
-#### 1. Backend
+**Linux / macOS:**
 ```bash
 cd backend
 python3 -m venv .venv
@@ -44,17 +45,36 @@ pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-*(Optional) Start async Celery worker in a separate terminal:*
-```bash
-celery -A celery_app worker --concurrency=2 --loglevel=info
+**Windows (PowerShell / Command Prompt):**
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### 2. Frontend
+#### Step 3: Set Up & Run the Frontend (Terminal 2)
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+
+#### Step 4: Open the App
+* **Web UI:** [http://localhost:3000](http://localhost:3000)
+* **Backend API & Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+### 3. One-Command Launch (Linux with systemd)
+On Linux workstations with systemd user services, simply execute:
+```bash
+./start.sh
+```
+This automatically manages starting and focusing both the FastAPI backend and Next.js frontend.
+
 
 ---
 
@@ -62,7 +82,7 @@ npm run dev
 
 Comprehensive documentation lives in the [`docs/`](./docs/) directory:
 
-* [Architecture & Data Flow](./docs/architecture.md): Deep-dive into Next.js, FastAPI, Celery, and storage lifecycles.
+* [Architecture & Data Flow](./docs/architecture.md): Deep-dive into Next.js, Tauri, FastAPI, and storage lifecycles.
 * [Prepress Engines Reference](./docs/engines.md): Algorithms, MaxRects bin-packing, Bézier die-line vectorization, and bleed synthesis.
 * [API & Integration Guide](./docs/api.md): High-level pipeline endpoints and OpenAPI documentation details.
 * [Contributing & Development Guidelines](./CONTRIBUTING.md): Code standards, verification commands, and contribution rules.

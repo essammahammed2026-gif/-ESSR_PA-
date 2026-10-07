@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Documentation & Setup Guides**:
+  - **Work PC & Cross-Platform Setup Guide**: Added step-by-step setup and quickstart instructions in [`README.md`](README.md) covering cloning from GitHub, environment setup, and service running for both Linux/macOS and Windows without external Redis or Celery dependencies.
+  - **Prepress Engine & API Sync**: Updated [`docs/api.md`](docs/api.md), [`docs/engines.md`](docs/engines.md), and [`backend/README.md`](backend/README.md) to document the Universal Asset Inspector (`asset_inspector.py`), Executive Audit Report Generator (`report_generator.py`), and granular imposition deck endpoints.
+
 - **Bug Fixes**:
   - **Asset Ingest Cache NameError**: Defined [`INSPECT_CACHE`](backend/main.py#L49) in [`main.py`](backend/main.py) and added it to cache eviction pruning. Resolved an unhandled 500 `NameError: name 'INSPECT_CACHE' is not defined` on `POST /api/inspect` that caused browsers (specifically Zen Browser / Firefox) to drop CORS headers and fail file uploads with `TypeError: NetworkError when attempting to fetch resource`.
 

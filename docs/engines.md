@@ -57,3 +57,20 @@ All core printing, geometry, computer vision, and document-transformation logic 
   * Configurable binding direction: Left-to-Right (LTR) and Right-to-Left (RTL, for Arabic/Hebrew publications).
   * Applies realistic binding gutters and spine creep adjustments via `helpers.apply_print_binding_padding`.
   * Outputs standalone HTML5 bundles using `templates/flipbook.html`.
+
+### 6. Universal Asset Inspector (`asset_inspector.py`)
+* **Purpose:** Provides universal ingest, triage, and multi-page technical audit for PDFs and raster assets.
+* **Pipeline & Inspections:**
+  * **Geometry & Box Analysis:** Reads `MediaBox`, `CropBox`, `BleedBox`, and `TrimBox` for every page using PyMuPDF (`fitz`). Groups pages by identical trim dimensions to identify mixed-size publications.
+  * **Embedded Image DPI Scanner:** Iterates through all embedded XObjects on each page, computes effective resolution ($DPI_x, DPI_y$) relative to on-page transform matrices, and catalogs all low-resolution images (< 300 DPI) with exact page numbers, pixel sizes, and bounding box dimensions.
+  * **Color Space & Spot Color Detection:** Scans image color spaces (`DeviceCMYK`, `DeviceRGB`, `DeviceGray`, `Separation`) and page-level resource dictionaries to detect RGB elements needing press separation and record spot/Pantone color names.
+  * **Bleed Margin Detection:** Computes outward bleed extension ($BleedBox - TrimBox$) in millimeters.
+  * **Compliance Checklist:** Compiles traffic-light checklist metrics (`geometry_uniform`, `bleed_detected`, `min_dpi_ok`, `colorspace_cmyk`) alongside prioritized prepress remediation notes.
+
+### 7. Executive Prepress Audit Report Generator (`report_generator.py`)
+* **Purpose:** Generates a clean, professional A4 PDF Prepress Quality & Preflight Audit Report for print customer sign-off or internal shop job tickets.
+* **Features:**
+  * **Engine:** Built with ReportLab using vector flowables (`SimpleDocTemplate`, `Table`, `ParagraphStyle`).
+  * **Structure:** Includes executive header with document metadata (filename, page count, file size, dimensions, primary color space), traffic-light audit checklist table with visual pass/warning status pills, page-by-page findings matrix, and remediation advice block.
+  * **Output:** Returns pure PDF bytes for direct streaming download via `GET /api/inspect/report-pdf/{file_id}` or `POST /api/inspect/export-report-pdf`.
+
