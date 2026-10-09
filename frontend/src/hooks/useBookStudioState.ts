@@ -1,7 +1,17 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { API_BASE_URL } from "@/lib/api";
 import { useDebounce } from "@/lib/useDebounce";
-import { BookIntakeMode, BookStudioPage, BookProcessSettings } from "@/types/book_studio";
+import { 
+  BookIntakeMode, 
+  BookStudioPage, 
+  BookProcessSettings,
+  DeskewModuleConfig,
+  BleedModuleConfig,
+  RestorationModuleConfig,
+  CropModuleConfig,
+  CropBox
+} from "@/types/book_studio";
+import { isPageInScope } from "@/lib/pageScope";
 
 export function useBookStudioState() {
   // Intake configuration
@@ -26,51 +36,82 @@ export function useBookStudioState() {
 
   // Processing settings
   const [previewCleaned, setPreviewCleaned] = useState<boolean>(true);
-  const [bleedMm, setBleedMm] = useState<number>(3.0);
-  const [showCropMarks, setShowCropMarks] = useState<boolean>(true);
-  const [exportDpi, setExportDpi] = useState<number>(200);
 
-  const [cleanBorders, setCleanBorders] = useState<boolean>(true);
-  const [borderMarginPx, setBorderMarginPx] = useState<number>(15);
-  const [borderThreshold] = useState<number>(210);
+  // Modular Processing Framework: All modules off by default
+  const [cropModule, setCropModule] = useState<CropModuleConfig>({
+    enabled: false,
+    mode: "spread",
+    cropBox: { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 },
+    splitPos: 0.50,
+    scope: { mode: "all", customRange: "" },
+  });
+  const [isDetectingCrop, setIsDetectingCrop] = useState<boolean>(false);
 
-  const [enhanceColors, setEnhanceColors] = useState<boolean>(true);
-  const [saturation, setSaturation] = useState<number>(1.30);
-  const [contrast, setContrast] = useState<number>(1.10);
-  const [deskew, setDeskew] = useState<boolean>(false);
-  const [sharpen] = useState<boolean>(true);
+  const [deskewModule, setDeskewModule] = useState<DeskewModuleConfig>({
+    enabled: false,
+    mode: "auto",
+    angle: 0.0,
+    maxAngle: 10.0,
+    ignoreBorders: true,
+    showGrid: false,
+    scope: { mode: "all", customRange: "" },
+  });
+
+  const [bleedModule, setBleedModule] = useState<BleedModuleConfig>({
+    enabled: false,
+    bleedMm: 3.0,
+    showCropMarks: true,
+    exportDpi: 200,
+    scope: { mode: "all", customRange: "" },
+  });
+
+  const [restorationModule, setRestorationModule] = useState<RestorationModuleConfig>({
+    enabled: false,
+    cleanBorders: true,
+    borderMarginPx: 15,
+    borderThreshold: 210,
+    enhanceColors: true,
+    saturation: 1.30,
+    contrast: 1.10,
+    sharpen: true,
+    scope: { mode: "all", customRange: "" },
+  });
+
+  const [isDetectingAngle, setIsDetectingAngle] = useState<boolean>(false);
+  const [detectedAngle, setDetectedAngle] = useState<number | null>(null);
+
+  // Reset page-specific detected angle when selecting a different page
+  useEffect(() => {
+    setDetectedAngle(null);
+  }, [selectedPageId]);
 
   // Golden Rule: Debounce reactive slider controls (350ms)
-  const debouncedMargin = useDebounce(borderMarginPx, 350);
-  const debouncedSaturation = useDebounce(saturation, 350);
-  const debouncedContrast = useDebounce(contrast, 350);
-  const debouncedBleed = useDebounce(bleedMm, 350);
+  const debouncedMargin = useDebounce(restorationModule.borderMarginPx, 350);
+  const debouncedSaturation = useDebounce(restorationModule.saturation, 350);
+  const debouncedContrast = useDebounce(restorationModule.contrast, 350);
+  const debouncedBleed = useDebounce(bleedModule.bleedMm, 350);
+  const debouncedDeskewAngle = useDebounce(deskewModule.angle, 350);
 
   // Consolidated settings
   const settings: BookProcessSettings = useMemo(() => ({
-    bleedMm,
-    showCropMarks,
-    exportDpi,
-    cleanBorders,
-    borderMarginPx,
-    borderThreshold,
-    enhanceColors,
-    saturation,
-    contrast,
-    deskew,
-    sharpen,
+    bleedMm: bleedModule.bleedMm,
+    showCropMarks: bleedModule.showCropMarks,
+    exportDpi: bleedModule.exportDpi,
+    cleanBorders: restorationModule.cleanBorders,
+    borderMarginPx: restorationModule.borderMarginPx,
+    borderThreshold: restorationModule.borderThreshold,
+    enhanceColors: restorationModule.enhanceColors,
+    saturation: restorationModule.saturation,
+    contrast: restorationModule.contrast,
+    deskew: false,
+    sharpen: restorationModule.sharpen,
+    deskewModule,
+    bleedModule,
+    restorationModule,
   }), [
-    bleedMm,
-    showCropMarks,
-    exportDpi,
-    cleanBorders,
-    borderMarginPx,
-    borderThreshold,
-    enhanceColors,
-    saturation,
-    contrast,
-    deskew,
-    sharpen,
+    bleedModule,
+    restorationModule,
+    deskewModule,
   ]);
 
   // Reset current session
@@ -83,6 +124,42 @@ export function useBookStudioState() {
     setFileEvens(null);
     setError(null);
     setActiveTab("grid");
+    setCropModule({
+      enabled: false,
+      mode: "spread",
+      cropBox: { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 },
+      splitPos: 0.50,
+      scope: { mode: "all", customRange: "" },
+    });
+    setIsDetectingCrop(false);
+    setDeskewModule({
+      enabled: false,
+      mode: "auto",
+      angle: 0.0,
+      maxAngle: 10.0,
+      ignoreBorders: true,
+      showGrid: false,
+      scope: { mode: "all", customRange: "" },
+    });
+    setBleedModule({
+      enabled: false,
+      bleedMm: 3.0,
+      showCropMarks: true,
+      exportDpi: 200,
+      scope: { mode: "all", customRange: "" },
+    });
+    setRestorationModule({
+      enabled: false,
+      cleanBorders: true,
+      borderMarginPx: 15,
+      borderThreshold: 210,
+      enhanceColors: true,
+      saturation: 1.30,
+      contrast: 1.10,
+      sharpen: true,
+      scope: { mode: "all", customRange: "" },
+    });
+    setDetectedAngle(null);
   }, []);
 
   // Initialize session with backend
@@ -204,6 +281,168 @@ export function useBookStudioState() {
     });
   }, [sessionId]);
 
+  // Detect deskew angle via backend analysis
+  const detectPageAngle = useCallback(async (pageId?: string) => {
+    const targetId = pageId || selectedPageId;
+    if (!sessionId || !targetId) return null;
+    setIsDetectingAngle(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/book-scan/detect-angle/${sessionId}/${targetId}?max_angle=${deskewModule.maxAngle}&ignore_borders=${deskewModule.ignoreBorders}`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const angle = Number(data.detected_angle);
+        setDetectedAngle(angle);
+        return angle;
+      }
+    } catch (err) {
+      console.error("Detect angle failed:", err);
+    } finally {
+      setIsDetectingAngle(false);
+    }
+    return null;
+  }, [sessionId, selectedPageId, deskewModule.maxAngle, deskewModule.ignoreBorders]);
+
+  // Detect open book boundary and central spine fold
+  const detectCrop = useCallback(async (pageId?: string): Promise<{ crop_box: CropBox; split_pos: number; confidence: number } | null> => {
+    const targetId = pageId || selectedPageId;
+    if (!sessionId || !targetId) return null;
+    setIsDetectingCrop(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/book-scan/detect-crop/${sessionId}/${targetId}`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCropModule((prev) => ({
+          ...prev,
+          cropBox: data.crop_box,
+          splitPos: data.split_pos,
+        }));
+        return data;
+      }
+    } catch (err) {
+      console.error("Detect crop failed:", err);
+    } finally {
+      setIsDetectingCrop(false);
+    }
+    return null;
+  }, [sessionId, selectedPageId]);
+
+  // Split a 2-page spread into discrete Left & Right pages in the deck
+  const splitSpread = useCallback(async (target: "current" | "scope" = "current") => {
+    if (!sessionId || !selectedPageId) return;
+    try {
+      let targetPageIds: string[] | undefined = undefined;
+      let applyToAll = false;
+      if (target === "scope") {
+        if (cropModule.scope.mode === "all") {
+          applyToAll = true;
+        } else {
+          targetPageIds = pages
+            .filter((p, idx) => isPageInScope(idx + 1, cropModule.scope))
+            .map((p) => p.id);
+        }
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/book-scan/split-spread/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_id: selectedPageId,
+          crop_box: cropModule.cropBox,
+          split_pos: cropModule.splitPos,
+          apply_to_all: applyToAll,
+          target_page_ids: targetPageIds,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPages(data.pages);
+        if (data.new_selected_id) {
+          setSelectedPageId(data.new_selected_id);
+        }
+        // Switch crop mode to single and reset crop box for the newly created page half
+        setCropModule((prev) => ({
+          ...prev,
+          mode: "single",
+          cropBox: { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0 },
+          splitPos: 0.5,
+        }));
+      }
+    } catch (err) {
+      console.error("Split spread failed:", err);
+    }
+  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.splitPos, cropModule.scope, pages]);
+
+  // Revert a split page back to its uncut 2-page spread
+  const revertSpread = useCallback(async (mode: "current" | "all" = "current", pageId?: string) => {
+    const targetId = pageId || selectedPageId;
+    if (!sessionId) return;
+    if (mode === "current" && !targetId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/book-scan/revert-spread/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_id: mode === "current" ? targetId : undefined,
+          revert_all: mode === "all",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPages(data.pages);
+        if (data.new_selected_id) {
+          setSelectedPageId(data.new_selected_id);
+        }
+        // Switch crop mode back to spread for recombined sheet
+        setCropModule((prev) => ({
+          ...prev,
+          mode: "spread",
+        }));
+      }
+    } catch (err) {
+      console.error("Revert spread failed:", err);
+    }
+  }, [sessionId, selectedPageId]);
+
+  // Crop outer dead space margins on single page (or pages in scope)
+  const applyCrop = useCallback(async (target: "current" | "scope" = "current") => {
+    if (!sessionId || !selectedPageId) return;
+    try {
+      let targetPageIds: string[] | undefined = undefined;
+      let applyToAll = false;
+      if (target === "scope") {
+        if (cropModule.scope.mode === "all") {
+          applyToAll = true;
+        } else {
+          targetPageIds = pages
+            .filter((p, idx) => isPageInScope(idx + 1, cropModule.scope))
+            .map((p) => p.id);
+        }
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/book-scan/crop-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_id: selectedPageId,
+          crop_box: cropModule.cropBox,
+          apply_to_all: applyToAll,
+          target_page_ids: targetPageIds,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPages(data.pages);
+      }
+    } catch (err) {
+      console.error("Apply crop failed:", err);
+    }
+  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.scope, pages]);
+
   // Export print-ready PDF
   const exportPdf = useCallback(async () => {
     if (!sessionId) return;
@@ -215,17 +454,34 @@ export function useBookStudioState() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          bleed_mm: bleedMm,
-          show_crop_marks: showCropMarks,
-          dpi: exportDpi,
-          clean_borders: cleanBorders,
-          border_margin_px: borderMarginPx,
-          border_threshold: borderThreshold,
-          enhance_colors: enhanceColors,
-          saturation: saturation,
-          contrast: contrast,
-          deskew: deskew,
-          sharpen,
+          bleed_mm: bleedModule.bleedMm,
+          show_crop_marks: bleedModule.showCropMarks,
+          dpi: bleedModule.exportDpi,
+          clean_borders: restorationModule.cleanBorders,
+          border_margin_px: restorationModule.borderMarginPx,
+          border_threshold: restorationModule.borderThreshold,
+          enhance_colors: restorationModule.enhanceColors,
+          saturation: restorationModule.saturation,
+          contrast: restorationModule.contrast,
+          deskew: false,
+          sharpen: restorationModule.sharpen,
+
+          // Modular configurations & page scopes
+          deskew_module_enabled: deskewModule.enabled,
+          deskew_mode: deskewModule.mode,
+          deskew_angle: deskewModule.angle,
+          deskew_max_angle: deskewModule.maxAngle,
+          deskew_ignore_borders: deskewModule.ignoreBorders,
+          deskew_scope_mode: deskewModule.scope.mode,
+          deskew_custom_range: deskewModule.scope.customRange,
+
+          bleed_module_enabled: bleedModule.enabled,
+          bleed_scope_mode: bleedModule.scope.mode,
+          bleed_custom_range: bleedModule.scope.customRange,
+
+          restoration_module_enabled: restorationModule.enabled,
+          restoration_scope_mode: restorationModule.scope.mode,
+          restoration_custom_range: restorationModule.scope.customRange,
         }),
       });
 
@@ -237,7 +493,7 @@ export function useBookStudioState() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `book_${intakeMode}_${bleedMm}mm_bleed.pdf`;
+      link.download = `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -250,44 +506,48 @@ export function useBookStudioState() {
     }
   }, [
     sessionId,
-    bleedMm,
-    showCropMarks,
-    exportDpi,
-    cleanBorders,
-    borderMarginPx,
-    borderThreshold,
-    enhanceColors,
-    saturation,
-    contrast,
-    deskew,
-    sharpen,
+    bleedModule,
+    restorationModule,
+    deskewModule,
     intakeMode,
   ]);
 
   // Debounced URL generator for thumbnails & high-res inspector
   const getThumbnailUrl = useCallback((pageId: string, isClean: boolean, dpi: number = 100) => {
     if (!sessionId) return "";
+    const pageIdx = pages.findIndex((p) => p.id === pageId);
+    const pageNum = pageIdx >= 0 ? pageIdx + 1 : 1;
+
+    // Check scope applicability for this specific page
+    const applyDeskew = deskewModule.enabled && isPageInScope(pageNum, deskewModule.scope);
+    const applyRestoration = restorationModule.enabled && isPageInScope(pageNum, restorationModule.scope);
+
     const params = new URLSearchParams({
       preview_clean: String(isClean),
-      clean_borders: String(cleanBorders),
+      clean_borders: String(applyRestoration ? restorationModule.cleanBorders : false),
       border_margin_px: String(debouncedMargin),
-      border_threshold: String(borderThreshold),
-      enhance_colors: String(enhanceColors),
-      saturation: String(debouncedSaturation),
-      contrast: String(debouncedContrast),
-      deskew: String(deskew),
+      border_threshold: String(restorationModule.borderThreshold),
+      enhance_colors: String(applyRestoration ? restorationModule.enhanceColors : false),
+      saturation: String(applyRestoration ? debouncedSaturation : 1.0),
+      contrast: String(applyRestoration ? debouncedContrast : 1.0),
+      deskew: "false",
       dpi: String(dpi),
+      deskew_module_enabled: String(applyDeskew),
+      deskew_mode: deskewModule.mode,
+      deskew_angle: String(debouncedDeskewAngle),
+      deskew_max_angle: String(deskewModule.maxAngle),
+      deskew_ignore_borders: String(deskewModule.ignoreBorders),
     });
     return `${API_BASE_URL}/api/book-scan/page-thumbnail/${sessionId}/${pageId}?${params.toString()}`;
   }, [
     sessionId,
-    cleanBorders,
+    pages,
+    restorationModule,
     debouncedMargin,
-    borderThreshold,
-    enhanceColors,
     debouncedSaturation,
     debouncedContrast,
-    deskew,
+    deskewModule,
+    debouncedDeskewAngle,
   ]);
 
   return {
@@ -306,17 +566,21 @@ export function useBookStudioState() {
     isExporting,
     error, setError,
     previewCleaned, setPreviewCleaned,
-    bleedMm, setBleedMm, debouncedBleed,
-    showCropMarks, setShowCropMarks,
-    exportDpi, setExportDpi,
-    cleanBorders, setCleanBorders,
-    borderMarginPx, setBorderMarginPx, debouncedMargin,
-    borderThreshold,
-    enhanceColors, setEnhanceColors,
-    saturation, setSaturation, debouncedSaturation,
-    contrast, setContrast, debouncedContrast,
-    deskew, setDeskew,
-    sharpen,
+    debouncedBleed,
+    debouncedMargin,
+    debouncedSaturation,
+    debouncedContrast,
+    deskewModule, setDeskewModule,
+    bleedModule, setBleedModule,
+    restorationModule, setRestorationModule,
+    cropModule, setCropModule,
+    isDetectingCrop,
+    detectCrop,
+    splitSpread,
+    revertSpread,
+    applyCrop,
+    isDetectingAngle, detectedAngle,
+    detectPageAngle,
     settings,
     resetJob,
     initSession,

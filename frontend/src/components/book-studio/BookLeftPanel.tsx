@@ -84,25 +84,25 @@ export function BookLeftPanel({
       id: "single_page",
       title: "Single Pages",
       subtitle: "1 page per scan sheet (Most Common)",
-      icon: <FileText size={16} className="text-blue-400" />,
+      icon: <FileText size={16} className="text-cyan-400" />,
     },
     {
       id: "spread",
       title: "2-Page Spreads",
       subtitle: "2-Up spreads split into 1-Up pages",
-      icon: <BookOpen size={16} className="text-amber-400" />,
+      icon: <BookOpen size={16} className="text-cyan-400" />,
     },
     {
       id: "dual_pass",
       title: "Dual Pass (Odds/Evens)",
       subtitle: "Duplex scan batches collated",
-      icon: <Layers size={16} className="text-purple-400" />,
+      icon: <Layers size={16} className="text-cyan-400" />,
     },
     {
       id: "digital",
       title: "Digital / Original",
       subtitle: "Born-digital or vector PDF book",
-      icon: <FileCheck size={16} className="text-emerald-400" />,
+      icon: <FileCheck size={16} className="text-cyan-400" />,
     },
   ];
 
@@ -138,7 +138,7 @@ export function BookLeftPanel({
       {/* Panel Header */}
       <div className="p-3 border-b border-[#242A38] bg-[#131720] flex items-center justify-between">
         <div className="flex items-center space-x-2 text-slate-200 font-semibold text-sm truncate">
-          <FolderOpen size={16} className="text-amber-400 shrink-0" />
+          <FolderOpen size={16} className="text-cyan-400 shrink-0" />
           <span className="truncate">{sessionId ? "Pages Deck" : "Document Intake"}</span>
         </div>
         <div className="flex items-center space-x-1.5">
@@ -180,7 +180,7 @@ export function BookLeftPanel({
                     onClick={() => setIntakeMode(m.id)}
                     className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-start space-x-2.5 ${
                       isSelected
-                        ? "border-blue-500 bg-blue-950/40 ring-1 ring-blue-500/30 text-white"
+                        ? "border-cyan-500 bg-cyan-950/40 ring-1 ring-cyan-500/30 text-white"
                         : "border-[#242A38] bg-[#131720]/50 hover:bg-[#131720] text-slate-300 hover:border-slate-700"
                     }`}
                   >
@@ -209,8 +209,8 @@ export function BookLeftPanel({
                   onClick={() => oddsInputRef.current?.click()}
                   className={`p-3 rounded-lg border-2 border-dashed cursor-pointer text-center transition-all ${
                     fileOdds
-                      ? "border-blue-500/60 bg-blue-950/20"
-                      : "border-[#2E3648] hover:border-blue-400/50 bg-[#131720]/40"
+                      ? "border-cyan-500/60 bg-cyan-950/20"
+                      : "border-[#2E3648] hover:border-cyan-400/50 bg-[#131720]/40"
                   }`}
                 >
                   <input
@@ -243,8 +243,8 @@ export function BookLeftPanel({
                   onClick={() => evensInputRef.current?.click()}
                   className={`p-3 rounded-lg border-2 border-dashed cursor-pointer text-center transition-all ${
                     fileEvens
-                      ? "border-purple-500/60 bg-purple-950/20"
-                      : "border-[#2E3648] hover:border-purple-400/50 bg-[#131720]/40"
+                      ? "border-cyan-500/60 bg-cyan-950/20"
+                      : "border-[#2E3648] hover:border-cyan-400/50 bg-[#131720]/40"
                   }`}
                 >
                   <input
@@ -278,8 +278,8 @@ export function BookLeftPanel({
                 onClick={() => singleInputRef.current?.click()}
                 className={`p-5 rounded-lg border-2 border-dashed cursor-pointer text-center transition-all ${
                   fileSingle
-                    ? "border-blue-500/60 bg-blue-950/20"
-                    : "border-[#2E3648] hover:border-blue-400/50 bg-[#131720]/40"
+                    ? "border-cyan-500/60 bg-cyan-950/20"
+                    : "border-[#2E3648] hover:border-cyan-400/50 bg-[#131720]/40"
                 }`}
               >
                 <input
@@ -289,7 +289,7 @@ export function BookLeftPanel({
                   className="hidden"
                   onChange={(e) => setFileSingle(e.target.files?.[0] || null)}
                 />
-                <Upload size={24} className="mx-auto text-blue-400 mb-2" />
+                <Upload size={24} className="mx-auto text-cyan-400 mb-2" />
                 <div className="text-xs font-semibold text-slate-200 truncate">
                   {fileSingle ? fileSingle.name : "Drop or Browse Book PDF"}
                 </div>
@@ -307,7 +307,7 @@ export function BookLeftPanel({
             <button
               onClick={initSession}
               disabled={isInitializing || (intakeMode === "dual_pass" ? (!fileOdds || !fileEvens) : !fileSingle)}
-              className="w-full flex items-center justify-center space-x-2 py-2.5 px-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-lg text-xs font-semibold shadow transition-all"
+              className="w-full flex items-center justify-center space-x-2 py-2.5 px-3 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-lg text-xs font-semibold shadow transition-all cursor-pointer disabled:cursor-not-allowed"
             >
               {isInitializing ? (
                 <>
@@ -349,11 +349,11 @@ export function BookLeftPanel({
                     onClick={() => setSelectedPageId(p.id)}
                     className={`group relative flex flex-col rounded-lg border cursor-pointer transition-all ${
                       isSelfDragging
-                        ? "opacity-30 border-dashed border-blue-500 scale-95"
+                        ? "opacity-30 border-dashed border-cyan-500 scale-95"
                         : isDragTarget
                         ? "border-cyan-400 bg-cyan-950/20 scale-[1.02]"
                         : isSelected
-                        ? "border-blue-500 ring-2 ring-blue-500/40 bg-[#1E2638] shadow"
+                        ? "border-cyan-500 ring-2 ring-cyan-500/40 bg-[#1E2638] shadow"
                         : "border-[#272E3F] hover:border-slate-500 bg-[#131720]"
                     }`}
                   >
@@ -376,7 +376,7 @@ export function BookLeftPanel({
 
                       {/* Rotation Tag */}
                       {p.rotation !== 0 && (
-                        <span className="absolute top-1 right-1 bg-amber-950/80 text-amber-300 border border-amber-700/50 text-[8px] font-mono px-1 rounded">
+                        <span className="absolute top-1 right-1 bg-cyan-950/80 text-cyan-300 border border-cyan-700/50 text-[8px] font-mono px-1 rounded">
                           {p.rotation}°
                         </span>
                       )}

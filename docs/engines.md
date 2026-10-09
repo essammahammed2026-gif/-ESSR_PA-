@@ -34,12 +34,28 @@ All core printing, geometry, computer vision, and document-transformation logic 
   6. **Export:** Generates an SVG or PDF with a designated spot-color stroke (e.g. 100% Magenta `#FF00FF` labeled `CutContour` or `KissCut`) without rasterizing or flattening the artwork.
 
 ### 3. Book Scan Processor (`book_scan_engine.py`)
-* **Purpose:** Ingests raw book scans from flatbed scanners, dual overhead scanners, or smartphone cameras.
+* **Purpose:** Ingests raw book scans from flatbed scanners, dual overhead scanners, or automated sheet-fed passes.
 * **Pipeline:**
-  * **Spread Splitting:** Identifies vertical book gutters and splits two-page spreads into discrete left/right pages.
-  * **Deskewing & Cropping:** Detects text-block orientation via Radon/Hough line transforms and rectifies page skew.
-  * **Contrast & Margin Normalization:** Removes dark scan edges and optimizes legibility.
-  * **Bleed Synthesis:** Synthesizes a 3mm outer bleed extension using mirror-edge pixel padding for safe binding and guillotine trimming.
+  * **Spread Splitting & Collation:** Identifies vertical book gutters and splits two-page spreads into discrete left/right pages, or interleaves dual-pass odds/evens files.
+  * **Modular Pipeline Architecture:** Tools operate as independent, non-destructive modules (**Crop & Split**, **Deskew**, **Print Bleed & Marks**, **Restoration & Cleanup**), off by default upon loading.
+  * **Granular Page Scoping (`is_page_in_scope`):** Evaluates targeting masks (`all`, `odds`, `evens`, or custom comma-separated range strings e.g. `1-5, 8, 11-14`) so modules execute exclusively on eligible pages during real-time rendering and PDF export.
+  * **Intelligent Crop & 2-Page Spread Splitting (`detect_book_crop_and_seam`, `extract_page_image`, `split_spread`, `revert_spread`):**
+    - *Scanner Bed Platen Cropping*: Automatically detects the outer bounding box of an open book lying on a flatbed scanner glass bed (e.g. an A5 or custom-size book on an A3/A4 scanner bed), trimming away empty white/black background margins.
+    - *Spine Valley Fold Detection*: Analyzes the central 30%–70% vertical strip of the cropped book via luminance valley profiling, locating the physical center seam / gutter fold with sub-pixel precision.
+    - *Two Operational Modes*:
+      - **Spread Mode**: Crops scanner bed margins and splits 2-page spreads into discrete Left and Right pages directly inserted into the page deck, preserving natural book reading order.
+      - **Single Page Mode**: Crops unwanted outer scan bed margins for single-page scans without splitting.
+    - *Interactive Canvas Overlay*: Provides 8 draggable corner and edge handles plus an interactive spine seam guideline with dynamic coordinate clamps and pixel-precise slider synchronization.
+    - *Non-Destructive Splitting & Revert*: Child split pages retain links to their parent sheet (`parent_page_id`, `crop_box`, `split_pos`), allowing instant 1-click reversal back into uncut sheets via `revert_spread`.
+  * **Modular Intelligent Deskewing (`detect_skew_angle`, `apply_deskew`):** Detects fine text baseline orientation on scanned book pages with sub-0.05° precision:
+    - *Illumination Normalization*: Uses adaptive background subtraction (`diff = cv2.subtract(medianBlur, gray)`) to completely neutralize scanner light falloff, page yellowing, and dark spine gutter gradients.
+    - *Margin Exclusion*: Masks outer 6% margins when `ignore_borders` is enabled to eliminate scanner bed platen borders and ADF feed roller shadow interference.
+    - *Contour Baseline Analysis*: Connects words horizontally using morphology and analyzes text line bounding boxes (`minAreaRect`), calculating a robust weighted median angle that remains completely immune to multi-column staggered paragraphs.
+    - *Multi-Strip Vertical Profiling Fallback*: Automatically falls back to 3-strip interior vertical projection profile variance for sparse-text pages, title pages, or tables.
+    - *Seamless Edge Replicate*: Employs OpenCV `BORDER_REPLICATE` during affine rotation to blend page corners naturally with the document's true paper tone, avoiding artificial stark white wedge artifacts.
+    - *Pipeline Execution Priority*: Runs deskew **first** before border cleaning, ensuring subsequent border clearing and bleed extension align squarely with straightened page axes.
+  * **Contrast & Margin Normalization:** Removes dark scan edges and optimizes legibility via outer border clearing along straightened document axes, with levels and saturation boosting.
+  * **Bleed Synthesis & Prepress Marks (`add_bleed_and_export_pdf`):** Synthesizes outer bleed extension using mirror-edge pixel padding for safe binding and guillotine trimming, rendering vector trim marks per-page according to module scope.
 
 ### 4. PDF Preflight Analyzer (`preflight.py`)
 * **Purpose:** Inspects incoming PDF assets before production to prevent costly press downtime and print defects.

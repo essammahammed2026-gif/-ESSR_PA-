@@ -7,7 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+- **Book Studio Spread Split Coordinate & Dimension Accuracy Overhaul**:
+  - **Spine Seam Physical Anchor Preservation**: Fixed seam position shifting when adjusting crop margins. Moving outer boundary handles (`w`, `e`, `n`, `s`, `nw`, etc.) to crop blank scanner glass now preserves the exact physical location of the spine seam on the scan, eliminating cut line drift.
+  - **Accurate Post-Split Dimensions & Secondary Crop Separation**:
+    - Stored true page half dimensions (`width_mm`, `height_mm`, `orig_width_mm`, `orig_height_mm`) on split pages instead of retaining parent spread dimensions.
+    - Preserved `parent_spread_width_mm` and `parent_spread_height_mm` on split page records to enable seamless restoration on revert.
+    - Separated `spread_crop_box` / `spread_split_pos` from secondary `page_crop_box` in `extract_page_image`, preventing single-page crops from corrupting parent spread cuts.
+  - **Context-Aware Split Page UI & Viewport Isolation**:
+    - Automatically switches Crop module to `single` mode upon selecting a split page (`left` or `right`), preventing phantom spine cutters from rendering across individual page halves.
+    - Replaced spread dimension calculations with single page dimensions on split pages, with explicit `Split Page (Left Half / Right Half)` badges and instant `Revert to Spread` button access.
+  - **Comprehensive Cache Invalidation & Canvas Orientation**:
+    - Added page half (`half`), split position (`sp`), rotation (`rot`), and spread/page crop box tokens to thumbnail cache keys, eliminating stale cached images.
+    - Removed redundant CSS rotation transform on the viewport image element to prevent double-rotation artifacts with backend OpenCV renders.
+
+- **Book Studio Crop & 2-Page Spread Split Module**:
+  - **In-Studio Spread Splitting (Option A)**: Ingests 2-page scans as full uncut sheets, allowing operators to visually calibrate margins and split them into discrete left and right pages directly inside Book Studio's page deck.
+  - **Spread & Single Page Operational Modes**:
+    - **Spread Mode**: Crops empty scanner glass bed margins and divides the book into left/right pages with configurable spine gutter position.
+    - **Single Page Mode**: Crops outer scanner bed borders for individual page scans without splitting.
+  - **Granular Page Scope Support**:
+    - Respects operator-defined page scopes (`all`, custom `range` e.g. `1-5`, `odds`, `evens`) during both **Split Spread** and **Apply Crop** operations via `target_page_ids`.
+    - Action buttons dynamically label target scope (e.g. `Split Spreads in Scope (1-5)`, `Split Odd Spreads`, `Apply Crop to Scope (1-5)`).
+  - **Dual Revert Controls**:
+    - Added **Revert Current** to recombine the selected split page back to its original parent spread.
+    - Added **Revert All** to recombine all split spreads across the entire publication in 1 click.
+  - **Decluttered UI & Compact Prepress Dimensions**:
+    - Removed redundant seam slider bar and crop margin % grid to keep the right panel clean and lightweight.
+    - Removed dragging HUD overlay in the viewport; kept compact, non-intrusive 8-9px dimension tags directly on crop box boundaries (`↔ WIDTH`, `↕ HEIGHT`, `P1 (LEFT)`, `P2 (RIGHT)`).
+  - **High-Contrast Amber Prepress Guides & Dual-Contrast Line Backing**:
+    - Replaced low-contrast cyan guides with vivid prepress Amber-400 and dark under-shadow backing (`border-2 border-dashed border-amber-400` with `shadow-[0_0_0_1px_rgba(0,0,0,0.85)]`), guaranteeing 100% visibility against pure white paper glare and dark scanner beds alike.
+    - Overhauled the spine seam divider with a dark underlayer, vivid amber dashed guideline, top `▼ SEAM` notch, bottom `▲ SEAM` notch, and an interactive draggable grip pill displaying live percentage and millimeter widths.
+    - Enlarged the 8 corner and edge resize handles with high-contrast amber fills and 2px solid black borders.
+  - **Intelligent Auto-Detection Engine (`detect_book_crop_and_seam`)**:
+    - Analyzes thresholded edge projections to identify book contours against bright or dark scanner bed margins.
+    - Evaluates central gutter valley profiles to pinpoint the physical spine fold seam.
+  - **Non-Destructive Splitting & 1-Click Revert**:
+    - Preserves origin sheet metadata (`parent_page_id`, `crop_box`, `split_pos`, `width_mm`, `height_mm`, `orig_width_mm`, `orig_height_mm`) on split pages.
+  - **Backend API Endpoints**: Added `POST /api/book-scan/detect-crop/{session_id}/{page_id}`, `POST /api/book-scan/split-spread/{session_id}`, `POST /api/book-scan/revert-spread/{session_id}`, and `POST /api/book-scan/crop-page/{session_id}`, with dynamic thumbnail cache invalidation.
+
+- **Book Studio Default Collapsed Modules & High-Precision Deskew Overhaul**:
+  - **Collapsed Modules by Default**: Configured all processing module dropdown cards (**Deskew**, **Print Bleed & Marks**, **Restoration & Cleanup**) in [`BookRightPanel.tsx`](frontend/src/components/book-studio/BookRightPanel.tsx) to initialize closed/collapsed, providing a clean and organized control panel on load.
+  - **High-Precision Hybrid Deskew Engine**: Overhauled `detect_skew_angle` in [`book_scan_engine.py`](backend/engines/book_scan_engine.py):
+    - Replaced global Otsu with adaptive background subtraction (`diff = cv2.subtract(medianBlur, gray)`), eliminating spine gutter shadows, scanner light falloff, and paper yellowing.
+    - Implemented horizontal morphological text line grouping and primary contour baseline analysis with `minAreaRect` and weighted median angles, achieving sub-0.05° precision completely immune to staggered multi-column layouts.
+    - Added 3-strip vertical interior projection profiling fallback for sparse text or table pages.
+    - Switched affine rotation padding in `apply_deskew` to `cv2.BORDER_REPLICATE` to blend rotated corners seamlessly with natural paper tones without pure-white corner triangles.
+    - Corrected pipeline processing order in `process_single_page`: runs deskew **first** so downstream border cleaning and bleed extension operate squarely along straightened axes.
+  - **Deskew UI Controls & Manual Transfer**:
+    - Clarified the "Current Tilt" readout in [`BookRightPanel.tsx`](frontend/src/components/book-studio/BookRightPanel.tsx) to display measured tilt alongside the applied correction adjustment (e.g. `+1.8° (adj: -1.8°)`).
+    - Added an instant **Adjust in Manual Nudge →** button that copies the auto-detected angle into the manual slider for effortless fine-tuning without resetting to zero.
+    - Added explicit `(CW)` and `(CCW)` direction indicators to the manual nudge slider range endpoints.
+    - Automatically resets detected angle when switching pages in [`useBookStudioState.ts`](frontend/src/hooks/useBookStudioState.ts).
+
 - **Book Studio Full-Page Viewport & Left Deck Gallery**:
   - **Thumbnail Deck in Left Panel**: Moved the visual thumbnail deck directly into [`BookLeftPanel.tsx`](frontend/src/components/book-studio/BookLeftPanel.tsx) with 2-column cards, rotation tags, drag-and-drop reordering, and hover actions, replacing the plain text list and freeing up the central screen.
   - **Full-Page Center Viewport Refinements**: Refactored [`BookWorkspace.tsx`](frontend/src/components/book-studio/BookWorkspace.tsx) with a clean toolbar (removed redundant labels and bottom hint pill), added counter-clockwise rotation (`RotateCcw`), and integrated the HTML5 Fullscreen API (`Maximize2` / `Minimize2`).

@@ -24,15 +24,17 @@ function BookStudioContent() {
     isInitializing,
     isExporting,
     error,
-    bleedMm, setBleedMm,
-    showCropMarks, setShowCropMarks,
-    exportDpi, setExportDpi,
-    cleanBorders, setCleanBorders,
-    borderMarginPx, setBorderMarginPx,
-    enhanceColors, setEnhanceColors,
-    saturation, setSaturation,
-    contrast, setContrast,
-    deskew, setDeskew,
+    deskewModule, setDeskewModule,
+    bleedModule, setBleedModule,
+    restorationModule, setRestorationModule,
+    cropModule, setCropModule,
+    isDetectingCrop,
+    detectCrop,
+    splitSpread,
+    revertSpread,
+    applyCrop,
+    isDetectingAngle, detectedAngle,
+    detectPageAngle,
     resetJob,
     initSession,
     rotatePage,
@@ -61,7 +63,7 @@ function BookStudioContent() {
       title="Book Studio"
       statusBadge={
         <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#181D27] border border-[#242A38] text-xs">
-          <BookOpen size={13} className="text-amber-400" />
+          <BookOpen size={13} className="text-cyan-400" />
           <span className="text-slate-300 font-medium">
             {sessionId ? `${pages.length} Pages Loaded` : "Intake Ready"}
           </span>
@@ -115,6 +117,9 @@ function BookStudioContent() {
           rotatePage={rotatePage}
           deletePage={deletePage}
           sessionId={sessionId}
+          showGrid={deskewModule.enabled && deskewModule.showGrid}
+          cropModule={cropModule}
+          setCropModule={setCropModule}
         />
       }
 
@@ -125,29 +130,29 @@ function BookStudioContent() {
       onToggleRight={() => setIsRightCollapsed((prev) => !prev)}
       rightPanel={
         <BookRightPanel
-          bleedMm={bleedMm}
-          setBleedMm={setBleedMm}
-          showCropMarks={showCropMarks}
-          setShowCropMarks={setShowCropMarks}
-          exportDpi={exportDpi}
-          setExportDpi={setExportDpi}
-          cleanBorders={cleanBorders}
-          setCleanBorders={setCleanBorders}
-          borderMarginPx={borderMarginPx}
-          setBorderMarginPx={setBorderMarginPx}
-          enhanceColors={enhanceColors}
-          setEnhanceColors={setEnhanceColors}
-          saturation={saturation}
-          setSaturation={setSaturation}
-          contrast={contrast}
-          setContrast={setContrast}
-          deskew={deskew}
-          setDeskew={setDeskew}
+          cropModule={cropModule}
+          setCropModule={setCropModule}
+          isDetectingCrop={isDetectingCrop}
+          detectCrop={detectCrop}
+          splitSpread={splitSpread}
+          revertSpread={revertSpread}
+          applyCrop={applyCrop}
+          pages={pages}
+          deskewModule={deskewModule}
+          setDeskewModule={setDeskewModule}
+          bleedModule={bleedModule}
+          setBleedModule={setBleedModule}
+          restorationModule={restorationModule}
+          setRestorationModule={setRestorationModule}
           handleExport={exportPdf}
           isExporting={isExporting}
           sessionId={sessionId}
           totalPages={pages.length}
           onCollapse={() => setIsRightCollapsed(true)}
+          isDetectingAngle={isDetectingAngle}
+          detectedAngle={detectedAngle}
+          detectPageAngle={detectPageAngle}
+          selectedPageId={selectedPageId}
         />
       }
     />
