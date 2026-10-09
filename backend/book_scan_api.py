@@ -169,7 +169,8 @@ async def get_page_thumbnail(
     enhance_colors: bool = True,
     saturation: float = 1.30,
     contrast: float = 1.10,
-    deskew: bool = False
+    deskew: bool = False,
+    dpi: int = 100
 ):
     session = SESSIONS.get(session_id)
     if not session:
@@ -179,8 +180,12 @@ async def get_page_thumbnail(
     if not page_info:
         raise HTTPException(status_code=404, detail="Page not found.")
 
-    # Disk cache: return cached thumbnail if it exists
-    thumb_path = os.path.join(session["session_dir"], f"thumb_{page_id}_{preview_clean}.jpg")
+    # Disk cache tag with settings
+    cache_tag = f"thumb_{page_id}_{preview_clean}_{dpi}"
+    if preview_clean:
+        cache_tag += f"_{border_margin_px}_{int(saturation*100)}_{int(contrast*100)}_{int(deskew)}"
+    thumb_path = os.path.join(session["session_dir"], f"{cache_tag}.jpg")
+
     if os.path.exists(thumb_path):
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
@@ -193,7 +198,7 @@ async def get_page_thumbnail(
         doc_map["single"] = fitz.open(session["single_path"])
 
     try:
-        raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=90)
+        raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=dpi)
         if preview_clean:
             proc_img = BookScanEngine.process_single_page(
                 raw_img,

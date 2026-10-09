@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Book Studio Full-Page Viewport & Left Deck Gallery**:
+  - **Thumbnail Deck in Left Panel**: Moved the visual thumbnail deck directly into [`BookLeftPanel.tsx`](frontend/src/components/book-studio/BookLeftPanel.tsx) with 2-column cards, rotation tags, drag-and-drop reordering, and hover actions, replacing the plain text list and freeing up the central screen.
+  - **Full-Page Center Viewport Refinements**: Refactored [`BookWorkspace.tsx`](frontend/src/components/book-studio/BookWorkspace.tsx) with a clean toolbar (removed redundant labels and bottom hint pill), added counter-clockwise rotation (`RotateCcw`), and integrated the HTML5 Fullscreen API (`Maximize2` / `Minimize2`).
+  - **Contextual Toggle Button**: Replaced verbose status labels with a clear dynamic button: `Show Original` when viewing edited, and `Show Edited` when viewing original.
+  - **Mouse Wheel Zoom & Pan Control**: Intercepted `Ctrl + Wheel` via non-passive event listeners to zoom directly into the cursor location without triggering browser page zoom, with `Ctrl + 0` resetting scale to 100%, and mouse-drag panning when zoomed.
+  - **Instant Original Overlay with Shortcuts**:
+    - **Hold `[Space]`**: Temporarily overlays the raw, unprocessed scan to quickly inspect what was changed, releasing immediately snaps back to cleaned.
+    - **Press `[O]`**: Toggles between Raw Original and Cleaned Print View.
+    - **Keys `[` and `]` / Arrow keys**: Rapidly flip through previous and next pages.
+  - **Unified StudioLayout Shell Component**: Created [`StudioLayout.tsx`](frontend/src/components/layout/StudioLayout.tsx) establishing a standard 3-slot architecture (Left Deck / Center Viewport / Right Controls) shared across the suite. Features collapsible sidebars (`w-11` slim rails with expand triggers), global bracket hotkeys (`[` and `]`), top breadcrumb toggles, and seamless full-width canvas expansion.
+  - **Studio Adoption (Book Studio & Imposing Studio)**: Successfully migrated both [`book-studio/page.tsx`](frontend/src/app/book-studio/page.tsx) and [`imposing/page.tsx`](frontend/src/app/imposing/page.tsx) to `StudioLayout`, removing hundreds of lines of repetitive layout boilerplate.
+  - **Dynamic Backend Cache & DPI Scaling**: Updated `get_page_thumbnail` in [`book_scan_api.py`](backend/book_scan_api.py) to support dynamic DPI (100 DPI for fast deck thumbnails, 150 DPI for high-res viewport inspection) and multi-parameter cache keys.
+
 - **Documentation & Setup Guides**:
   - **Work PC & Cross-Platform Setup Guide**: Added step-by-step setup and quickstart instructions in [`README.md`](README.md) covering cloning from GitHub, environment setup, and service running for both Linux/macOS and Windows without external Redis or Celery dependencies.
   - **Prepress Engine & API Sync**: Updated [`docs/api.md`](docs/api.md), [`docs/engines.md`](docs/engines.md), and [`backend/README.md`](backend/README.md) to document the Universal Asset Inspector (`asset_inspector.py`), Executive Audit Report Generator (`report_generator.py`), and granular imposition deck endpoints.

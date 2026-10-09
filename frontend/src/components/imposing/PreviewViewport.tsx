@@ -135,14 +135,14 @@ export function PreviewViewport({
   }, [previewData, currentPage]);
 
   return (
-    <div className="flex-1 min-w-0 max-w-[780px] flex flex-col space-y-3">
+    <div className="flex-1 min-w-0 w-full h-full flex flex-col space-y-2">
       {error && (
         <div className="p-3 bg-red-500/10 text-red-400 rounded-xl border border-red-500/30 text-xs">
           {error}
         </div>
       )}
 
-      <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex flex-col overflow-hidden min-h-[460px] h-[520px] lg:h-[620px] xl:h-[680px] shadow-sm relative">
+      <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex flex-col overflow-hidden h-full shadow-sm relative">
         {/* Viewport Toolbar */}
         <div className="p-2.5 border-b border-[#242A38] flex flex-wrap justify-between items-center bg-[#141822] gap-2">
           <div className="flex items-center space-x-3">

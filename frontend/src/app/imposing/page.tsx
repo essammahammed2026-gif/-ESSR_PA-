@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { 
 } from "lucide-react";
@@ -9,6 +8,7 @@ import { API_BASE_URL } from "@/lib/api";
 
 import { ImposingItem, ImposingPage, ImpositionPreviewResponse, PageRotation } from "@/types/prepress";
 import { useImpositionState } from "@/hooks/useImpositionState";
+import { StudioLayout } from "@/components/layout/StudioLayout";
 import { PreviewViewport } from "@/components/imposing/PreviewViewport";
 import { LeftAssetPanel } from "@/components/imposing/LeftAssetPanel";
 import { RightControlPanel } from "@/components/imposing/RightControlPanel";
@@ -403,87 +403,83 @@ function ImposingStudioContent() {
   }, [items, pages, jobMode, mode, sheetW, sheetH, margin, gap, rows, cols, align, drawBorder, borderColor, cropMarks, autoRotateSheet, handlePreview]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-2rem)] space-y-2">
-      {/* Top Header */}
-      <div className="flex items-center justify-between pb-2 border-b border-[#242A38]">
-         <div className="flex items-center space-x-2 text-sm text-slate-300">
-            <Link href="/" className="text-cyan-400 hover:text-cyan-300 transition-colors font-medium">
-              Home
-            </Link>
-            <span className="text-slate-500">/</span>
-            <span className="font-semibold text-white">Imposing Studio</span>
-         </div>
-      </div>
-
-      <div className="flex-1 flex flex-col lg:flex-row gap-3 min-h-0">
-        {/* Left Panel */}
-        <div className="w-full lg:w-[280px] xl:w-[300px] shrink-0 h-full">
-           <LeftAssetPanel 
-             items={items}
-             pages={pages}
-             handleFileUpload={handleFileUpload}
-             isUploading={isUploading}
-             reorderPages={reorderPages}
-             rotatePage={rotatePage}
-             toggleDeletePage={toggleDeletePage}
-             duplicatePage={duplicatePage}
-             clearAllPages={clearAllPages}
-           />
+    <StudioLayout
+      title="Imposing Studio"
+      statusBadge={
+        <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#181D27] border border-[#242A38] text-xs">
+          <span className="text-slate-400 font-mono font-medium">
+            {sheetW}×{sheetH}{unit}
+          </span>
+          <span className="text-slate-600">•</span>
+          <span className="text-cyan-400 font-semibold uppercase text-[11px]">
+            {jobMode}
+          </span>
         </div>
-
-        {/* Center Canvas */}
-        <div className="flex-1 h-full min-w-0">
-           <PreviewViewport
-             previewData={previewData}
-             items={items}
-             jobMode={jobMode}
-             bookStep={bookStep}
-             isPreviewing={isPreviewing}
-             sheetW={sheetW}
-             sheetH={sheetH}
-             margin={margin}
-             drawBorder={drawBorder}
-             borderColor={borderColor}
-             cropMarks={cropMarks}
-             regMarks={regMarks}
-             error={error}
-             currentPage={currentPage}
-             setCurrentPage={setCurrentPage}
-           />
-        </div>
-
-        {/* Right Panel */}
-        <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 h-full overflow-y-auto">
-           <RightControlPanel
-              jobMode={jobMode}
-              setJobMode={setJobMode}
-              items={items}
-              sheetPreset={sheetPreset}
-              setSheetPreset={setSheetPreset}
-              sheetW={sheetW}
-              setSheetW={setSheetW}
-              sheetH={sheetH}
-              setSheetH={setSheetH}
-              unit={unit}
-              gap={gap}
-              setGap={setGap}
-              margin={margin}
-              setMargin={setMargin}
-              handleExport={handleExport}
-              isExporting={isExporting}
-              cropMarks={cropMarks}
-              setCropMarks={setCropMarks}
-              regMarks={regMarks}
-              setRegMarks={setRegMarks}
-              rows={rows}
-              setRows={setRows}
-              cols={cols}
-              setCols={setCols}
-              handlePreview={handlePreview}
-           />
-        </div>
-      </div>
-    </div>
+      }
+      leftLabel="Deck"
+      leftPanel={
+        <LeftAssetPanel 
+          items={items}
+          pages={pages}
+          handleFileUpload={handleFileUpload}
+          isUploading={isUploading}
+          reorderPages={reorderPages}
+          rotatePage={rotatePage}
+          toggleDeletePage={toggleDeletePage}
+          duplicatePage={duplicatePage}
+          clearAllPages={clearAllPages}
+        />
+      }
+      centerViewport={
+        <PreviewViewport
+          previewData={previewData}
+          items={items}
+          jobMode={jobMode}
+          bookStep={bookStep}
+          isPreviewing={isPreviewing}
+          sheetW={sheetW}
+          sheetH={sheetH}
+          margin={margin}
+          drawBorder={drawBorder}
+          borderColor={borderColor}
+          cropMarks={cropMarks}
+          regMarks={regMarks}
+          error={error}
+          currentPage={currentPage}
+          setCurrentPage={setCurrentPage}
+        />
+      }
+      rightLabel="Controls"
+      rightPanel={
+        <RightControlPanel
+          jobMode={jobMode}
+          setJobMode={setJobMode}
+          items={items}
+          sheetPreset={sheetPreset}
+          setSheetPreset={setSheetPreset}
+          sheetW={sheetW}
+          setSheetW={setSheetW}
+          sheetH={sheetH}
+          setSheetH={setSheetH}
+          unit={unit}
+          gap={gap}
+          setGap={setGap}
+          margin={margin}
+          setMargin={setMargin}
+          handleExport={handleExport}
+          isExporting={isExporting}
+          cropMarks={cropMarks}
+          setCropMarks={setCropMarks}
+          regMarks={regMarks}
+          setRegMarks={setRegMarks}
+          rows={rows}
+          setRows={setRows}
+          cols={cols}
+          setCols={setCols}
+          handlePreview={handlePreview}
+        />
+      }
+    />
   );
 }
 

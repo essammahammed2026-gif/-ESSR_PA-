@@ -47,15 +47,15 @@ Managed in `backend/main.py`.
 * **`POST /api/contour/generate`**: Accepts thresholding mode, dilation/erosion offset (mm), smoothing factor, and area filtering. Runs `contour_engine.py` and returns the vectorized cut path as an SVG preview.
 * **`GET /api/contour/export`**: Downloads the final cut path as a standalone SVG or PDF with designated spot-color die lines.
 
-### 5. Book Scan Ingest & Cleanup
+### 5. Book Scan Ingest & Cleanup (`/api/book-scan/*`)
 Managed by `backend/book_scan_api.py`.
 
-* **`POST /init-session`**: Initializes a temporary book scan session and receives odd/even page scans.
-* **`GET /page-thumbnail/{session_id}/{page_num}`**: Returns low-resolution raster thumbnail for the page lightbox UI.
-* **`POST /reorder/{session_id}`**: Updates page sequence and spread assignments.
-* **`POST /rotate/{session_id}/{page_num}`**: Rotates individual pages in 90° increments.
-* **`DELETE /page/{session_id}/{page_num}`**: Removes blank or spoiled scan pages.
-* **`POST /export/{session_id}`**: Compiles normalized pages with 3mm synthesized bleed into a unified publication PDF.
+* **`POST /api/book-scan/init-session`**: Initializes a book scan session. Supports single-pass scans, 2-up double-page spreads, dual-pass duplex scans (odds/evens), and digital PDFs.
+* **`GET /api/book-scan/page-thumbnail/{session_id}/{page_id}`**: Returns cached raster thumbnail or high-res page image. Supports dynamic resolution via `dpi` (e.g. 100 DPI for fast deck cards, 150 DPI for high-res viewport inspection) and live preview filters (border cleanup, saturation, contrast, deskew).
+* **`POST /api/book-scan/reorder/{session_id}`**: Persists reordered page sequence.
+* **`POST /api/book-scan/rotate/{session_id}`**: Rotates individual page in 90° CW/CCW increments.
+* **`DELETE /api/book-scan/page/{session_id}/{page_id}`**: Removes blank or unwanted scan pages.
+* **`POST /api/book-scan/export/{session_id}`**: Compiles processed pages with 3mm synthesized mirrored bleed, PDF trim boxes, and vector crop marks into a print-ready PDF.
 
 ### 6. Settings & Preset Management (`/api/settings/*`)
 Managed by `backend/settings_api.py`.
