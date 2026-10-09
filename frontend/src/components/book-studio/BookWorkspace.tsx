@@ -201,7 +201,7 @@ export function BookWorkspace({
       ...prev,
       mode: isSplit ? "single" : (selectedPage.is_spread ? "spread" : "single"),
       cropBox: isSplit
-        ? { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0 }
+        ? (selectedPage.page_crop_box || { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0 })
         : (selectedPage.crop_box || { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 }),
       splitPos: selectedPage.split_pos ?? 0.5,
     }));

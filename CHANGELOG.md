@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
-
+- **Book Studio Crop Box State Fix**:
+  - Fixed a critical UI bug where navigating to a split page in Book Studio would unconditionally wipe the single-page crop box view back to full bed margins (`0, 0, 1, 1`), ignoring the previously applied secondary `page_crop_box` crop from the backend. The frontend viewport will now faithfully re-render the single page crop upon navigating away and back.
 - **UI Refinement: Spine Seam Simplification**:
   - Simplified the Spine Seam interactive overlay in Book Studio: removed the word "SEAM" to only show the percentage.
   - Refined Resulting Dimensions display and P1/P2 canvas badges to show a single exact dimension, removing secondary rounded-up versions.
