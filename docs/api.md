@@ -55,7 +55,12 @@ Managed by `backend/book_scan_api.py`.
 * **`POST /api/book-scan/reorder/{session_id}`**: Persists reordered page sequence.
 * **`POST /api/book-scan/rotate/{session_id}`**: Rotates individual page in 90° CW/CCW increments.
 * **`DELETE /api/book-scan/page/{session_id}/{page_id}`**: Removes blank or unwanted scan pages.
-* **`POST /api/book-scan/export/{session_id}`**: Compiles processed pages with 3mm synthesized mirrored bleed, PDF trim boxes, and vector crop marks into a print-ready PDF.
+* **`POST /api/book-scan/detect-angle/{session_id}/{page_id}`**: Auto-detects and returns skew angle for a page.
+* **`POST /api/book-scan/detect-crop/{session_id}/{page_id}`**: Auto-detects the physical page bounds/crop box against the scanner backing.
+* **`POST /api/book-scan/split-spread/{session_id}`**: Splits a 2-up double-page spread into two individual pages along a specified seam percentage.
+* **`POST /api/book-scan/revert-spread/{session_id}`**: Restores a previously split spread back into its original 2-up page format.
+* **`POST /api/book-scan/crop-page/{session_id}`**: Persists manual or detected crop box adjustments to a page.
+* **`POST /api/book-scan/export/{session_id}`**: Compiles processed pages with 3mm synthesized mirrored bleed, PDF trim boxes, and vector crop marks into a print-ready PDF, processing according to selected page scope filters.
 
 ### 6. Settings & Preset Management (`/api/settings/*`)
 Managed by `backend/settings_api.py`.

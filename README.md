@@ -6,7 +6,7 @@ A modular, high-performance web-to-print and prepress automation suite built wit
 
 ## The Studios
 
-* **Book Studio (`/book-studio`)**: Prioritized single-page and 2-up spread collation, left thumbnail deck, edge-to-edge high-res canvas, Space/O raw scan comparison overlay, paper whitening, deskewing, margin cleanup, and 3mm synthesized bleed generation.
+* **Book Studio (`/book-studio`)**: Prioritized single-page and 2-up spread collation, left thumbnail deck, edge-to-edge high-res canvas, Space/O raw scan comparison overlay, paper whitening, modular processing (crop, split, deskew, cleanup), non-destructive seam splitting with interactive canvas overlays, granular page scoping, and 3mm synthesized bleed generation.
 * **Imposing Studio (`/imposing`)**: Unified collapsible studio shell, MaxRects gang runs, sheet/roll packing, margins, gaps, bleeds, live SVG visualizer, sheet efficiency HUD, cut marks, and print-ready PDF export.
 * **Contour Cut Studio (`/contour`)**: Alpha/Otsu thresholding, dilation/erosion offsets, smooth cubic Bézier vectorization, and SVG spot-color die lines.
 * **Flipbook Studio (`/flipbook`)**: 3D interactive virtual proofing (LTR/RTL, paperback/hardcover simulation).

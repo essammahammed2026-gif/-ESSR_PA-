@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+- **UI Refinement: Spine Seam Simplification**:
+  - Simplified the Spine Seam interactive overlay in Book Studio: removed the word "SEAM" to only show the percentage.
+  - Refined Resulting Dimensions display and P1/P2 canvas badges to show a single exact dimension, removing secondary rounded-up versions.
 - **Book Studio Spread Split Coordinate & Dimension Accuracy Overhaul**:
   - **Spine Seam Physical Anchor Preservation**: Fixed seam position shifting when adjusting crop margins. Moving outer boundary handles (`w`, `e`, `n`, `s`, `nw`, etc.) to crop blank scanner glass now preserves the exact physical location of the spine seam on the scan, eliminating cut line drift.
   - **Accurate Post-Split Dimensions & Secondary Crop Separation**:
