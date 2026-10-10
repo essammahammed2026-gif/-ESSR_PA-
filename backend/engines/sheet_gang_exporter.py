@@ -3,6 +3,8 @@ import base64
 import fitz
 from typing import List
 from engines.sheet_packer import SingleSheetResult, PlacedSheetItem
+from engines.units import MM_TO_PTS as _MM_TO_PTS
+from engines.units import hex_to_rgb
 
 
 class SheetGangExporter:
@@ -12,7 +14,7 @@ class SheetGangExporter:
     and optional vector CutContour stroke layers.
     """
 
-    MM_TO_PTS = 72.0 / 25.4
+    MM_TO_PTS = _MM_TO_PTS
 
     @staticmethod
     def _crop_clip_rect(
@@ -115,11 +117,6 @@ class SheetGangExporter:
                 for cx, cy in corners:
                     shape.draw_circle(fitz.Point(cx, cy), reg_size_pt / 2.0)
                     shape.finish(color=(0, 0, 0), fill=(0, 0, 0), stroke_opacity=1.0)
-
-            # Helper for colors
-            def hex_to_rgb(h):
-                h = h.lstrip('#')
-                return tuple(int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)) if len(h)==6 else (0,0,0)
 
             # Insert placed artwork items & draw crop marks
             for item in sheet.placed_items:
@@ -319,9 +316,6 @@ class SheetGangExporter:
                 tx0, ty0, tx1, ty1 = trim_rect.x0, trim_rect.y0, trim_rect.x1, trim_rect.y1
 
                 if draw_border:
-                    def hex_to_rgb(h):
-                        h = h.lstrip('#')
-                        return tuple(int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)) if len(h)==6 else (0,0,0)
                     shape.draw_rect(trim_rect)
                     shape.finish(color=hex_to_rgb(border_color), width=1.0, stroke_opacity=1.0)
                     
@@ -353,6 +347,96 @@ class SheetGangExporter:
 
             shape.commit()
 
+        doc.save(output_pdf_path)
+        doc.close()
+        return True
+
+    @staticmethod
+    def export_roll_pdf(
+        roll_result,
+        output_pdf_path: str,
+        sheet_w_mm: float,
+        fallback_sheet_h_mm: float,
+        default_file_id=None,
+        margin_mm: float = 10.0,
+        align: str = "Center",
+        draw_border: bool = False,
+        border_color: str = "#000000",
+        show_crop_marks: bool = False,
+    ) -> bool:
+        """Render continuous-roll meter segments to PDF (moved from router, fix.md 1.4)."""
+        import fitz
+        from engines.imposing_prep import apply_alignment
+        from engines.thumbnails import resolve_temp_file
+
+        pt = SheetGangExporter.MM_TO_PTS
+        doc = fitz.open()
+        for seg in roll_result.segments:
+            placed_list = getattr(seg, 'placed_items', getattr(seg, 'items', []))
+            seg_length = getattr(seg, 'length_mm', getattr(seg, 'segment_length_mm', fallback_sheet_h_mm))
+
+            apply_alignment(placed_list, sheet_w_mm, seg_length, margin_mm, align)
+
+            page = doc.new_page(width=sheet_w_mm * pt, height=seg_length * pt)
+            shape = page.new_shape()
+
+            for placed in placed_list:
+                try:
+                    file_id = getattr(placed, 'file_id', '')
+                    file_path = resolve_temp_file(file_id) or (resolve_temp_file(default_file_id) if default_file_id else None) or f"temp_uploads/{file_id}"
+                    rect = fitz.Rect(
+                        placed.x_mm * pt,
+                        placed.y_mm * pt,
+                        (placed.x_mm + placed.w_mm) * pt,
+                        (placed.y_mm + placed.h_mm) * pt
+                    )
+
+                    if placed.keep_aspect:
+                        shape.draw_rect(rect)
+                        shape.finish(color=None, fill=hex_to_rgb(placed.fill_color))
+                        shape.commit()
+                        shape = page.new_shape()
+
+                    ext = file_path.lower().split('.')[-1]
+                    if ext in ['png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp', 'avif', 'webp']:
+                        if ext in ['avif', 'webp']:
+                            import cv2
+                            img = cv2.imread(file_path)
+                            if img is not None:
+                                success, encoded = cv2.imencode('.png', img)
+                                if success:
+                                    page.insert_image(rect, stream=encoded.tobytes(), keep_proportion=placed.keep_aspect)
+                        else:
+                            page.insert_image(rect, filename=file_path, keep_proportion=placed.keep_aspect)
+                    else:
+                        src_doc = fitz.open(file_path)
+                        page_idx = min(max(0, getattr(placed, 'page_num', 0)), len(src_doc) - 1)
+                        src_page = src_doc[page_idx]
+                        page.show_pdf_page(rect, src_doc, page_idx, clip=src_page.rect, keep_proportion=placed.keep_aspect)
+                        src_doc.close()
+                except Exception as e:
+                    print(f"Roll export render error: {e}")
+                    pass
+
+                if draw_border:
+                    shape.draw_rect(rect)
+                    shape.finish(color=hex_to_rgb(border_color), width=1.0, stroke_opacity=1.0)
+
+                if show_crop_marks:
+                    off = 1.5 * pt
+                    mlen = 3.0 * pt
+                    ix_pt, iy_pt = rect.x0, rect.y0
+                    iw_pt, ih_pt = rect.width, rect.height
+                    shape.draw_line(fitz.Point(ix_pt - off, iy_pt), fitz.Point(ix_pt - off - mlen, iy_pt))
+                    shape.draw_line(fitz.Point(ix_pt, iy_pt - off), fitz.Point(ix_pt, iy_pt - off - mlen))
+                    shape.draw_line(fitz.Point(ix_pt + iw_pt + off, iy_pt), fitz.Point(ix_pt + iw_pt + off + mlen, iy_pt))
+                    shape.draw_line(fitz.Point(ix_pt + iw_pt, iy_pt - off), fitz.Point(ix_pt, iy_pt - off - mlen))
+                    shape.draw_line(fitz.Point(ix_pt - off, iy_pt + ih_pt), fitz.Point(ix_pt - off - mlen, iy_pt + ih_pt))
+                    shape.draw_line(fitz.Point(ix_pt, iy_pt + ih_pt + off), fitz.Point(ix_pt, iy_pt + ih_pt + off + mlen))
+                    shape.draw_line(fitz.Point(ix_pt + iw_pt + off, iy_pt + ih_pt), fitz.Point(ix_pt + iw_pt + off + mlen, iy_pt + ih_pt))
+                    shape.draw_line(fitz.Point(ix_pt + iw_pt, iy_pt + ih_pt + off), fitz.Point(ix_pt + iw_pt, iy_pt + ih_pt + off + mlen))
+                    shape.finish(color=(0, 0, 0), width=0.2, stroke_opacity=1.0)
+                shape.commit()
         doc.save(output_pdf_path)
         doc.close()
         return True

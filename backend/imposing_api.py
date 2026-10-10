@@ -2,13 +2,15 @@ import os
 import uuid
 import threading
 import fitz
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
 from typing import List, Optional
-from engines.sheet_packer import MaxRectsSheetPacker, SheetArtworkSpec, SingleSheetResult, PlacedSheetItem
-from engines.roll_packer import MeterSegmentPacker, ArtworkSpec as RollArtworkSpec, MeterSegmentPackingResult
+from engines.sheet_packer import MaxRectsSheetPacker, SingleSheetResult, PlacedSheetItem
+from engines.roll_packer import MeterSegmentPacker
 from engines.sheet_gang_exporter import SheetGangExporter
+from engines.schemas import ImposingItem, ImposingRequest
+from engines.imposing_prep import build_sheet_specs, build_roll_specs, apply_alignment
+from engines.thumbnails import get_dimensions_mm
 
 
 router = APIRouter()
@@ -29,109 +31,17 @@ def _pregen_all_thumbnails(file_path: str, file_id_ext: str, page_count: int) ->
     Thumbnails that already exist on disk are skipped (page 0 is always written
     by the upload handler before this thread starts).
     """
-    try:
-        doc = fitz.open(file_path)
-        # 0.72 scale (~150 DPI) provides crystal-clear preview resolution
-        mat = fitz.Matrix(0.72, 0.72)
-        stem = os.path.splitext(file_id_ext)[0]
-        for p in range(page_count):
-            thumb_path = os.path.join("temp_uploads", f"{stem}_thumb_p{p}.jpg")
-            if not os.path.exists(thumb_path):
-                pix = doc[p].get_pixmap(matrix=mat)
-                pix.save(thumb_path)
-        doc.close()
-    except Exception as exc:
-        print(f"[imposing] thumbnail pre-gen failed for {file_id_ext}: {exc}")
-
-class ImposingItem(BaseModel):
-    file_id: str
-    copies: int = 1
-    name: str
-    w: Optional[float] = None
-    h: Optional[float] = None
-    keep_aspect: bool = False
-    fill_color: str = "#FFFFFF"
-    page_count: Optional[int] = 1
-    page_range: Optional[str] = "all"
-    page_num: Optional[int] = 0
-    # Fit mode (authoritative): "stretch" | "fit" | "crop"
-    # "stretch" → force-fill exact W×H (may distort).
-    # "fit"     → scale proportionally + letterbox-pad with fill_color.
-    # "crop"    → scale to fill, centre-crop any overflow.
-    fit_mode: str = "stretch"
-    # Page rotation applied to content (independent of packer auto-rotation)
-    # "none" | "cw" (90° CW) | "ccw" (90° CCW)
-    page_rotation: str = "none"
-    # Bleed mode: "none" | "solid" | "mirror"
-    bleed_mode: str = "none"
-    bleed_mm: float = 0.0
-    bleed_color: str = "#FFFFFF"
-    # Bleed placement: "inside" (trim size locked, artwork inset) | "outside" (artwork locked, outer box expands)
-    bleed_type: str = "inside"
-
-
-
-class ImposingRequest(BaseModel):
-    items: List[ImposingItem]
-    job_mode: str = "gang"
-    mode: str = "Sheet"
-    sheet_w: float = 320.0
-    sheet_h: float = 450.0
-    margin: float = 10.0
-    gap: float = 5.0
-    draw_border: bool = False
-    border_color: str = "#000000"
-    crop_marks: bool = False
-    reg_marks: bool = False
-    align: str = "Center"
-    nesting_mode: str = "Grid"
-    auto_rotate_sheet: bool = True
-    uniform_orientation: bool = True
-    rows: Optional[int] = None
-    cols: Optional[int] = None
-    page_index: Optional[int] = 0
-
-def get_dimensions_mm(file_path: str):
-    # Try pdf first
-    if file_path.lower().endswith(".pdf"):
-        doc = fitz.open(file_path)
-        rect = doc[0].rect
-        return (rect.width / 72.0) * 25.4, (rect.height / 72.0) * 25.4
-    else:
-        import cv2
-        img = cv2.imread(file_path)
-        if img is not None:
-            # Assume 300 DPI if unknown
-            h, w = img.shape[:2]
-            return (w / 300.0) * 25.4, (h / 300.0) * 25.4
-    return 100.0, 100.0
-
-def parse_page_range(range_str: str, max_pages: int) -> List[int]:
-    if not range_str or range_str.strip().lower() in ["all", ""]:
-        return list(range(max_pages))
-    pages = []
-    for part in range_str.split(","):
-        part = part.strip()
-        if not part: continue
-        if "-" in part:
-            try:
-                start_s, end_s = part.split("-")
-                start = max(1, int(start_s))
-                end = min(max_pages, int(end_s))
-                pages.extend(range(start - 1, end))
-            except:
-                pass
-        else:
-            try:
-                p = int(part)
-                if 1 <= p <= max_pages:
-                    pages.append(p - 1)
-            except:
-                pass
-    return sorted(list(set(pages))) if pages else list(range(max_pages))
+    from engines.thumbnails import pregen_pdf_thumbnails
+    stem = os.path.splitext(file_id_ext)[0]
+    pregen_pdf_thumbnails(file_path, stem, page_count)
 
 @router.post("/api/imposing/upload")
 async def upload_imposing_file(file: UploadFile = File(...)):
+    try:
+        from main import evict_stale_caches
+        evict_stale_caches()
+    except ImportError:
+        pass
     file_id = str(uuid.uuid4())
     ext = os.path.splitext(file.filename)[1].lower()
     if not ext: ext = ".pdf"
@@ -154,8 +64,8 @@ async def upload_imposing_file(file: UploadFile = File(...)):
                 w = (rect.width / 72.0) * 25.4
                 h = (rect.height / 72.0) * 25.4
                 # Render page 0 thumbnail synchronously at 0.72 scale (~150 DPI) for crisp preview
-                pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.72, 0.72))
-                pix.save(thumb_path)
+                from engines.thumbnails import render_pdf_thumb
+                render_pdf_thumb(file_path, thumb_path, page_num=0)
                 
                 for p in range(page_count):
                     p_rect = doc[p].rect
@@ -196,14 +106,8 @@ async def upload_imposing_file(file: UploadFile = File(...)):
     else:
         w, h = get_dimensions_mm(file_path)
         try:
-            import cv2
-            img = cv2.imread(file_path)
-            if img is not None:
-                h_img, w_img = img.shape[:2]
-                scale = min(720.0 / max(1, w_img), 720.0 / max(1, h_img))
-                if scale < 1.0:
-                    img = cv2.resize(img, (int(w_img * scale), int(h_img * scale)))
-                cv2.imwrite(thumb_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            from engines.thumbnails import render_image_thumb
+            render_image_thumb(file_path, thumb_path)
         except:
             thumb_path = ""
         pages_meta.append({
@@ -276,27 +180,16 @@ def get_imposing_file_pages(file_id: str):
         }
 
 def resolve_temp_file(file_id: str) -> Optional[str]:
-    if not file_id:
-        return None
-    safe_name = os.path.basename(file_id)
-    # 1. Exact match in temp_uploads
-    p = os.path.join("temp_uploads", safe_name)
-    if os.path.exists(p) and os.path.isfile(p):
-        return p
-    # 2. Check with common extensions
-    for ext in [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff"]:
-        p_ext = os.path.join("temp_uploads", f"{safe_name}{ext}")
-        if os.path.exists(p_ext) and os.path.isfile(p_ext):
-            return p_ext
-    # 3. Check if safe_name is a prefix or contains prefix
-    stem = os.path.splitext(safe_name)[0]
-    if os.path.exists("temp_uploads"):
-        for fname in os.listdir("temp_uploads"):
-            if fname.startswith(f"{stem}.") or fname.startswith(f"{stem}_") or fname.startswith(f"{safe_name}_"):
-                full = os.path.join("temp_uploads", fname)
-                if os.path.isfile(full) and not ("_thumb_" in fname or fname.endswith("_thumb.jpg")):
-                    return full
-    return None
+    from engines.thumbnails import resolve_temp_file as _resolve
+    return _resolve(file_id)
+
+def _cleanup_export_file(path: str) -> None:
+    """BackgroundTasks callback: removes single-use export files after download."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
 
 @router.get("/api/imposing/thumbnail/{file_id}/{page_num}")
 def get_imposing_thumbnail(file_id: str, page_num: int):
@@ -319,159 +212,25 @@ def get_imposing_thumbnail(file_id: str, page_num: int):
     ext = os.path.splitext(src_path)[1].lower()
     if ext == ".pdf":
         try:
-            doc = fitz.open(src_path)
-            p = min(max(0, page_num), len(doc) - 1)
-            # High-fidelity preview resolution (approx 150 DPI, 0.72 scale)
-            pix = doc[p].get_pixmap(matrix=fitz.Matrix(0.72, 0.72))
-            pix.save(thumb_path)
+            from engines.thumbnails import render_pdf_thumb
+            # High-fidelity preview resolution (approx 150 DPI, 0.72 scale; clamped internally)
+            render_pdf_thumb(src_path, thumb_path, page_num=page_num)
             if actual_thumb_path != thumb_path:
-                pix.save(actual_thumb_path)
-            doc.close()
+                render_pdf_thumb(src_path, actual_thumb_path, page_num=page_num)
             return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate page thumbnail: {e}")
     else:
         try:
-            import cv2
-            img = cv2.imread(src_path)
-            if img is not None:
-                h_img, w_img = img.shape[:2]
-                scale = min(720.0 / max(1, w_img), 720.0 / max(1, h_img))
-                if scale < 1.0:
-                    img = cv2.resize(img, (int(w_img * scale), int(h_img * scale)))
-                cv2.imwrite(thumb_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
-                if actual_thumb_path != thumb_path:
-                    cv2.imwrite(actual_thumb_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
-                return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+            from engines.thumbnails import render_image_thumb
+            render_image_thumb(src_path, thumb_path)
+            if actual_thumb_path != thumb_path:
+                render_image_thumb(src_path, actual_thumb_path)
+            return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Image thumbnail error: {e}")
         return FileResponse(src_path)
 
-def build_sheet_specs(items: List[ImposingItem]) -> List[SheetArtworkSpec]:
-    specs = []
-    for item in items:
-        path = resolve_temp_file(item.file_id) or f"temp_uploads/{item.file_id}"
-        w = item.w if item.w is not None else get_dimensions_mm(path)[0]
-        h = item.h if item.h is not None else get_dimensions_mm(path)[1]
-        # fit_mode is authoritative; keep_aspect is derived for backward compat
-        fit_mode = item.fit_mode or "stretch"
-        keep_aspect_derived = (fit_mode == "fit")
-
-        bleed_mode = item.bleed_mode or "none"
-        bleed_mm = item.bleed_mm or 0.0
-        bleed_color = item.bleed_color or "#FFFFFF"
-        bleed_type = item.bleed_type or "inside"
-
-        # If outside bleed, the total piece bounding box on the sheet expands by 2*bleed_mm
-        pack_w = (w + 2 * bleed_mm) if (bleed_type == "outside" and bleed_mode != "none" and bleed_mm > 0) else w
-        pack_h = (h + 2 * bleed_mm) if (bleed_type == "outside" and bleed_mode != "none" and bleed_mm > 0) else h
-
-        if item.page_count and item.page_count > 1:
-            target_pages = parse_page_range(item.page_range or "all", item.page_count)
-            for p_idx in target_pages:
-                specs.append(SheetArtworkSpec(
-                    name=f"{item.name}#p{p_idx + 1}",
-                    piece_w_mm=pack_w, piece_h_mm=pack_h,
-                    quantity=item.copies, pdf_path=path,
-                    keep_aspect=keep_aspect_derived,
-                    fill_color=item.fill_color,
-                    page_num=p_idx,
-                    file_id=item.file_id,
-                    fit_mode=fit_mode,
-                    page_rotation=item.page_rotation or "none",
-                    bleed_mode=bleed_mode,
-                    bleed_mm=bleed_mm,
-                    bleed_color=bleed_color,
-                    bleed_type=bleed_type,
-                    target_w_mm=w,
-                    target_h_mm=h,
-                ))
-        else:
-            specs.append(SheetArtworkSpec(
-                name=item.name, piece_w_mm=pack_w, piece_h_mm=pack_h,
-                quantity=item.copies, pdf_path=path,
-                keep_aspect=keep_aspect_derived,
-                fill_color=item.fill_color,
-                page_num=item.page_num or 0,
-                file_id=item.file_id,
-                fit_mode=fit_mode,
-                page_rotation=item.page_rotation or "none",
-                bleed_mode=bleed_mode,
-                bleed_mm=bleed_mm,
-                bleed_color=bleed_color,
-                bleed_type=bleed_type,
-                target_w_mm=w,
-                target_h_mm=h,
-            ))
-    return specs
-
-def build_roll_specs(items: List[ImposingItem]) -> List[RollArtworkSpec]:
-    specs = []
-    for item in items:
-        path = resolve_temp_file(item.file_id) or f"temp_uploads/{item.file_id}"
-        w = item.w if item.w is not None else get_dimensions_mm(path)[0]
-        h = item.h if item.h is not None else get_dimensions_mm(path)[1]
-        fit_mode = item.fit_mode or "stretch"
-        keep_aspect_derived = (fit_mode == "fit")
-
-        if item.page_count and item.page_count > 1:
-            target_pages = parse_page_range(item.page_range or "all", item.page_count)
-            for p_idx in target_pages:
-                specs.append(RollArtworkSpec(
-                    name=f"{item.name}#p{p_idx + 1}",
-                    piece_w_mm=w, piece_h_mm=h,
-                    quantity=item.copies,
-                    keep_aspect=keep_aspect_derived,
-                    fill_color=item.fill_color,
-                    page_num=p_idx,
-                    file_id=item.file_id,
-                ))
-        else:
-            specs.append(RollArtworkSpec(
-                name=item.name, piece_w_mm=w, piece_h_mm=h,
-                quantity=item.copies,
-                keep_aspect=keep_aspect_derived,
-                fill_color=item.fill_color,
-                page_num=item.page_num or 0,
-                file_id=item.file_id,
-            ))
-    return specs
-
-
-def apply_alignment(items, sheet_w, sheet_h, margin, align):
-    if not items or align == "Top Left":
-        return
-    min_x = min(i.x_mm for i in items)
-    max_x = max(i.x_mm + i.w_mm for i in items)
-    min_y = min(i.y_mm for i in items)
-    max_y = max(i.y_mm + i.h_mm for i in items)
-    
-    content_w = max_x - min_x
-    content_h = max_y - min_y
-    usable_w = sheet_w - (margin * 2)
-    usable_h = sheet_h - (margin * 2)
-    
-    shift_x = 0
-    shift_y = 0
-    
-    if "Center" in align:
-        shift_x = (usable_w - content_w) / 2.0
-    elif "Right" in align:
-        shift_x = usable_w - content_w
-        
-    if "Center" == align or "Left" == align or "Right" == align:
-        # Middle vertical alignment
-        shift_y = (usable_h - content_h) / 2.0
-    elif "Bottom" in align:
-        shift_y = usable_h - content_h
-        
-    # Prevent negative shifts if content overflows usable bounds slightly
-    shift_x = max(0, shift_x)
-    shift_y = max(0, shift_y)
-
-    for i in items:
-        i.x_mm += shift_x
-        i.y_mm += shift_y
 @router.post("/api/imposing/preview")
 def preview_imposing(req: ImposingRequest):
     try:
@@ -624,7 +383,7 @@ def preview_imposing(req: ImposingRequest):
         return {"success": False, "error": str(e)}
 
 @router.post("/api/imposing/export")
-def export_imposing(req: ImposingRequest):
+def export_imposing(req: ImposingRequest, background_tasks: BackgroundTasks):
     try:
         out_path = f"temp_uploads/imposing_export_{uuid.uuid4().hex[:8]}.pdf"
         
@@ -662,85 +421,26 @@ def export_imposing(req: ImposingRequest):
                 gap_mm=req.gap, artworks=specs
             )
             
-            doc = fitz.open()
-            for seg in res.segments:
-                placed_list = getattr(seg, 'placed_items', getattr(seg, 'items', []))
-                seg_length = getattr(seg, 'length_mm', getattr(seg, 'segment_length_mm', req.sheet_h))
-                
-                apply_alignment(placed_list, req.sheet_w, seg_length, req.margin, req.align)
-                
-                page = doc.new_page(width=(req.sheet_w / 25.4 * 72.0), height=(seg_length / 25.4 * 72.0))
-                shape = page.new_shape()
+            SheetGangExporter.export_roll_pdf(
+                roll_result=res,
+                output_pdf_path=out_path,
+                sheet_w_mm=req.sheet_w,
+                fallback_sheet_h_mm=req.sheet_h,
+                default_file_id=req.items[0].file_id if req.items else None,
+                margin_mm=req.margin,
+                align=req.align,
+                draw_border=req.draw_border,
+                border_color=req.border_color,
+                show_crop_marks=req.crop_marks,
+            )
 
-                def hex_to_rgb(h):
-                    h = h.lstrip('#')
-                    return tuple(int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)) if len(h)==6 else (0,0,0)
-
-                for placed in placed_list:
-                    try:
-                        file_id = getattr(placed, 'file_id', '')
-                        file_path = resolve_temp_file(file_id) or (resolve_temp_file(req.items[0].file_id) if req.items else None) or f"temp_uploads/{file_id}"
-                        rect = fitz.Rect(
-                            placed.x_mm / 25.4 * 72.0,
-                            placed.y_mm / 25.4 * 72.0,
-                            (placed.x_mm + placed.w_mm) / 25.4 * 72.0,
-                            (placed.y_mm + placed.h_mm) / 25.4 * 72.0
-                        )
-                        
-                        if placed.keep_aspect:
-                            shape.draw_rect(rect)
-                            shape.finish(color=None, fill=hex_to_rgb(placed.fill_color))
-                            shape.commit()
-                            shape = page.new_shape()
-
-                        ext = file_path.lower().split('.')[-1]
-                        if ext in ['png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp', 'avif', 'webp']:
-                            if ext in ['avif', 'webp']:
-                                import cv2
-                                img = cv2.imread(file_path)
-                                if img is not None:
-                                    success, encoded = cv2.imencode('.png', img)
-                                    if success:
-                                        page.insert_image(rect, stream=encoded.tobytes(), keep_proportion=placed.keep_aspect)
-                            else:
-                                page.insert_image(rect, filename=file_path, keep_proportion=placed.keep_aspect)
-                        else:
-                            src_doc = fitz.open(file_path)
-                            page_idx = min(max(0, getattr(placed, 'page_num', 0)), len(src_doc) - 1)
-                            src_page = src_doc[page_idx]
-                            page.show_pdf_page(rect, src_doc, page_idx, clip=src_page.rect, keep_proportion=placed.keep_aspect)
-                            src_doc.close()
-                    except Exception as e:
-                        print(f"Roll export render error: {e}")
-                        pass
-                    
-                    if req.draw_border:
-                        shape.draw_rect(rect)
-                        shape.finish(color=hex_to_rgb(req.border_color), width=1.0, stroke_opacity=1.0)
-                        
-                    if req.crop_marks:
-                        off = 1.5 * (72.0 / 25.4)
-                        mlen = 3.0 * (72.0 / 25.4)
-                        ix_pt, iy_pt = rect.x0, rect.y0
-                        iw_pt, ih_pt = rect.width, rect.height
-                        shape.draw_line(fitz.Point(ix_pt - off, iy_pt), fitz.Point(ix_pt - off - mlen, iy_pt))
-                        shape.draw_line(fitz.Point(ix_pt, iy_pt - off), fitz.Point(ix_pt, iy_pt - off - mlen))
-                        shape.draw_line(fitz.Point(ix_pt + iw_pt + off, iy_pt), fitz.Point(ix_pt + iw_pt + off + mlen, iy_pt))
-                        shape.draw_line(fitz.Point(ix_pt + iw_pt, iy_pt - off), fitz.Point(ix_pt + iw_pt, iy_pt - off - mlen))
-                        shape.draw_line(fitz.Point(ix_pt - off, iy_pt + ih_pt), fitz.Point(ix_pt - off - mlen, iy_pt + ih_pt))
-                        shape.draw_line(fitz.Point(ix_pt, iy_pt + ih_pt + off), fitz.Point(ix_pt, iy_pt + ih_pt + off + mlen))
-                        shape.draw_line(fitz.Point(ix_pt + iw_pt + off, iy_pt + ih_pt), fitz.Point(ix_pt + iw_pt + off + mlen, iy_pt + ih_pt))
-                        shape.draw_line(fitz.Point(ix_pt + iw_pt, iy_pt + ih_pt + off), fitz.Point(ix_pt + iw_pt, iy_pt + ih_pt + off + mlen))
-                        shape.finish(color=(0, 0, 0), width=0.2, stroke_opacity=1.0)
-                    shape.commit()
-            doc.save(out_path)
-            
+        background_tasks.add_task(_cleanup_export_file, out_path)
         return FileResponse(out_path, filename="Imposed_Print_File.pdf", media_type="application/pdf")
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 @router.post("/api/imposing/export-svg")
-def export_imposing_svg(req: ImposingRequest):
+def export_imposing_svg(req: ImposingRequest, background_tasks: BackgroundTasks):
     try:
         page_idx = req.page_index if req.page_index is not None else 0
         out_path = f"temp_uploads/imposing_export_{uuid.uuid4().hex[:8]}.svg"
@@ -829,6 +529,7 @@ def export_imposing_svg(req: ImposingRequest):
             )
             download_name = f"Imposed_Cut_Segment_{target_idx + 1}.svg" if len(res.segments) > 1 else "Imposed_Cut_Segment.svg"
 
+        background_tasks.add_task(_cleanup_export_file, out_path)
         return FileResponse(out_path, filename=download_name, media_type="image/svg+xml")
     except Exception as e:
         return {"success": False, "error": str(e)}

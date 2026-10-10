@@ -10,6 +10,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from engines.units import format_page_ranges
 
 def format_file_size(size_bytes: int) -> str:
     if size_bytes < 1024:
@@ -289,7 +290,6 @@ def generate_prepress_report_pdf(analysis: Dict[str, Any]) -> bytes:
     # Bleed Information
     pages_missing_bleed = bleed_check.get("pages_missing_bleed", [])
     if pages_missing_bleed:
-        from engines.asset_inspector import format_page_ranges
         findings_items.append(Paragraph(f"• <b>Bleed Missing:</b> Pages {format_page_ranges(pages_missing_bleed)} have 0mm bleed margin defined. Use Flint Book Studio or Imposing Studio to synthesize mirrored bleeds.", body_style))
     else:
         findings_items.append(Paragraph("• <b>Bleed Allowance:</b> Valid bleed margins detected across document.", body_style))
@@ -297,7 +297,6 @@ def generate_prepress_report_pdf(analysis: Dict[str, Any]) -> bytes:
     # Color Information
     rgb_pages = color_check.get("rgb_pages", [])
     if rgb_pages:
-        from engines.asset_inspector import format_page_ranges
         findings_items.append(Paragraph(f"• <b>RGB Color Space:</b> Pages {format_page_ranges(rgb_pages)} contain RGB images/graphics. Converting to CMYK (e.g. FOGRA39 or SWOP) is recommended before CTP plate generation.", body_style))
     else:
         findings_items.append(Paragraph("• <b>Color Compatibility:</b> CMYK / Grayscale color model is ready for commercial plate output.", body_style))

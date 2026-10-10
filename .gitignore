@@ -10,6 +10,7 @@ __pycache__/
 # Node & Next.js
 node_modules/
 frontend/.next/
+frontend/.next-build/
 frontend/out/
 frontend/build/
 .npm
@@ -19,6 +20,7 @@ next-env.d.ts
 # Temporary uploads & output generated flipbooks
 backend/temp_uploads/*
 !backend/temp_uploads/.gitkeep
+!backend/temp_uploads/book_scans/.gitkeep
 backend/public_flipbooks/*
 !backend/public_flipbooks/.gitkeep
 backend/public_flipbooks/flipbook_*

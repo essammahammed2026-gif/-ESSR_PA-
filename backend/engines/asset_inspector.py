@@ -3,30 +3,7 @@ import fitz  # PyMuPDF
 import cv2
 import numpy as np
 from typing import Dict, Any, List
-
-def format_page_ranges(pages: List[int]) -> str:
-    """Formats a sorted list of 1-based page numbers into compact ranges: e.g. [1,2,3,5,7,8] -> '1–3, 5, 7–8'"""
-    if not pages:
-        return ""
-    sorted_pages = sorted(list(set(pages)))
-    ranges = []
-    start = sorted_pages[0]
-    prev = start
-    for p in sorted_pages[1:]:
-        if p == prev + 1:
-            prev = p
-        else:
-            if start == prev:
-                ranges.append(str(start))
-            else:
-                ranges.append(f"{start}–{prev}")
-            start = p
-            prev = p
-    if start == prev:
-        ranges.append(str(start))
-    else:
-        ranges.append(f"{start}–{prev}")
-    return ", ".join(ranges)
+from engines.units import format_page_ranges  # canonical; kept re-exported for compat
 
 def match_standard_paper_name(w_mm: float, h_mm: float) -> str:
     """Matches width and height against international standard sheet sizes."""

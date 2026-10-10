@@ -283,3 +283,38 @@ def export_flipbook_task(task_id, state_dict, project_cache, export_task_id, out
             "status": str(e),
             "progress": 0
         }
+
+
+def refresh_flipbook_html(cached, direction, binding_style, mag_pad_choice,
+                          add_flyleaves, bg_texture, sound_enabled):
+    """Re-pad + re-render + rewrite an existing flipbook project (moved from router).
+
+    Mutates `cached` display settings in place. Returns the output path.
+    """
+    # 1. Padding
+    padded_pages = apply_print_binding_padding(
+        list(cached["b64_pages"]), binding_style, add_flyleaves, mag_pad_choice)
+
+    # 2. HTML Generation
+    html_content = generate_html_content(
+        b64_pages=padded_pages,
+        original_pdf_name=cached["original_pdf_name"],
+        direction=direction,
+        binding_style=binding_style,
+        bg_texture=bg_texture,
+        sound_enabled=sound_enabled,
+        page_w=cached["page_w"],
+        page_h=cached["page_h"]
+    )
+
+    # 3. Write
+    with open(cached["output_path"], "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    cached["direction"] = direction
+    cached["binding_style"] = binding_style
+    cached["mag_pad_choice"] = mag_pad_choice
+    cached["add_flyleaves"] = add_flyleaves
+    cached["bg_texture"] = bg_texture
+    cached["sound_enabled"] = sound_enabled
+    return cached["output_path"]

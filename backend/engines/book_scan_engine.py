@@ -5,9 +5,7 @@ import fitz  # PyMuPDF
 import cv2
 import numpy as np
 from typing import List, Dict, Any, Optional
-
-MM_TO_PTS = 72.0 / 25.4
-PTS_TO_MM = 25.4 / 72.0
+from engines.units import MM_TO_PTS, PTS_TO_MM
 
 class BookScanEngine:
     """
@@ -750,3 +748,243 @@ class BookScanEngine:
         doc.save(output_pdf_path)
         doc.close()
         return True
+
+    # --- Session page-list operations (moved from router, fix.md 1.4b) ---
+
+    @staticmethod
+    def split_pages(pages, page_id, crop_box=None, split_pos=0.5,
+                    apply_to_all=False, target_page_ids=None):
+        """Split full spreads into left/right halves. Returns (new_pages, new_selected_id).
+
+        Raises PageOpError(400) when no split occurred.
+        """
+        new_pages = []
+        split_occurred = False
+        new_selected_id = None
+        target_ids = set(target_page_ids) if target_page_ids is not None else None
+
+        for p in pages:
+            if target_ids is not None:
+                is_target = p["id"] in target_ids
+            elif apply_to_all:
+                is_target = True
+            else:
+                is_target = (p["id"] == page_id)
+
+            if is_target and p.get("half", "full") == "full":
+                split_occurred = True
+                base_label = p.get("label", "Sheet").replace(" (Spread)", "")
+                cb = crop_box if crop_box is not None else p.get("crop_box")
+                sp = split_pos if split_pos is not None else p.get("split_pos", 0.5)
+
+                p_orig_w = p.get("orig_width_mm") or p.get("width_mm", 297.0)
+                p_orig_h = p.get("orig_height_mm") or p.get("height_mm", 210.0)
+                cb_w = (cb.get("x2", 1.0) - cb.get("x1", 0.0)) if cb else 1.0
+                cb_h = (cb.get("y2", 1.0) - cb.get("y1", 0.0)) if cb else 1.0
+                cropped_w = p_orig_w * cb_w
+                cropped_h = p_orig_h * cb_h
+                left_w = round(cropped_w * sp, 1)
+                right_w = round(cropped_w * (1.0 - sp), 1)
+
+                left_id = str(uuid.uuid4())[:8]
+                right_id = str(uuid.uuid4())[:8]
+                if p["id"] == page_id or new_selected_id is None:
+                    new_selected_id = left_id
+
+                common = {
+                    "source": p["source"],
+                    "doc_idx": p["doc_idx"],
+                    "crop_box": cb,
+                    "spread_crop_box": cb,
+                    "split_pos": sp,
+                    "spread_split_pos": sp,
+                    "page_crop_box": None,
+                    "rotation": p.get("rotation", 0),
+                    "parent_page_id": p["id"],
+                    "is_spread": False,
+                    "height_mm": round(cropped_h, 1),
+                    "orig_height_mm": round(cropped_h, 1),
+                    "parent_spread_width_mm": p_orig_w,
+                    "parent_spread_height_mm": p_orig_h,
+                }
+                new_pages.append({
+                    **common,
+                    "id": left_id,
+                    "half": "left",
+                    "label": f"{base_label} (Left)",
+                    "width_mm": left_w,
+                    "orig_width_mm": left_w,
+                })
+                new_pages.append({
+                    **common,
+                    "id": right_id,
+                    "half": "right",
+                    "label": f"{base_label} (Right)",
+                    "width_mm": right_w,
+                    "orig_width_mm": right_w,
+                })
+            else:
+                new_pages.append(p)
+
+        if not split_occurred:
+            raise PageOpError(400, "Target page is already split or not found.")
+        return new_pages, new_selected_id
+
+    @staticmethod
+    def revert_pages(pages, page_id=None, revert_all=False, target_page_ids=None):
+        """Recombine split halves into parent spreads. Returns (new_pages, new_selected_id).
+
+        Raises PageOpError(400/404) on missing targets.
+        """
+        target_pairs = set()
+
+        if revert_all:
+            for p in pages:
+                if p.get("half") in ["left", "right"]:
+                    target_pairs.add((p["source"], p["doc_idx"]))
+        elif target_page_ids:
+            t_ids = set(target_page_ids)
+            for p in pages:
+                if p["id"] in t_ids and p.get("half") in ["left", "right"]:
+                    target_pairs.add((p["source"], p["doc_idx"]))
+        elif page_id:
+            target_page = next((p for p in pages if p["id"] == page_id), None)
+            if not target_page:
+                raise PageOpError(404, "Page not found.")
+            target_pairs.add((target_page["source"], target_page["doc_idx"]))
+        else:
+            raise PageOpError(400, "page_id or revert_all required.")
+
+        if not target_pairs:
+            raise PageOpError(400, "No split pages found to revert.")
+
+        new_pages = []
+        recombined_pairs = set()
+        new_selected_id = None
+
+        for p in pages:
+            pair = (p["source"], p["doc_idx"])
+            if pair in target_pairs and p.get("half") in ["left", "right"]:
+                if pair not in recombined_pairs:
+                    recombined_pairs.add(pair)
+                    orig_w = p.get("parent_spread_width_mm") or p.get("orig_width_mm") or 297.0
+                    orig_h = p.get("parent_spread_height_mm") or p.get("orig_height_mm") or 210.0
+                    reverted_id = p.get("parent_page_id") or str(uuid.uuid4())[:8]
+                    if new_selected_id is None:
+                        new_selected_id = reverted_id
+                    new_pages.append({
+                        "id": reverted_id,
+                        "source": p["source"],
+                        "doc_idx": p["doc_idx"],
+                        "half": "full",
+                        "crop_box": p.get("spread_crop_box") or p.get("crop_box"),
+                        "split_pos": p.get("spread_split_pos") if p.get("spread_split_pos") is not None else p.get("split_pos", 0.5),
+                        "rotation": p.get("rotation", 0),
+                        "label": f"Sheet {p['doc_idx'] + 1} (Spread)",
+                        "is_spread": True,
+                        "width_mm": orig_w,
+                        "height_mm": orig_h,
+                        "orig_width_mm": orig_w,
+                        "orig_height_mm": orig_h,
+                    })
+            else:
+                new_pages.append(p)
+
+        return new_pages, new_selected_id
+
+    @staticmethod
+    def apply_crop_to_pages(pages, page_id, crop_box, apply_to_all=False, target_page_ids=None):
+        """Apply a crop box dict to targeted pages (mutates + returns pages)."""
+        cb_w = crop_box["x2"] - crop_box["x1"]
+        cb_h = crop_box["y2"] - crop_box["y1"]
+        target_ids = set(target_page_ids) if target_page_ids is not None else None
+
+        for p in pages:
+            if target_ids is not None:
+                is_target = p["id"] in target_ids
+            elif apply_to_all:
+                is_target = True
+            else:
+                is_target = (p["id"] == page_id)
+
+            if is_target:
+                if p.get("half") in ["left", "right"]:
+                    p["page_crop_box"] = crop_box
+                else:
+                    p["crop_box"] = crop_box
+                orig_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
+                orig_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
+                p["orig_width_mm"] = orig_w
+                p["orig_height_mm"] = orig_h
+                p["width_mm"] = round(orig_w * cb_w, 1)
+                p["height_mm"] = round(orig_h * cb_h, 1)
+        return pages
+
+    @staticmethod
+    def render_export_pages(doc_map, pages, req) -> tuple:
+        """Per-page extract + scope evaluation + processing. Returns (images, bleed_list)."""
+        processed_images = []
+        per_page_bleed_list = []
+        for idx, p_info in enumerate(pages):
+            page_num = idx + 1
+            raw_img = BookScanEngine.extract_page_image(doc_map, p_info, dpi=req.dpi)
+
+            # Evaluate module scope per page
+            apply_deskew = req.deskew_module_enabled and BookScanEngine.is_page_in_scope(
+                page_num, req.deskew_scope_mode, req.deskew_custom_range
+            )
+            apply_restoration = req.restoration_module_enabled and BookScanEngine.is_page_in_scope(
+                page_num, req.restoration_scope_mode, req.restoration_custom_range
+            )
+            apply_bleed = req.bleed_module_enabled and BookScanEngine.is_page_in_scope(
+                page_num, req.bleed_scope_mode, req.bleed_custom_range
+            )
+
+            # Restoration settings
+            if req.restoration_module_enabled:
+                do_clean_borders = apply_restoration and req.clean_borders
+                do_enhance_colors = apply_restoration and req.enhance_colors
+            else:
+                do_clean_borders = req.clean_borders
+                do_enhance_colors = req.enhance_colors
+
+            cleaned = BookScanEngine.process_single_page(
+                raw_img,
+                clean_borders=do_clean_borders,
+                border_margin_px=req.border_margin_px,
+                border_threshold=req.border_threshold,
+                enhance_colors=do_enhance_colors,
+                saturation=req.saturation,
+                contrast=req.contrast,
+                deskew=req.deskew if not req.deskew_module_enabled else False,
+                sharpen=req.sharpen,
+                deskew_module_enabled=apply_deskew,
+                deskew_mode=req.deskew_mode,
+                deskew_angle=req.deskew_angle,
+                deskew_max_angle=req.deskew_max_angle,
+                deskew_ignore_borders=req.deskew_ignore_borders,
+            )
+            processed_images.append(cleaned)
+
+            # Bleed settings per page
+            if req.bleed_module_enabled:
+                p_bleed = req.bleed_mm if apply_bleed else 0.0
+                p_marks = req.show_crop_marks if apply_bleed else False
+            else:
+                p_bleed = 0.0
+                p_marks = False
+
+            per_page_bleed_list.append({
+                "bleed_mm": p_bleed,
+                "show_crop_marks": p_marks
+            })
+        return processed_images, per_page_bleed_list
+
+
+class PageOpError(Exception):
+    """Engine-side operation failure carrying an HTTP status (router converts)."""
+
+    def __init__(self, status_code: int = 400, detail: str = "Operation failed."):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail

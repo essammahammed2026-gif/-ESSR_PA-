@@ -13,8 +13,8 @@ import cv2
 from typing import List
 from engines.preflight import run_preflight
 from engines.contour_engine import generate_contour_cut_svg, analyze_image_for_contour
-from engines.flipbook_worker import generate_flipbook_task, generate_html_content, export_flipbook_task
-from engines.helpers import apply_print_binding_padding
+from engines.flipbook_worker import generate_flipbook_task, export_flipbook_task, refresh_flipbook_html
+from engines.units import parse_page_selection
 from engines.asset_inspector import analyze_universal_asset
 from engines.report_generator import generate_prepress_report_pdf
 import time
@@ -86,6 +86,7 @@ async def inspect_asset(file: UploadFile = File(...)):
     generates a high-resolution preview thumbnail, and registers the file for immediate
     handover across Imposing, Contour, Flipbook, and Book Studio.
     """
+    evict_stale_caches()
     os.makedirs("temp_uploads", exist_ok=True)
     file_id = str(uuid.uuid4())[:12]
     ext = os.path.splitext(file.filename)[1].lower()
@@ -113,15 +114,15 @@ async def inspect_asset(file: UploadFile = File(...)):
     thumb_filename = f"{file_id}_thumb.jpg"
     thumb_disk_path = f"temp_uploads/{thumb_filename}"
     try:
+        from engines.thumbnails import render_thumb_for_file
         if ext == ".pdf":
             doc = fitz.open(file_path)
             num_pages = len(doc)
-            if num_pages > 0:
-                pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.72, 0.72))
-                pix.save(thumb_p0_disk_path)
-                pix.save(thumb_disk_path)
-                analysis["thumbnail_url"] = f"/temp_uploads/{thumb_filename}"
             doc.close()
+            if num_pages > 0:
+                render_thumb_for_file(file_path, thumb_p0_disk_path, page_num=0)
+                shutil.copy(thumb_p0_disk_path, thumb_disk_path)
+                analysis["thumbnail_url"] = f"/temp_uploads/{thumb_filename}"
 
             # For multi-page PDFs (books), pre-generate ALL remaining page thumbnails
             # in background thread for instant disk cache hits in Imposing Studio
@@ -134,14 +135,9 @@ async def inspect_asset(file: UploadFile = File(...)):
                 )
                 t.start()
         else:
-            img = cv2.imread(file_path)
-            if img is not None:
-                h_img, w_img = img.shape[:2]
-                scale = min(720.0 / max(1, w_img), 720.0 / max(1, h_img))
-                if scale < 1.0:
-                    img = cv2.resize(img, (int(w_img * scale), int(h_img * scale)))
-                cv2.imwrite(thumb_p0_disk_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
-                cv2.imwrite(thumb_disk_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            from engines.thumbnails import render_image_thumb
+            if render_image_thumb(file_path, thumb_p0_disk_path):
+                shutil.copy(thumb_p0_disk_path, thumb_disk_path)
                 analysis["thumbnail_url"] = f"/temp_uploads/{thumb_filename}"
     except Exception as e_thumb:
         print(f"Notice: thumbnail generation failed: {e_thumb}")
@@ -167,27 +163,22 @@ async def inspect_asset(file: UploadFile = File(...)):
         "analysis": analysis
     }
 
-@app.get("/api/inspect/report-pdf/{file_id}")
-async def get_report_pdf(file_id: str):
-    """
-    Generates and downloads an executive A4 Prepress Quality Audit Report PDF.
-    """
+def _lookup_inspect_analysis(file_id: str):
+    """Shared cache-or-disk lookup for both report endpoints (fix.md 1.6)."""
     analysis = INSPECT_CACHE.get(file_id)
-    if not analysis:
-        # Check if file exists on disk and re-inspect
-        file_path = f"temp_uploads/{file_id}"
-        if not os.path.exists(file_path):
-            for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]:
-                if os.path.exists(f"temp_uploads/{file_id}{test_ext}"):
-                    file_path = f"temp_uploads/{file_id}{test_ext}"
-                    break
-        if os.path.exists(file_path):
-            analysis = analyze_universal_asset(file_path, os.path.basename(file_path))
+    if analysis:
+        return analysis
+    for candidate in [f"temp_uploads/{file_id}"] + [
+        f"temp_uploads/{file_id}{test_ext}"
+        for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]
+    ]:
+        if os.path.exists(candidate):
+            analysis = analyze_universal_asset(candidate, os.path.basename(candidate))
             INSPECT_CACHE[file_id] = analysis
+            return analysis
+    return None
 
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analyzed asset not found")
-
+def _report_pdf_response(analysis: dict):
     pdf_bytes = generate_prepress_report_pdf(analysis)
     safe_name = os.path.splitext(analysis.get("filename", "Artwork"))[0].replace(" ", "_")
     return Response(
@@ -197,6 +188,16 @@ async def get_report_pdf(file_id: str):
             "Content-Disposition": f'attachment; filename="Prepress_Audit_Report_{safe_name}.pdf"'
         }
     )
+
+@app.get("/api/inspect/report-pdf/{file_id}")
+async def get_report_pdf(file_id: str):
+    """
+    Generates and downloads an executive A4 Prepress Quality Audit Report PDF.
+    """
+    analysis = _lookup_inspect_analysis(file_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analyzed asset not found")
+    return _report_pdf_response(analysis)
 
 @app.post("/api/inspect/export-report-pdf")
 async def export_report_pdf(request: Request):
@@ -206,25 +207,11 @@ async def export_report_pdf(request: Request):
     data = await request.json()
     analysis = data.get("analysis")
     if not analysis and "file_id" in data:
-        fid = data["file_id"]
-        analysis = INSPECT_CACHE.get(fid)
-        if not analysis:
-            file_path = f"temp_uploads/{fid}"
-            if os.path.exists(file_path):
-                analysis = analyze_universal_asset(file_path, os.path.basename(file_path))
+        analysis = _lookup_inspect_analysis(data["file_id"])
 
     if not analysis:
         raise HTTPException(status_code=400, detail="Missing analysis data for PDF report generation")
-
-    pdf_bytes = generate_prepress_report_pdf(analysis)
-    safe_name = os.path.splitext(analysis.get("filename", "Artwork"))[0].replace(" ", "_")
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="Prepress_Audit_Report_{safe_name}.pdf"'
-        }
-    )
+    return _report_pdf_response(analysis)
 
 @app.post("/api/preflight")
 async def analyze_pdfs(
@@ -280,6 +267,7 @@ async def create_flipbook(
     sound_enabled: bool = Form(False),
     page_range: str = Form(""),
 ):
+    evict_stale_caches()
     saved_paths = []
     task_id = str(uuid.uuid4())[:12]
     
@@ -309,19 +297,7 @@ async def create_flipbook(
     CACHE_TIMESTAMPS[task_id] = time.time()
 
 
-    target_indices = None
-    if page_range and page_range.lower() != "all":
-        try:
-            target_indices = []
-            for part in page_range.split(","):
-                part = part.strip()
-                if "-" in part:
-                    start, end = part.split("-")
-                    target_indices.extend(range(int(start) - 1, int(end)))
-                else:
-                    target_indices.append(int(part) - 1)
-        except Exception:
-            target_indices = None
+    target_indices = parse_page_selection(page_range)
 
     background_tasks.add_task(
         generate_flipbook_task,
@@ -360,34 +336,13 @@ async def update_flipbook(
         
     CACHE_TIMESTAMPS[task_id] = time.time()
     cached = PROJECT_CACHE[task_id]
-    
-    # 1. Padding
-    padded_pages = apply_print_binding_padding(list(cached["b64_pages"]), binding_style, add_flyleaves, mag_pad_choice)
-    
-    # 2. HTML Generation
-    html_content = generate_html_content(
-        b64_pages=padded_pages, 
-        original_pdf_name=cached["original_pdf_name"], 
-        direction=direction, 
-        binding_style=binding_style, 
-        bg_texture=bg_texture, 
-        sound_enabled=sound_enabled, 
-        page_w=cached["page_w"], 
-        page_h=cached["page_h"]
-    )
-    
-    # 3. Write
-    with open(cached["output_path"], "w", encoding="utf-8") as f:
-        f.write(html_content)
-        
-    cached["direction"] = direction
-    cached["binding_style"] = binding_style
-    cached["mag_pad_choice"] = mag_pad_choice
-    cached["add_flyleaves"] = add_flyleaves
-    cached["bg_texture"] = bg_texture
-    cached["sound_enabled"] = sound_enabled
 
-    return {"success": True, "output": cached["output_path"], "message": "Flipbook updated instantly!"}
+    output_path = refresh_flipbook_html(
+        cached, direction, binding_style, mag_pad_choice,
+        add_flyleaves, bg_texture, sound_enabled,
+    )
+
+    return {"success": True, "output": output_path, "message": "Flipbook updated instantly!"}
 
 
 @app.post("/api/flipbook/export")
@@ -433,6 +388,7 @@ async def get_task_status(task_id: str):
 @app.post("/api/contour/upload")
 async def upload_contour_file(file: UploadFile = File(...)):
     try:
+        evict_stale_caches()
         os.makedirs("temp_uploads", exist_ok=True)
         file_id = str(uuid.uuid4())[:12]
         ext = os.path.splitext(file.filename)[1].lower()
@@ -447,23 +403,8 @@ async def upload_contour_file(file: UploadFile = File(...)):
         preview_filename = f"{file_id}_preview.png"
         preview_disk_path = f"temp_uploads/{preview_filename}"
         try:
-            if ext == ".pdf":
-                doc = fitz.open(file_path)
-                if len(doc) > 0:
-                    pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.5, 0.5), alpha=True)
-                    pix.save(preview_disk_path)
-                doc.close()
-            else:
-                img_cv = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
-                if img_cv is not None:
-                    h_cv, w_cv = img_cv.shape[:2]
-                    max_dim = 1200.0
-                    if max(w_cv, h_cv) > max_dim:
-                        scale = max_dim / float(max(w_cv, h_cv))
-                        resized = cv2.resize(img_cv, (int(w_cv * scale), int(h_cv * scale)), interpolation=cv2.INTER_AREA)
-                        cv2.imwrite(preview_disk_path, resized)
-                    else:
-                        cv2.imwrite(preview_disk_path, img_cv)
+            from engines.thumbnails import render_downsampled_preview
+            render_downsampled_preview(file_path, preview_disk_path)
             if os.path.exists(preview_disk_path):
                 CONTOUR_PREVIEWS[file_id] = f"/temp_uploads/{preview_filename}"
         except Exception as e_prev:

@@ -1,6 +1,11 @@
 .venv/
 __pycache__/
 *.pyc
-temp_uploads/
-public_flipbooks/
+temp_uploads/*
+!temp_uploads/.gitkeep
+!temp_uploads/book_scans/
+temp_uploads/book_scans/*
+!temp_uploads/book_scans/.gitkeep
+public_flipbooks/*
+!public_flipbooks/.gitkeep
 *.bak

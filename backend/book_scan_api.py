@@ -3,12 +3,15 @@ import uuid
 import shutil
 import fitz
 import cv2
-import numpy as np
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse
 from typing import List, Optional, Dict, Any
-from engines.book_scan_engine import BookScanEngine
+from engines.book_scan_engine import BookScanEngine, PageOpError
+from engines.schemas import (
+    SessionInitResponse, ReorderRequest, PageRotateRequest, ProcessPageRequest,
+    CropBoxModel, SplitSpreadRequest, RevertSpreadRequest, CropPageRequest,
+    ExportRequest,
+)
 
 import time
 
@@ -30,82 +33,6 @@ def evict_stale_sessions():
         sess = SESSIONS.pop(sid, None)
         if sess and "session_dir" in sess:
             cleanup_session_dir(sess["session_dir"])
-
-class SessionInitResponse(BaseModel):
-    session_id: str
-    mode: str
-    total_pages: int
-    pages: List[Dict[str, Any]]
-
-class ReorderRequest(BaseModel):
-    page_ids: List[str]
-
-class PageRotateRequest(BaseModel):
-    page_id: str
-    rotation_delta: int  # e.g. 90, 180, 270
-
-class ProcessPageRequest(BaseModel):
-    page_id: str
-    clean_borders: bool = True
-    border_margin_px: int = 15
-    border_threshold: int = 210
-    enhance_colors: bool = True
-    saturation: float = 1.30
-    contrast: float = 1.10
-    deskew: bool = False
-    sharpen: bool = True
-
-class CropBoxModel(BaseModel):
-    x1: float = 0.0
-    y1: float = 0.0
-    x2: float = 1.0
-    y2: float = 1.0
-
-class SplitSpreadRequest(BaseModel):
-    page_id: str
-    crop_box: Optional[CropBoxModel] = None
-    split_pos: float = 0.5
-    apply_to_all: bool = False
-    target_page_ids: Optional[List[str]] = None
-
-class RevertSpreadRequest(BaseModel):
-    page_id: Optional[str] = None
-    revert_all: bool = False
-    target_page_ids: Optional[List[str]] = None
-
-class CropPageRequest(BaseModel):
-    page_id: str
-    crop_box: CropBoxModel
-    apply_to_all: bool = False
-    target_page_ids: Optional[List[str]] = None
-
-class ExportRequest(BaseModel):
-    bleed_mm: float = 3.0
-    show_crop_marks: bool = True
-    dpi: int = 200
-    clean_borders: bool = True
-    border_margin_px: int = 15
-    border_threshold: int = 210
-    enhance_colors: bool = True
-    saturation: float = 1.30
-    contrast: float = 1.10
-    deskew: bool = False
-    sharpen: bool = True
-    deskew_module_enabled: bool = False
-    deskew_mode: str = "auto"
-    deskew_angle: float = 0.0
-    deskew_max_angle: float = 10.0
-    deskew_ignore_borders: bool = True
-    deskew_scope_mode: str = "all"
-    deskew_custom_range: str = ""
-
-    bleed_module_enabled: bool = False
-    bleed_scope_mode: str = "all"
-    bleed_custom_range: str = ""
-
-    restoration_module_enabled: bool = False
-    restoration_scope_mode: str = "all"
-    restoration_custom_range: str = ""
 
 def cleanup_session_dir(session_dir: str):
     if os.path.exists(session_dir):
@@ -410,87 +337,17 @@ async def split_spread(session_id: str, req: SplitSpreadRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    new_pages = []
-    split_occurred = False
-    new_selected_id = None
-    target_ids = set(req.target_page_ids) if req.target_page_ids is not None else None
-
-    for p in session["pages"]:
-        if target_ids is not None:
-            is_target = p["id"] in target_ids
-        elif req.apply_to_all:
-            is_target = True
-        else:
-            is_target = (p["id"] == req.page_id)
-
-        if is_target and p.get("half", "full") == "full":
-            split_occurred = True
-            base_label = p.get("label", "Sheet").replace(" (Spread)", "")
-            cb = req.crop_box.dict() if req.crop_box else p.get("crop_box")
-            sp = req.split_pos if req.split_pos is not None else p.get("split_pos", 0.5)
-
-            p_orig_w = p.get("orig_width_mm") or p.get("width_mm", 297.0)
-            p_orig_h = p.get("orig_height_mm") or p.get("height_mm", 210.0)
-            cb_w = (cb.get("x2", 1.0) - cb.get("x1", 0.0)) if cb else 1.0
-            cb_h = (cb.get("y2", 1.0) - cb.get("y1", 0.0)) if cb else 1.0
-            cropped_w = p_orig_w * cb_w
-            cropped_h = p_orig_h * cb_h
-            left_w = round(cropped_w * sp, 1)
-            right_w = round(cropped_w * (1.0 - sp), 1)
-
-            left_id = str(uuid.uuid4())[:8]
-            right_id = str(uuid.uuid4())[:8]
-            if p["id"] == req.page_id or new_selected_id is None:
-                new_selected_id = left_id
-
-            left_p = {
-                "id": left_id,
-                "source": p["source"],
-                "doc_idx": p["doc_idx"],
-                "half": "left",
-                "crop_box": cb,
-                "spread_crop_box": cb,
-                "split_pos": sp,
-                "spread_split_pos": sp,
-                "page_crop_box": None,
-                "rotation": p.get("rotation", 0),
-                "label": f"{base_label} (Left)",
-                "parent_page_id": p["id"],
-                "is_spread": False,
-                "width_mm": left_w,
-                "height_mm": round(cropped_h, 1),
-                "orig_width_mm": left_w,
-                "orig_height_mm": round(cropped_h, 1),
-                "parent_spread_width_mm": p_orig_w,
-                "parent_spread_height_mm": p_orig_h,
-            }
-            right_p = {
-                "id": right_id,
-                "source": p["source"],
-                "doc_idx": p["doc_idx"],
-                "half": "right",
-                "crop_box": cb,
-                "spread_crop_box": cb,
-                "split_pos": sp,
-                "spread_split_pos": sp,
-                "page_crop_box": None,
-                "rotation": p.get("rotation", 0),
-                "label": f"{base_label} (Right)",
-                "parent_page_id": p["id"],
-                "is_spread": False,
-                "width_mm": right_w,
-                "height_mm": round(cropped_h, 1),
-                "orig_width_mm": right_w,
-                "orig_height_mm": round(cropped_h, 1),
-                "parent_spread_width_mm": p_orig_w,
-                "parent_spread_height_mm": p_orig_h,
-            }
-            new_pages.extend([left_p, right_p])
-        else:
-            new_pages.append(p)
-
-    if not split_occurred:
-        raise HTTPException(status_code=400, detail="Target page is already split or not found.")
+    try:
+        new_pages, new_selected_id = BookScanEngine.split_pages(
+            session["pages"],
+            req.page_id,
+            crop_box=req.crop_box.dict() if req.crop_box else None,
+            split_pos=req.split_pos,
+            apply_to_all=req.apply_to_all,
+            target_page_ids=req.target_page_ids,
+        )
+    except PageOpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
     session["pages"] = new_pages
     return {
@@ -506,59 +363,15 @@ async def revert_spread(session_id: str, req: RevertSpreadRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    target_pairs = set()
-
-    if req.revert_all:
-        for p in session["pages"]:
-            if p.get("half") in ["left", "right"]:
-                target_pairs.add((p["source"], p["doc_idx"]))
-    elif req.target_page_ids:
-        t_ids = set(req.target_page_ids)
-        for p in session["pages"]:
-            if p["id"] in t_ids and p.get("half") in ["left", "right"]:
-                target_pairs.add((p["source"], p["doc_idx"]))
-    elif req.page_id:
-        target_page = next((p for p in session["pages"] if p["id"] == req.page_id), None)
-        if not target_page:
-            raise HTTPException(status_code=404, detail="Page not found.")
-        target_pairs.add((target_page["source"], target_page["doc_idx"]))
-    else:
-        raise HTTPException(status_code=400, detail="page_id or revert_all required.")
-
-    if not target_pairs:
-        raise HTTPException(status_code=400, detail="No split pages found to revert.")
-
-    new_pages = []
-    recombined_pairs = set()
-    new_selected_id = None
-
-    for p in session["pages"]:
-        pair = (p["source"], p["doc_idx"])
-        if pair in target_pairs and p.get("half") in ["left", "right"]:
-            if pair not in recombined_pairs:
-                recombined_pairs.add(pair)
-                orig_w = p.get("parent_spread_width_mm") or p.get("orig_width_mm") or 297.0
-                orig_h = p.get("parent_spread_height_mm") or p.get("orig_height_mm") or 210.0
-                reverted_id = p.get("parent_page_id") or str(uuid.uuid4())[:8]
-                if new_selected_id is None:
-                    new_selected_id = reverted_id
-                new_pages.append({
-                    "id": reverted_id,
-                    "source": p["source"],
-                    "doc_idx": p["doc_idx"],
-                    "half": "full",
-                    "crop_box": p.get("spread_crop_box") or p.get("crop_box"),
-                    "split_pos": p.get("spread_split_pos") if p.get("spread_split_pos") is not None else p.get("split_pos", 0.5),
-                    "rotation": p.get("rotation", 0),
-                    "label": f"Sheet {p['doc_idx'] + 1} (Spread)",
-                    "is_spread": True,
-                    "width_mm": orig_w,
-                    "height_mm": orig_h,
-                    "orig_width_mm": orig_w,
-                    "orig_height_mm": orig_h,
-                })
-        else:
-            new_pages.append(p)
+    try:
+        new_pages, new_selected_id = BookScanEngine.revert_pages(
+            session["pages"],
+            page_id=req.page_id,
+            revert_all=req.revert_all,
+            target_page_ids=req.target_page_ids,
+        )
+    except PageOpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
     session["pages"] = new_pages
     return {
@@ -574,30 +387,13 @@ async def crop_page(session_id: str, req: CropPageRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    cb_dict = req.crop_box.dict()
-    cb_w = req.crop_box.x2 - req.crop_box.x1
-    cb_h = req.crop_box.y2 - req.crop_box.y1
-    target_ids = set(req.target_page_ids) if req.target_page_ids is not None else None
-
-    for p in session["pages"]:
-        if target_ids is not None:
-            is_target = p["id"] in target_ids
-        elif req.apply_to_all:
-            is_target = True
-        else:
-            is_target = (p["id"] == req.page_id)
-
-        if is_target:
-            if p.get("half") in ["left", "right"]:
-                p["page_crop_box"] = cb_dict
-            else:
-                p["crop_box"] = cb_dict
-            orig_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
-            orig_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
-            p["orig_width_mm"] = orig_w
-            p["orig_height_mm"] = orig_h
-            p["width_mm"] = round(orig_w * cb_w, 1)
-            p["height_mm"] = round(orig_h * cb_h, 1)
+    BookScanEngine.apply_crop_to_pages(
+        session["pages"],
+        req.page_id,
+        req.crop_box.dict(),
+        apply_to_all=req.apply_to_all,
+        target_page_ids=req.target_page_ids,
+    )
 
     return {
         "status": "ok",
@@ -608,8 +404,8 @@ async def crop_page(session_id: str, req: CropPageRequest):
 async def export_book_pdf(
     session_id: str,
     req: ExportRequest,
-    background_tasks: BackgroundTasks
 ):
+    evict_stale_sessions()
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
@@ -627,61 +423,9 @@ async def export_book_pdf(
         doc_map["single"] = fitz.open(session["single_path"])
 
     try:
-        processed_images = []
-        per_page_bleed_list = []
-        for idx, p_info in enumerate(pages):
-            page_num = idx + 1
-            raw_img = BookScanEngine.extract_page_image(doc_map, p_info, dpi=req.dpi)
-
-            # Evaluate module scope per page
-            apply_deskew = req.deskew_module_enabled and BookScanEngine.is_page_in_scope(
-                page_num, req.deskew_scope_mode, req.deskew_custom_range
-            )
-            apply_restoration = req.restoration_module_enabled and BookScanEngine.is_page_in_scope(
-                page_num, req.restoration_scope_mode, req.restoration_custom_range
-            )
-            apply_bleed = req.bleed_module_enabled and BookScanEngine.is_page_in_scope(
-                page_num, req.bleed_scope_mode, req.bleed_custom_range
-            )
-
-            # Restoration settings
-            if req.restoration_module_enabled:
-                do_clean_borders = apply_restoration and req.clean_borders
-                do_enhance_colors = apply_restoration and req.enhance_colors
-            else:
-                do_clean_borders = req.clean_borders
-                do_enhance_colors = req.enhance_colors
-
-            cleaned = BookScanEngine.process_single_page(
-                raw_img,
-                clean_borders=do_clean_borders,
-                border_margin_px=req.border_margin_px,
-                border_threshold=req.border_threshold,
-                enhance_colors=do_enhance_colors,
-                saturation=req.saturation,
-                contrast=req.contrast,
-                deskew=req.deskew if not req.deskew_module_enabled else False,
-                sharpen=req.sharpen,
-                deskew_module_enabled=apply_deskew,
-                deskew_mode=req.deskew_mode,
-                deskew_angle=req.deskew_angle,
-                deskew_max_angle=req.deskew_max_angle,
-                deskew_ignore_borders=req.deskew_ignore_borders,
-            )
-            processed_images.append(cleaned)
-
-            # Bleed settings per page
-            if req.bleed_module_enabled:
-                p_bleed = req.bleed_mm if apply_bleed else 0.0
-                p_marks = req.show_crop_marks if apply_bleed else False
-            else:
-                p_bleed = 0.0
-                p_marks = False
-
-            per_page_bleed_list.append({
-                "bleed_mm": p_bleed,
-                "show_crop_marks": p_marks
-            })
+        processed_images, per_page_bleed_list = BookScanEngine.render_export_pages(
+            doc_map, pages, req
+        )
 
         export_filename = f"cleaned_book_{session_id[:8]}.pdf"
         output_pdf_path = os.path.join(session["session_dir"], export_filename)

@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Bloat Remediation (fix.md Phase 1.4b — book-scan + main routers)**:
+  - `book_scan_api.py` 710 → 453 lines: all request models → `engines/schemas.py`; split/revert/crop/export-loop math → `BookScanEngine.split_pages` / `revert_pages` / `apply_crop_to_pages` / `render_export_pages` (+ `PageOpError`); removed dead `numpy`/`BackgroundTasks`/`JSONResponse`/`BaseModel` imports.
+  - `main.py` 594 → 536: flipbook page-range splitter → `units.parse_page_selection`, update flow → `flipbook_worker.refresh_flipbook_html`; dropped now-unused helper import. Split/revert/crop round-trip verified numerically.
+- **Bloat Remediation (fix.md Phase 1.4a — imposing router)**:
+  - `imposing_api.py` 804 → 538 lines. New `engines/schemas.py` (`ImposingItem`, `ImposingRequest`) and `engines/imposing_prep.py` (`build_sheet_specs`, `build_roll_specs`, `apply_alignment`); `parse_page_range` centralized in `units.py`, `get_dimensions_mm` in `thumbnails.py` (also fixed unclosed-doc leak).
+  - 70-line inline roll-PDF renderer moved to `SheetGangExporter.export_roll_pdf` (now closes the output doc); removed unused imports. Verified: compile clean, routes intact, prep helpers unit-checked.
+- **Bloat Remediation (fix.md Phase 1.1/1.5/1.6)**:
+  - New `backend/engines/thumbnails.py`: single `render_pdf_thumb` / `render_image_thumb` / `pregen_pdf_thumbnails` / `resolve_temp_file` / `render_downsampled_preview`. `main.py` (inspect, contour upload) and `imposing_api.py` (upload, thumbnail, `_pregen`) now delegate; `resolve_temp_file` in router is a thin wrapper.
+  - Retention: `evict_stale_caches()` now runs on `inspect`, `contour/upload`, `flipbook`, `imposing/upload`; `evict_stale_sessions()` on `book-scan/export`. `imposing_export_*.pdf/svg` deleted via BackgroundTasks after download.
+  - Report endpoints share `_lookup_inspect_analysis` + `_report_pdf_response` (both routes kept — POST used by frontend, GET deep-linkable).
+  - Deliberately kept: `POST /api/shutdown` (used by `layout.tsx`) and `/temp_uploads` static mount (used by `PreviewViewport`, `controls`) — removal would break UX.
+- **Bloat Remediation (fix.md Phase 0–1.3)**:
+  - Hygiene: purged `frontend/.next`, `__pycache__`, logs, `dump.rdb`; evicted 319M / 1,155 stale `backend/temp_uploads/book_scans/*` sessions (all >2h TTL); worktree (excl. venv/target/node) 577M → 16M.
+  - Ignores: added `frontend/.next-build/`, `book_scans/.gitkeep` + `public_flipbooks/.gitkeep` negations.
+  - Backend dedup: new `backend/engines/units.py` (single `MM_TO_PTS`, `hex_to_rgb`, `format_page_ranges`); `sheet_gang_exporter` (2 copies), `imposing_api` (1 copy) now import it; `asset_inspector` re-exports, `report_generator` imports at top; `book_scan_engine` imports units.
+  - Dead code removed: `GridSheetPacker` (broken `total_area_m2`), `GridRollPacker` (broken `SegmentResult`), `PAPER_CALIPERS_MM` + `calculate_spine_thickness` (zero imports).
+  - Deferred: `git filter-repo` history purge (needs backup + re-clone window); router thinning, thumbnail helper, retention eviction, frontend god-split (tracked in `fix.md`).
 - **Book Studio Crop Box State Fix**:
   - Fixed a critical UI bug where navigating to a split page in Book Studio would unconditionally wipe the single-page crop box view back to full bed margins (`0, 0, 1, 1`), ignoring the previously applied secondary `page_crop_box` crop from the backend. The frontend viewport will now faithfully re-render the single page crop upon navigating away and back.
 - **UI Refinement: Spine Seam Simplification**:
