@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { API_BASE_URL } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { ImposingItem, ImposingPage } from "@/types/prepress";
+import { usePageDeck } from "./usePageDeck";
 
 export function useImpositionState() {
   const [jobMode, setJobMode] = useState<"book" | "gang">("book");
   const [selectedBookIdx, setSelectedBookIdx] = useState(0);
   const [items, setItems] = useState<ImposingItem[]>([]);
-  const [pages, setPages] = useState<ImposingPage[]>([]);
+  const deck = usePageDeck<ImposingPage>();
+  const { pages, setPages } = deck;
   const [mode, setMode] = useState<"Sheet" | "Roll">("Sheet");
   const [unit, setUnit] = useState("mm");
   
@@ -30,59 +32,34 @@ export function useImpositionState() {
   const [dbSheets, setDbSheets] = useState<{name: string; width: number; height: number}[]>([]);
   const [dbRolls, setDbRolls] = useState<{name: string; width: number}[]>([]);
 
+  // Deck ops delegate to the shared usePageDeck hook (identical list semantics)
   const reorderPages = useCallback((fromIndex: number, toIndex: number) => {
-    setPages((prev) => {
-      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length) return prev;
-      const copy = [...prev];
-      const [moved] = copy.splice(fromIndex, 1);
-      copy.splice(toIndex, 0, moved);
-      return copy;
-    });
-  }, []);
+    deck.reorder(fromIndex, toIndex);
+  }, [deck]);
 
   const rotatePage = useCallback((id: string, dir: "cw" | "ccw") => {
-    setPages((prev) =>
-      prev.map((p) => {
-        if (p.id !== id) return p;
-        const delta = dir === "cw" ? 90 : -90;
-        const newRot = ((p.rotation + delta + 360) % 360) as 0 | 90 | 180 | 270;
-        return { ...p, rotation: newRot };
-      })
-    );
-  }, []);
+    deck.rotateStepped(id, dir);
+  }, [deck]);
 
   const toggleDeletePage = useCallback((id: string) => {
-    setPages((prev) =>
-      prev.map((p) => {
-        if (p.id !== id) return p;
-        return { ...p, is_deleted: !p.is_deleted };
-      })
-    );
-  }, []);
+    deck.toggleDeletedById(id);
+  }, [deck]);
 
   const duplicatePage = useCallback((id: string) => {
-    setPages((prev) => {
-      const idx = prev.findIndex((p) => p.id === id);
-      if (idx === -1) return prev;
-      const target = prev[idx];
-      const clone: ImposingPage = {
-        ...target,
-        id: `${target.file_id}_copy_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        display_page_num: (target.display_page_num || target.original_page_num + 1),
-      };
-      const copy = [...prev];
-      copy.splice(idx + 1, 0, clone);
-      return copy;
-    });
-  }, []);
+    deck.duplicateById(
+      id,
+      (target) => `${target.file_id}_copy_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      (target) => ({ display_page_num: target.display_page_num || target.original_page_num + 1 })
+    );
+  }, [deck]);
 
   const clearAllPages = useCallback(() => {
-    setPages([]);
+    deck.clear();
     setItems([]);
-  }, []);
+  }, [deck]);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/settings`)
+    apiFetch(`/api/settings`)
       .then((res) => res.json())
       .then((data) => {
         if (data.sheets) {

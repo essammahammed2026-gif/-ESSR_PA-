@@ -1,8 +1,6 @@
 import os
 import uuid
 import shutil
-import fitz
-import cv2
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from typing import List, Optional, Dict, Any
@@ -40,7 +38,7 @@ def cleanup_session_dir(session_dir: str):
 
 @router.post("/init-session")
 async def init_book_scan_session(
-    mode: str = Form("dual"),          # 'dual' (odds + evens) or 'single'
+    mode: str = Form("single"),         # 'single' or 'dual'
     is_spread: bool = Form(False),     # False by default (treat as-is)
     odds_order: str = Form("forward"), # 'forward' or 'reverse'
     evens_order: str = Form("reverse"),# 'reverse' or 'forward'
@@ -48,6 +46,7 @@ async def init_book_scan_session(
     file_odds: Optional[UploadFile] = File(None),
     file_evens: Optional[UploadFile] = File(None),
     file_single: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
     existing_file_path: Optional[str] = Form(None),
 ):
     session_id = str(uuid.uuid4())
@@ -58,7 +57,31 @@ async def init_book_scan_session(
     evens_path = None
     single_path = None
 
-    if mode == "dual":
+    if files and len(files) > 0:
+        saved_paths = []
+        for idx, upload in enumerate(files):
+            clean_name = f"{idx}_{upload.filename}"
+            save_path = os.path.join(session_dir, clean_name)
+            with open(save_path, "wb") as f:
+                shutil.copyfileobj(upload.file, f)
+            saved_paths.append(save_path)
+
+        combined_pdf_path = os.path.join(session_dir, "combined_book.pdf")
+        if BookScanEngine.combine_files_to_pdf(saved_paths, combined_pdf_path):
+            single_path = combined_pdf_path
+        elif len(saved_paths) == 1 and saved_paths[0].lower().endswith(".pdf"):
+            single_path = saved_paths[0]
+        else:
+            raise HTTPException(status_code=500, detail="Failed to combine uploaded files into document.")
+
+        pages = BookScanEngine.collate_from_paths(
+            single_path=single_path,
+            is_spread=is_spread,
+            odds_order=odds_order,
+            evens_order=evens_order,
+            spread_split_pos=spread_split_pos,
+        )
+    elif mode == "dual":
         if not file_odds or not file_evens:
             raise HTTPException(status_code=400, detail="Both Odds and Evens PDF files are required in dual mode.")
         odds_path = os.path.join(session_dir, f"odds_{file_odds.filename}")
@@ -68,37 +91,36 @@ async def init_book_scan_session(
         with open(evens_path, "wb") as f:
             shutil.copyfileobj(file_evens.file, f)
 
-        odds_doc = fitz.open(odds_path)
-        evens_doc = fitz.open(evens_path)
-        pages = BookScanEngine.collate_scans(
-            odds_doc=odds_doc,
-            evens_doc=evens_doc,
+        pages = BookScanEngine.collate_from_paths(
+            odds_path=odds_path,
+            evens_path=evens_path,
             is_spread=is_spread,
             odds_order=odds_order,
             evens_order=evens_order,
-            spread_split_pos=spread_split_pos
+            spread_split_pos=spread_split_pos,
         )
     else:
         if not file_single and not existing_file_path:
-            raise HTTPException(status_code=400, detail="Single PDF file is required in single mode.")
+            raise HTTPException(status_code=400, detail="Please upload at least one file.")
         if file_single:
             single_path = os.path.join(session_dir, f"single_{file_single.filename}")
             with open(single_path, "wb") as f:
                 shutil.copyfileobj(file_single.file, f)
+            if not single_path.lower().endswith(".pdf"):
+                combined_pdf_path = os.path.join(session_dir, "single_converted.pdf")
+                if BookScanEngine.combine_files_to_pdf([single_path], combined_pdf_path):
+                    single_path = combined_pdf_path
         else:
             if not os.path.exists(existing_file_path):
                 raise HTTPException(status_code=404, detail="Referenced file does not exist on server.")
             single_path = existing_file_path
 
-        single_doc = fitz.open(single_path)
-        pages = BookScanEngine.collate_scans(
-            odds_doc=None,
-            evens_doc=None,
+        pages = BookScanEngine.collate_from_paths(
+            single_path=single_path,
             is_spread=is_spread,
             odds_order=odds_order,
             evens_order=evens_order,
             spread_split_pos=spread_split_pos,
-            single_doc=single_doc
         )
     evict_stale_sessions()
     SESSION_TIMESTAMPS[session_id] = time.time()
@@ -142,6 +164,7 @@ async def get_page_thumbnail(
     deskew_angle: float = 0.0,
     deskew_max_angle: float = 10.0,
     deskew_ignore_borders: bool = True,
+    rev: int = 0,
 ):
     session = SESSIONS.get(session_id)
     if not session:
@@ -151,11 +174,13 @@ async def get_page_thumbnail(
     if not page_info:
         raise HTTPException(status_code=404, detail="Page not found.")
 
-    # Disk cache tag with complete state configuration
+    # Disk cache tag with complete state configuration.
+    # `rev` busts browser + disk caches after in-place mutations (crop/rotate)
+    # that keep the same page id with otherwise identical geometry tags.
     rot = page_info.get("rotation", 0)
     half = page_info.get("half", "full")
     sp = int(page_info.get("spread_split_pos", page_info.get("split_pos", 0.5)) * 1000)
-    cache_tag = f"thumb_{page_id}_{half}_{sp}_{rot}_{preview_clean}_{dpi}"
+    cache_tag = f"thumb_{page_id}_{half}_{sp}_{rot}_{preview_clean}_{dpi}_r{rev}"
     cb = page_info.get("crop_box")
     if cb:
         cache_tag += f"_cb_{int(cb.get('x1', 0)*1000)}_{int(cb.get('y1', 0)*1000)}_{int(cb.get('x2', 1)*1000)}_{int(cb.get('y2', 1)*1000)}"
@@ -165,6 +190,9 @@ async def get_page_thumbnail(
     pcb = page_info.get("page_crop_box")
     if pcb:
         cache_tag += f"_pcb_{int(pcb.get('x1', 0)*1000)}_{int(pcb.get('y1', 0)*1000)}_{int(pcb.get('x2', 1)*1000)}_{int(pcb.get('y2', 1)*1000)}"
+    sb = page_info.get("slice_box")
+    if sb:
+        cache_tag += f"_sb_{int(sb.get('x1', 0)*1000)}_{int(sb.get('y1', 0)*1000)}_{int(sb.get('x2', 1)*1000)}_{int(sb.get('y2', 1)*1000)}"
     if preview_clean:
         cache_tag += f"_{border_margin_px}_{int(saturation*100)}_{int(contrast*100)}_{int(deskew)}"
         if deskew_module_enabled:
@@ -174,13 +202,7 @@ async def get_page_thumbnail(
     if os.path.exists(thumb_path):
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
-    doc_map = {}
-    if session.get("odds_path"):
-        doc_map["odds"] = fitz.open(session["odds_path"])
-    if session.get("evens_path"):
-        doc_map["evens"] = fitz.open(session["evens_path"])
-    if session.get("single_path"):
-        doc_map["single"] = fitz.open(session["single_path"])
+    doc_map = BookScanEngine.open_session_docs(session)
 
     try:
         raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=dpi)
@@ -204,17 +226,12 @@ async def get_page_thumbnail(
         else:
             proc_img = raw_img
 
-        success, enc = cv2.imencode(".jpg", proc_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-        if not success:
+        if not BookScanEngine.write_thumbnail_jpg(proc_img, thumb_path, quality=80):
             raise HTTPException(status_code=500, detail="Failed to encode thumbnail.")
-
-        with open(thumb_path, "wb") as f:
-            f.write(enc.tobytes())
 
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
     finally:
-        for d in doc_map.values():
-            d.close()
+        BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/reorder/{session_id}")
 async def reorder_pages(session_id: str, req: ReorderRequest):
@@ -247,6 +264,10 @@ async def rotate_page(session_id: str, req: PageRotateRequest):
         raise HTTPException(status_code=404, detail="Page not found.")
 
     page_info["rotation"] = (page_info.get("rotation", 0) + req.rotation_delta) % 360
+    try:
+        page_info["rev"] = int(page_info.get("rev", 0)) + 1
+    except (TypeError, ValueError):
+        page_info["rev"] = 1
     return {"status": "ok", "page": page_info}
 
 @router.delete("/page/{session_id}/{page_id}")
@@ -273,13 +294,7 @@ async def detect_page_angle(
     if not page_info:
         raise HTTPException(status_code=404, detail="Page not found.")
 
-    doc_map = {}
-    if session.get("odds_path"):
-        doc_map["odds"] = fitz.open(session["odds_path"])
-    if session.get("evens_path"):
-        doc_map["evens"] = fitz.open(session["evens_path"])
-    if session.get("single_path"):
-        doc_map["single"] = fitz.open(session["single_path"])
+    doc_map = BookScanEngine.open_session_docs(session)
 
     try:
         raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=100)
@@ -294,8 +309,7 @@ async def detect_page_angle(
             "detected_angle": detected_angle
         }
     finally:
-        for d in doc_map.values():
-            d.close()
+        BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/detect-crop/{session_id}/{page_id}")
 async def detect_page_crop(session_id: str, page_id: str):
@@ -307,19 +321,13 @@ async def detect_page_crop(session_id: str, page_id: str):
     if not page_info:
         raise HTTPException(status_code=404, detail="Page not found.")
 
-    doc_map = {}
-    if session.get("odds_path"):
-        doc_map["odds"] = fitz.open(session["odds_path"])
-    if session.get("evens_path"):
-        doc_map["evens"] = fitz.open(session["evens_path"])
-    if session.get("single_path"):
-        doc_map["single"] = fitz.open(session["single_path"])
+    doc_map = BookScanEngine.open_session_docs(session)
 
     try:
-        temp_info = {**page_info}
-        temp_info.pop("crop_box", None)
-        temp_info["half"] = "full"
-        raw_img = BookScanEngine.extract_page_image(doc_map, temp_info, dpi=100)
+        # Detect within the CURRENT rendered view (stored crops kept): the
+        # returned box is view-relative, matching canvas overlay coordinates.
+        # Apply composes it onto the stored box (compose-on-commit).
+        raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=100)
         res = BookScanEngine.detect_book_crop_and_seam(raw_img)
         return {
             "status": "ok",
@@ -328,8 +336,7 @@ async def detect_page_crop(session_id: str, page_id: str):
             "split_pos": res["split_pos"]
         }
     finally:
-        for d in doc_map.values():
-            d.close()
+        BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/split-spread/{session_id}")
 async def split_spread(session_id: str, req: SplitSpreadRequest):
@@ -343,6 +350,8 @@ async def split_spread(session_id: str, req: SplitSpreadRequest):
             req.page_id,
             crop_box=req.crop_box.dict() if req.crop_box else None,
             split_pos=req.split_pos,
+            split_lines=req.split_lines,
+            split_direction=req.split_direction or "vertical",
             apply_to_all=req.apply_to_all,
             target_page_ids=req.target_page_ids,
         )
@@ -414,13 +423,7 @@ async def export_book_pdf(
     if not pages:
         raise HTTPException(status_code=400, detail="No pages available to export.")
 
-    doc_map = {}
-    if session.get("odds_path"):
-        doc_map["odds"] = fitz.open(session["odds_path"])
-    if session.get("evens_path"):
-        doc_map["evens"] = fitz.open(session["evens_path"])
-    if session.get("single_path"):
-        doc_map["single"] = fitz.open(session["single_path"])
+    doc_map = BookScanEngine.open_session_docs(session)
 
     try:
         processed_images, per_page_bleed_list = BookScanEngine.render_export_pages(
@@ -449,5 +452,4 @@ async def export_book_pdf(
             filename=export_filename
         )
     finally:
-        for d in doc_map.values():
-            d.close()
+        BookScanEngine.close_session_docs(doc_map)

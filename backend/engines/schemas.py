@@ -96,7 +96,9 @@ class CropBoxModel(BaseModel):
 class SplitSpreadRequest(BaseModel):
     page_id: str
     crop_box: Optional[CropBoxModel] = None
-    split_pos: float = 0.5
+    split_pos: Optional[float] = 0.5
+    split_lines: Optional[List[float]] = None
+    split_direction: Optional[str] = "vertical"
     apply_to_all: bool = False
     target_page_ids: Optional[List[str]] = None
 

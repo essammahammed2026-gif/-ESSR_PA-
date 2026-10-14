@@ -76,8 +76,8 @@ export default function RootLayout({
   const handleShutdown = async () => {
     setIsShuttingDown(true);
     try {
-      const { getApiUrl } = await import("@/lib/api");
-      await fetch(getApiUrl("/api/shutdown"), { method: "POST" });
+      const { apiFetch } = await import("@/lib/api");
+      await apiFetch("/api/shutdown", { method: "POST" });
     } catch {
       // Ignored since server process terminates immediately
     }

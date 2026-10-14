@@ -1,0 +1,18 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd frontend && npm run lint && npm run build
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd backend && python3 -m py_compile main.py imposing_api.py book_scan_api.py settings_api.py engines/*.py
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: test ! -e backend/README.md && ! git diff --cached --name-only | grep -Ei '\.(jpg|jpeg|png|pdf)$'

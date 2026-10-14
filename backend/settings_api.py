@@ -202,3 +202,37 @@ def delete_roll(roll_name: str):
     settings["rolls"] = filtered
     save_settings(settings)
     return settings
+
+
+# --- Storage & Cleanup Endpoints ---
+
+class OpenFolderRequest(BaseModel):
+    key: str
+
+class CleanStorageRequest(BaseModel):
+    target: str = "runtime"  # "runtime", "all", or specific key
+
+@router.get("/api/settings/storage-status")
+def get_storage_status():
+    from engines.storage_cleaner import StorageCleaner
+    return StorageCleaner.get_status()
+
+@router.post("/api/settings/open-folder")
+def open_storage_folder(req: OpenFolderRequest):
+    from engines.storage_cleaner import StorageCleaner
+    path = StorageCleaner.open_folder(req.key)
+    return {"success": True, "path": path}
+
+@router.post("/api/settings/clean-storage")
+def clean_storage(req: CleanStorageRequest):
+    from engines.storage_cleaner import StorageCleaner
+    res = StorageCleaner.clean(req.target)
+    if req.target in ["runtime", "all", "book_scans"]:
+        try:
+            from book_scan_api import SESSIONS, SESSION_TIMESTAMPS
+            SESSIONS.clear()
+            SESSION_TIMESTAMPS.clear()
+        except ImportError:
+            pass
+    return res
+

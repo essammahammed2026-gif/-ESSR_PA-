@@ -8,8 +8,6 @@ from fastapi.staticfiles import StaticFiles
 import shutil
 import os
 import uuid
-import fitz
-import cv2
 from typing import List
 from engines.preflight import run_preflight
 from engines.contour_engine import generate_contour_cut_svg, analyze_image_for_contour
@@ -114,11 +112,9 @@ async def inspect_asset(file: UploadFile = File(...)):
     thumb_filename = f"{file_id}_thumb.jpg"
     thumb_disk_path = f"temp_uploads/{thumb_filename}"
     try:
-        from engines.thumbnails import render_thumb_for_file
+        from engines.thumbnails import render_thumb_for_file, get_pdf_page_count
         if ext == ".pdf":
-            doc = fitz.open(file_path)
-            num_pages = len(doc)
-            doc.close()
+            num_pages = get_pdf_page_count(file_path)
             if num_pages > 0:
                 render_thumb_for_file(file_path, thumb_p0_disk_path, page_num=0)
                 shutil.copy(thumb_p0_disk_path, thumb_disk_path)

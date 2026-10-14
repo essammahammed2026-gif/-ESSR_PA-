@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ban-binaries
+        name: Block committed images/PDFs/flipbooks (zero-retention policy)
+        entry: bash -c 'git diff --cached --name-only | grep -Ei "\.(jpg|jpeg|png|pdf)$|flipbook_|temp_uploads/book_scans" && { echo "BLOCKED: binary/upload artifacts must not be committed"; exit 1; } || exit 0'
+        language: system
+        pass_filenames: false
+      - id: frontend-changed-checks
+        name: ESLint (changed) + tsc --noEmit (frontend)
+        entry: bash -c 'cd frontend && git diff --cached --name-only --diff-filter=ACM | grep -E "\.(ts|tsx)$" | grep -v node_modules | xargs -r npx eslint && npx tsc --noEmit'
+        language: system
+        pass_filenames: false
+      - id: backend-compile
+        name: Backend py_compile
+        entry: bash -c 'cd backend && python3 -m py_compile main.py imposing_api.py book_scan_api.py settings_api.py engines/*.py'
+        language: system
+        pass_filenames: false

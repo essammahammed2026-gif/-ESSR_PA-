@@ -1,7 +1,6 @@
 import os
 import uuid
 import threading
-import fitz
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from typing import List, Optional
@@ -9,7 +8,7 @@ from engines.sheet_packer import MaxRectsSheetPacker, SingleSheetResult, PlacedS
 from engines.roll_packer import MeterSegmentPacker
 from engines.sheet_gang_exporter import SheetGangExporter
 from engines.schemas import ImposingItem, ImposingRequest
-from engines.imposing_prep import build_sheet_specs, build_roll_specs, apply_alignment
+from engines.imposing_prep import build_sheet_specs, build_roll_specs, apply_alignment, effective_page_rotation
 from engines.thumbnails import get_dimensions_mm
 
 
@@ -57,20 +56,18 @@ async def upload_imposing_file(file: UploadFile = File(...)):
     
     if ext == ".pdf":
         try:
-            doc = fitz.open(file_path)
-            page_count = len(doc)
+            from engines.thumbnails import list_pdf_pages_mm
+            dims = list_pdf_pages_mm(file_path)
+            page_count = len(dims)
             if page_count > 0:
-                rect = doc[0].rect
-                w = (rect.width / 72.0) * 25.4
-                h = (rect.height / 72.0) * 25.4
+                w, h = dims[0]
                 # Render page 0 thumbnail synchronously at 0.72 scale (~150 DPI) for crisp preview
                 from engines.thumbnails import render_pdf_thumb
                 render_pdf_thumb(file_path, thumb_path, page_num=0)
-                
-                for p in range(page_count):
-                    p_rect = doc[p].rect
-                    pw = round((p_rect.width / 72.0) * 25.4, 2)
-                    ph = round((p_rect.height / 72.0) * 25.4, 2)
+
+                for p, (pw_raw, ph_raw) in enumerate(dims):
+                    pw = round(pw_raw, 2)
+                    ph = round(ph_raw, 2)
                     pages_meta.append({
                         "page_num": p,
                         "width_mm": pw,
@@ -78,7 +75,6 @@ async def upload_imposing_file(file: UploadFile = File(...)):
                         "aspect_ratio": round(pw / ph, 3) if ph > 0 else 1.0,
                         "thumb_url": f"/api/imposing/thumbnail/{file_id}{ext}/{p}"
                     })
-            doc.close()
 
             # For multi-page PDFs (books), pre-generate ALL remaining page thumbnails
             # in a background daemon thread. One fitz.open() → all pages rendered
@@ -141,12 +137,12 @@ def get_imposing_file_pages(file_id: str):
     
     if ext == ".pdf":
         try:
-            doc = fitz.open(file_path)
-            page_count = len(doc)
-            for p in range(page_count):
-                rect = doc[p].rect
-                pw = round((rect.width / 72.0) * 25.4, 2)
-                ph = round((rect.height / 72.0) * 25.4, 2)
+            from engines.thumbnails import list_pdf_pages_mm
+            dims = list_pdf_pages_mm(file_path)
+            page_count = len(dims)
+            for p, (pw_raw, ph_raw) in enumerate(dims):
+                pw = round(pw_raw, 2)
+                ph = round(ph_raw, 2)
                 pages_meta.append({
                     "page_num": p,
                     "width_mm": pw,
@@ -154,7 +150,6 @@ def get_imposing_file_pages(file_id: str):
                     "aspect_ratio": round(pw / ph, 3) if ph > 0 else 1.0,
                     "thumb_url": f"/api/imposing/thumbnail/{os.path.basename(file_path)}/{p}"
                 })
-            doc.close()
             return {
                 "success": True,
                 "file_id": os.path.basename(file_path),
@@ -262,40 +257,15 @@ def preview_imposing(req: ImposingRequest):
                         file_id = getattr(placed, 'file_id', '') or (placed.pdf_path.split('/')[-1] if placed.pdf_path else '')
                         page_num = getattr(placed, 'page_num', 0)
 
-                        # Compute whether this page's aspect opposes the user-configured target trim size
+                        # Opposing-orientation gate lives in engines (no fitz/cv2 in router)
                         raw_user_rot = getattr(placed, "page_rotation", "none")
-                        eff_user_rot = "none"
                         target_w = getattr(placed, "target_w_mm", 0.0) or (placed.h_mm if placed.rotated else placed.w_mm)
                         target_h = getattr(placed, "target_h_mm", 0.0) or (placed.w_mm if placed.rotated else placed.h_mm)
-                        target_is_landscape = target_w > target_h
-
-                        if raw_user_rot in ("cw", "ccw"):
-                            pdf_path_val = placed.pdf_path or f"temp_uploads/{file_id}"
-                            src_pw, src_ph = target_w, target_h
-                            if pdf_path_val and os.path.exists(pdf_path_val):
-                                ext = pdf_path_val.lower().split(".")[-1]
-                                if ext == "pdf":
-                                    if pdf_path_val not in open_docs:
-                                        try:
-                                            open_docs[pdf_path_val] = fitz.open(pdf_path_val)
-                                        except Exception:
-                                            open_docs[pdf_path_val] = None
-                                    chk_doc = open_docs.get(pdf_path_val)
-                                    if chk_doc:
-                                        p_chk = min(max(0, page_num), len(chk_doc) - 1)
-                                        src_pw, src_ph = chk_doc[p_chk].rect.width, chk_doc[p_chk].rect.height
-                                elif ext in ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "avif", "webp"]:
-                                    try:
-                                        import cv2
-                                        tmp_im = cv2.imread(pdf_path_val)
-                                        if tmp_im is not None:
-                                            src_ph, src_pw = tmp_im.shape[:2]
-                                    except Exception:
-                                        pass
-                            # Only apply user rotation if page orientation opposes the user's target orientation!
-                            src_is_landscape = src_pw > src_ph
-                            if src_is_landscape != target_is_landscape:
-                                eff_user_rot = raw_user_rot
+                        pdf_path_val = placed.pdf_path or f"temp_uploads/{file_id}"
+                        eff_user_rot = effective_page_rotation(
+                            pdf_path_val, page_num, raw_user_rot,
+                            target_w, target_h, open_docs,
+                        )
 
                         boxes.append({
                             "x": placed.x_mm, "y": placed.y_mm, "w": placed.w_mm, "h": placed.h_mm,

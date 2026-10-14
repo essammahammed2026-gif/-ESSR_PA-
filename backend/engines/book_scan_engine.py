@@ -16,6 +16,151 @@ class BookScanEngine:
     - 3mm (or custom) print bleed extension & crop marks
     """
 
+    FULL_BOX: Dict[str, float] = {"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0}
+
+    @staticmethod
+    def compose_crop_boxes(outer: Optional[Dict[str, Any]], inner: Optional[Dict[str, Any]]) -> Dict[str, float]:
+        """Compose view-relative crop boxes into one absolute box.
+
+        The canvas overlay works in coordinates relative to the *rendered* image
+        (which already has `outer` applied), so an Apply/Split commits with
+        absolute = outer + inner * outer_size. Missing boxes mean full bed.
+        """
+        o = outer or BookScanEngine.FULL_BOX
+        n = inner or BookScanEngine.FULL_BOX
+
+        def num(box: Dict[str, Any], key: str, fallback: float) -> float:
+            try:
+                return float(box.get(key, fallback))
+            except (TypeError, ValueError):
+                return fallback
+
+        ox1, oy1 = num(o, "x1", 0.0), num(o, "y1", 0.0)
+        ox2, oy2 = num(o, "x2", 1.0), num(o, "y2", 1.0)
+        ow, oh = max(0.0, ox2 - ox1), max(0.0, oy2 - oy1)
+        nx1, ny1 = num(n, "x1", 0.0), num(n, "y1", 0.0)
+        nx2, ny2 = num(n, "x2", 1.0), num(n, "y2", 1.0)
+        return {
+            "x1": round(ox1 + nx1 * ow, 4),
+            "y1": round(oy1 + ny1 * oh, 4),
+            "x2": round(ox1 + nx2 * ow, 4),
+            "y2": round(oy1 + ny2 * oh, 4),
+        }
+
+    @staticmethod
+    def box_frac_w(box: Optional[Dict[str, Any]]) -> float:
+        if not box:
+            return 1.0
+        try:
+            return max(0.0, float(box.get("x2", 1.0)) - float(box.get("x1", 0.0)))
+        except (TypeError, ValueError):
+            return 1.0
+
+    @staticmethod
+    def box_frac_h(box: Optional[Dict[str, Any]]) -> float:
+        if not box:
+            return 1.0
+        try:
+            return max(0.0, float(box.get("y2", 1.0)) - float(box.get("y1", 0.0)))
+        except (TypeError, ValueError):
+            return 1.0
+
+    @staticmethod
+    def open_session_docs(session: Dict[str, Any]) -> Dict[str, Any]:
+        """Single-copy session doc opener — routers must not fitz.open directly."""
+        doc_map: Dict[str, Any] = {}
+        if session.get("odds_path"):
+            doc_map["odds"] = fitz.open(session["odds_path"])
+        if session.get("evens_path"):
+            doc_map["evens"] = fitz.open(session["evens_path"])
+        if session.get("single_path"):
+            doc_map["single"] = fitz.open(session["single_path"])
+        return doc_map
+
+    @staticmethod
+    def close_session_docs(doc_map: Dict[str, Any]) -> None:
+        for d in doc_map.values():
+            try:
+                d.close()
+            except Exception:
+                pass
+
+    @staticmethod
+    def collate_from_paths(
+        odds_path: Optional[str] = None,
+        evens_path: Optional[str] = None,
+        single_path: Optional[str] = None,
+        is_spread: bool = False,
+        odds_order: str = "forward",
+        evens_order: str = "reverse",
+        spread_split_pos: float = 0.5,
+    ) -> List[Dict[str, Any]]:
+        """Single-copy collation entry point by path — opens, collates, closes.
+
+        Fixes the router-side unclosed-fitz leak: docs never escape to routers.
+        """
+        odds_doc = fitz.open(odds_path) if odds_path else None
+        evens_doc = fitz.open(evens_path) if evens_path else None
+        single_doc = fitz.open(single_path) if single_path else None
+        try:
+            return BookScanEngine.collate_scans(
+                odds_doc=odds_doc,
+                evens_doc=evens_doc,
+                is_spread=is_spread,
+                odds_order=odds_order,
+                evens_order=evens_order,
+                spread_split_pos=spread_split_pos,
+                single_doc=single_doc,
+            )
+        finally:
+            for d in (odds_doc, evens_doc, single_doc):
+                if d is not None:
+                    try:
+                        d.close()
+                    except Exception:
+                        pass
+
+    @staticmethod
+    def write_thumbnail_jpg(img: np.ndarray, thumb_path: str, quality: int = 80) -> bool:
+        """Single-copy ndarray → JPEG writer — keeps cv2.imencode out of routers."""
+        try:
+            success, enc = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+            if not success:
+                return False
+            with open(thumb_path, "wb") as f:
+                f.write(enc.tobytes())
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def combine_files_to_pdf(file_paths: List[str], output_pdf_path: str) -> bool:
+        """Combines multiple files (PDFs, images: PNG, JPG, TIFF, WEBP, etc.) into a single unified PDF."""
+        doc = fitz.open()
+        try:
+            for fpath in file_paths:
+                if not os.path.exists(fpath):
+                    continue
+                ext = os.path.splitext(fpath)[1].lower()
+                if ext == ".pdf":
+                    sub_doc = fitz.open(fpath)
+                    doc.insert_pdf(sub_doc)
+                    sub_doc.close()
+                else:
+                    img_doc = fitz.open(fpath)
+                    pdf_bytes = img_doc.convert_to_pdf()
+                    img_doc.close()
+                    sub_doc = fitz.open("pdf", pdf_bytes)
+                    doc.insert_pdf(sub_doc)
+                    sub_doc.close()
+            doc.save(output_pdf_path)
+            return True
+        except Exception as e:
+            print(f"Error combining files to PDF: {e}")
+            return False
+        finally:
+            doc.close()
+
     @staticmethod
     def render_page_to_bgr(doc: fitz.Document, page_num: int, dpi: int = 150) -> np.ndarray:
         page = doc[page_num]
@@ -203,8 +348,35 @@ class BookScanEngine:
         img = BookScanEngine.render_page_to_bgr(doc, page_info["doc_idx"], dpi=dpi)
         h, w = img.shape[:2]
 
+        slice_box = page_info.get("slice_box")
         half = page_info.get("half", "full")
-        if half in ["left", "right"]:
+
+        if slice_box is not None:
+            spread_cb = page_info.get("spread_crop_box") or page_info.get("crop_box")
+            if spread_cb:
+                cx1 = max(0, min(w - 1, int(round(spread_cb.get("x1", 0.0) * w))))
+                cy1 = max(0, min(h - 1, int(round(spread_cb.get("y1", 0.0) * h))))
+                cx2 = max(cx1 + 1, min(w, int(round(spread_cb.get("x2", 1.0) * w))))
+                cy2 = max(cy1 + 1, min(h, int(round(spread_cb.get("y2", 1.0) * h))))
+                img = img[cy1:cy2, cx1:cx2]
+                h, w = img.shape[:2]
+
+            sb_x1 = max(0, min(w - 1, int(round(slice_box.get("x1", 0.0) * w))))
+            sb_y1 = max(0, min(h - 1, int(round(slice_box.get("y1", 0.0) * h))))
+            sb_x2 = max(sb_x1 + 1, min(w, int(round(slice_box.get("x2", 1.0) * w))))
+            sb_y2 = max(sb_y1 + 1, min(h, int(round(slice_box.get("y2", 1.0) * h))))
+            img = img[sb_y1:sb_y2, sb_x1:sb_x2]
+            h, w = img.shape[:2]
+
+            page_cb = page_info.get("page_crop_box")
+            if page_cb:
+                px1 = max(0, min(w - 1, int(round(page_cb.get("x1", 0.0) * w))))
+                py1 = max(0, min(h - 1, int(round(page_cb.get("y1", 0.0) * h))))
+                px2 = max(px1 + 1, min(w, int(round(page_cb.get("x2", 1.0) * w))))
+                py2 = max(py1 + 1, min(h, int(round(page_cb.get("y2", 1.0) * h))))
+                img = img[py1:py2, px1:px2]
+            extracted = img
+        elif half in ["left", "right"]:
             spread_cb = page_info.get("spread_crop_box") or page_info.get("crop_box")
             if spread_cb:
                 cx1 = max(0, min(w - 1, int(round(spread_cb.get("x1", 0.0) * w))))
@@ -753,8 +925,9 @@ class BookScanEngine:
 
     @staticmethod
     def split_pages(pages, page_id, crop_box=None, split_pos=0.5,
+                    split_lines=None, split_direction="vertical",
                     apply_to_all=False, target_page_ids=None):
-        """Split full spreads into left/right halves. Returns (new_pages, new_selected_id).
+        """Split full spreads into slices along vertical or horizontal lines. Returns (new_pages, new_selected_id).
 
         Raises PageOpError(400) when no split occurred.
         """
@@ -762,6 +935,18 @@ class BookScanEngine:
         split_occurred = False
         new_selected_id = None
         target_ids = set(target_page_ids) if target_page_ids is not None else None
+
+        # Normalize split positions
+        if split_lines:
+            lines = sorted(list(set([float(x) for x in split_lines if 0.01 <= float(x) <= 0.99])))
+            if not lines:
+                lines = [split_pos if split_pos is not None else 0.5]
+        else:
+            lines = [split_pos if split_pos is not None else 0.5]
+
+        direction = (split_direction or "vertical").lower()
+        cuts = [0.0] + lines + [1.0]
+        num_slices = len(cuts) - 1
 
         for p in pages:
             if target_ids is not None:
@@ -771,25 +956,23 @@ class BookScanEngine:
             else:
                 is_target = (p["id"] == page_id)
 
-            if is_target and p.get("half", "full") == "full":
+            is_already_split = p.get("half") in ["left", "right"] or p.get("slice_box") is not None or bool(p.get("parent_page_id"))
+
+            if is_target and not is_already_split:
                 split_occurred = True
                 base_label = p.get("label", "Sheet").replace(" (Spread)", "")
-                cb = crop_box if crop_box is not None else p.get("crop_box")
-                sp = split_pos if split_pos is not None else p.get("split_pos", 0.5)
+                # Incoming box is relative to the rendered (already cropped) view:
+                # compose it onto the stored box so repeat split-after-crop cuts
+                # the region the operator actually sees.
+                cb = BookScanEngine.compose_crop_boxes(p.get("crop_box"), crop_box)
+                sp = lines[0] if lines else 0.5
 
                 p_orig_w = p.get("orig_width_mm") or p.get("width_mm", 297.0)
                 p_orig_h = p.get("orig_height_mm") or p.get("height_mm", 210.0)
-                cb_w = (cb.get("x2", 1.0) - cb.get("x1", 0.0)) if cb else 1.0
-                cb_h = (cb.get("y2", 1.0) - cb.get("y1", 0.0)) if cb else 1.0
+                cb_w = BookScanEngine.box_frac_w(cb)
+                cb_h = BookScanEngine.box_frac_h(cb)
                 cropped_w = p_orig_w * cb_w
                 cropped_h = p_orig_h * cb_h
-                left_w = round(cropped_w * sp, 1)
-                right_w = round(cropped_w * (1.0 - sp), 1)
-
-                left_id = str(uuid.uuid4())[:8]
-                right_id = str(uuid.uuid4())[:8]
-                if p["id"] == page_id or new_selected_id is None:
-                    new_selected_id = left_id
 
                 common = {
                     "source": p["source"],
@@ -798,31 +981,60 @@ class BookScanEngine:
                     "spread_crop_box": cb,
                     "split_pos": sp,
                     "spread_split_pos": sp,
+                    "split_lines": lines,
+                    "split_direction": direction,
                     "page_crop_box": None,
                     "rotation": p.get("rotation", 0),
                     "parent_page_id": p["id"],
                     "is_spread": False,
-                    "height_mm": round(cropped_h, 1),
-                    "orig_height_mm": round(cropped_h, 1),
-                    "parent_spread_width_mm": p_orig_w,
-                    "parent_spread_height_mm": p_orig_h,
+                    "parent_spread_width_mm": round(cropped_w, 1),
+                    "parent_spread_height_mm": round(cropped_h, 1),
                 }
-                new_pages.append({
-                    **common,
-                    "id": left_id,
-                    "half": "left",
-                    "label": f"{base_label} (Left)",
-                    "width_mm": left_w,
-                    "orig_width_mm": left_w,
-                })
-                new_pages.append({
-                    **common,
-                    "id": right_id,
-                    "half": "right",
-                    "label": f"{base_label} (Right)",
-                    "width_mm": right_w,
-                    "orig_width_mm": right_w,
-                })
+
+                slice_ids = []
+                for i in range(num_slices):
+                    s_start = cuts[i]
+                    s_end = cuts[i + 1]
+                    s_id = str(uuid.uuid4())[:8]
+                    slice_ids.append(s_id)
+                    if p["id"] == page_id and new_selected_id is None:
+                        new_selected_id = s_id
+
+                    if direction == "horizontal":
+                        s_box = {"x1": 0.0, "y1": s_start, "x2": 1.0, "y2": s_end}
+                        s_w = round(cropped_w, 1)
+                        s_h = round(cropped_h * (s_end - s_start), 1)
+                        if num_slices == 2:
+                            s_label = f"{base_label} (Top)" if i == 0 else f"{base_label} (Bottom)"
+                        else:
+                            s_label = f"{base_label} (Row {i+1})"
+                        half_name = f"row_{i}"
+                    else:
+                        s_box = {"x1": s_start, "y1": 0.0, "x2": s_end, "y2": 1.0}
+                        s_w = round(cropped_w * (s_end - s_start), 1)
+                        s_h = round(cropped_h, 1)
+                        if num_slices == 2:
+                            s_label = f"{base_label} (Left)" if i == 0 else f"{base_label} (Right)"
+                            half_name = "left" if i == 0 else "right"
+                        else:
+                            s_label = f"{base_label} (Col {i+1})"
+                            half_name = f"col_{i}"
+
+                    new_pages.append({
+                        **common,
+                        "id": s_id,
+                        "half": half_name,
+                        "slice_box": s_box,
+                        "label": s_label,
+                        "width_mm": s_w,
+                        "orig_width_mm": s_w,
+                        "height_mm": s_h,
+                        "orig_height_mm": s_h,
+                        "rev": 0,
+                    })
+
+                if new_selected_id is None and slice_ids:
+                    new_selected_id = slice_ids[0]
             else:
                 new_pages.append(p)
 
@@ -832,20 +1044,27 @@ class BookScanEngine:
 
     @staticmethod
     def revert_pages(pages, page_id=None, revert_all=False, target_page_ids=None):
-        """Recombine split halves into parent spreads. Returns (new_pages, new_selected_id).
+        """Recombine split slices into parent spreads. Returns (new_pages, new_selected_id).
 
         Raises PageOpError(400/404) on missing targets.
         """
+        def is_split_page(page_item):
+            return (
+                page_item.get("half") in ["left", "right"]
+                or page_item.get("slice_box") is not None
+                or bool(page_item.get("parent_page_id"))
+            )
+
         target_pairs = set()
 
         if revert_all:
             for p in pages:
-                if p.get("half") in ["left", "right"]:
+                if is_split_page(p):
                     target_pairs.add((p["source"], p["doc_idx"]))
         elif target_page_ids:
             t_ids = set(target_page_ids)
             for p in pages:
-                if p["id"] in t_ids and p.get("half") in ["left", "right"]:
+                if p["id"] in t_ids and is_split_page(p):
                     target_pairs.add((p["source"], p["doc_idx"]))
         elif page_id:
             target_page = next((p for p in pages if p["id"] == page_id), None)
@@ -864,7 +1083,7 @@ class BookScanEngine:
 
         for p in pages:
             pair = (p["source"], p["doc_idx"])
-            if pair in target_pairs and p.get("half") in ["left", "right"]:
+            if pair in target_pairs and is_split_page(p):
                 if pair not in recombined_pairs:
                     recombined_pairs.add(pair)
                     orig_w = p.get("parent_spread_width_mm") or p.get("orig_width_mm") or 297.0
@@ -872,6 +1091,14 @@ class BookScanEngine:
                     reverted_id = p.get("parent_page_id") or str(uuid.uuid4())[:8]
                     if new_selected_id is None:
                         new_selected_id = reverted_id
+                    # Reused parent id can hit stale cached thumbnails: bump past children.
+                    child_rev = 0
+                    for q in pages:
+                        if (q["source"], q["doc_idx"]) == pair and is_split_page(q):
+                            try:
+                                child_rev = max(child_rev, int(q.get("rev", 0)))
+                            except (TypeError, ValueError):
+                                pass
                     new_pages.append({
                         "id": reverted_id,
                         "source": p["source"],
@@ -886,6 +1113,7 @@ class BookScanEngine:
                         "height_mm": orig_h,
                         "orig_width_mm": orig_w,
                         "orig_height_mm": orig_h,
+                        "rev": child_rev + 1,
                     })
             else:
                 new_pages.append(p)
@@ -894,9 +1122,15 @@ class BookScanEngine:
 
     @staticmethod
     def apply_crop_to_pages(pages, page_id, crop_box, apply_to_all=False, target_page_ids=None):
-        """Apply a crop box dict to targeted pages (mutates + returns pages)."""
-        cb_w = crop_box["x2"] - crop_box["x1"]
-        cb_h = crop_box["y2"] - crop_box["y1"]
+        """Commit a view-relative crop box onto targeted pages (mutates + returns pages).
+
+        The canvas overlay works in coordinates relative to the *rendered* image
+        (stored crops already applied), so the incoming box is composed onto the
+        stored box instead of replacing it. Repeat crops therefore keep refining
+        the visible region instead of corrupting it, and dimensions derive from
+        the composed absolute box. The Apply is final: callers reset their
+        overlay to full bed afterwards.
+        """
         target_ids = set(target_page_ids) if target_page_ids is not None else None
 
         for p in pages:
@@ -908,16 +1142,33 @@ class BookScanEngine:
                 is_target = (p["id"] == page_id)
 
             if is_target:
-                if p.get("half") in ["left", "right"]:
-                    p["page_crop_box"] = crop_box
+                is_slice = (
+                    p.get("half") in ["left", "right"]
+                    or p.get("slice_box") is not None
+                    or bool(p.get("parent_page_id"))
+                )
+                if is_slice:
+                    composed = BookScanEngine.compose_crop_boxes(p.get("page_crop_box"), crop_box)
+                    p["page_crop_box"] = composed
+                    base_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
+                    base_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
+                    p["orig_width_mm"] = base_w
+                    p["orig_height_mm"] = base_h
+                    p["width_mm"] = round(base_w * BookScanEngine.box_frac_w(composed), 1)
+                    p["height_mm"] = round(base_h * BookScanEngine.box_frac_h(composed), 1)
                 else:
-                    p["crop_box"] = crop_box
-                orig_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
-                orig_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
-                p["orig_width_mm"] = orig_w
-                p["orig_height_mm"] = orig_h
-                p["width_mm"] = round(orig_w * cb_w, 1)
-                p["height_mm"] = round(orig_h * cb_h, 1)
+                    composed = BookScanEngine.compose_crop_boxes(p.get("crop_box"), crop_box)
+                    p["crop_box"] = composed
+                    orig_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
+                    orig_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
+                    p["orig_width_mm"] = orig_w
+                    p["orig_height_mm"] = orig_h
+                    p["width_mm"] = round(orig_w * BookScanEngine.box_frac_w(composed), 1)
+                    p["height_mm"] = round(orig_h * BookScanEngine.box_frac_h(composed), 1)
+                try:
+                    p["rev"] = int(p.get("rev", 0)) + 1
+                except (TypeError, ValueError):
+                    p["rev"] = 1
         return pages
 
     @staticmethod

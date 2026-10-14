@@ -17,7 +17,7 @@ import {
   FileBox,
   RefreshCw
 } from "lucide-react";
-import { API_BASE_URL } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 interface PreflightData {
   num_pages: number;
@@ -44,7 +44,7 @@ function PreflightCenterContent() {
       const formData = new FormData();
       formData.append("existing_file_id", fileIdParam);
 
-      fetch(`${API_BASE_URL}/api/preflight`, {
+      apiFetch(`/api/preflight`, {
         method: "POST",
         body: formData,
       })
@@ -81,7 +81,7 @@ function PreflightCenterContent() {
     });
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/preflight`, {
+      const res = await apiFetch(`/api/preflight`, {
         method: "POST",
         body: formData,
       });

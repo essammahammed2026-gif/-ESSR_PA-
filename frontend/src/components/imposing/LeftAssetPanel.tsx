@@ -15,7 +15,7 @@ import {
   EyeOff, 
   GripVertical 
 } from "lucide-react";
-import { API_BASE_URL } from "@/lib/api";
+import { getApiUrl } from "@/lib/api";
 import { ImposingItem, ImposingPage } from "@/types/prepress";
 
 interface LeftAssetPanelProps {
@@ -144,7 +144,7 @@ export function LeftAssetPanel({
               const isSelfDragging = draggedIdx === i;
               const thumbSrc = pg.thumb_url.startsWith("http") 
                 ? pg.thumb_url 
-                : `${API_BASE_URL}${pg.thumb_url.startsWith("/") ? "" : "/"}${pg.thumb_url}`;
+                : getApiUrl(pg.thumb_url);
 
               return (
                 <div 

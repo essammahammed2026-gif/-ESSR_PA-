@@ -8,8 +8,32 @@ from typing import List
 from engines.schemas import ImposingItem
 from engines.sheet_packer import SheetArtworkSpec
 from engines.roll_packer import ArtworkSpec as RollArtworkSpec
-from engines.thumbnails import get_dimensions_mm, resolve_temp_file
+from engines.thumbnails import get_dimensions_mm, resolve_temp_file, probe_source_dims
 from engines.units import parse_page_range
+
+
+def effective_page_rotation(pdf_path_val: str, page_num: int, raw_rot: str,
+                            target_w: float, target_h: float,
+                            open_docs: dict) -> str:
+    """Single-copy opposing-orientation gate (moved out of router preview).
+
+    Only pages whose source orientation opposes the user target get rotated.
+    Keeps fitz/cv2 probing inside engines via `probe_source_dims`.
+    """
+    if raw_rot not in ("cw", "ccw"):
+        return "none"
+    import os
+    target_is_landscape = (target_w or 0) > (target_h or 0)
+    src_pw, src_ph = target_w, target_h
+    if pdf_path_val and os.path.exists(pdf_path_val):
+        try:
+            src_pw, src_ph = probe_source_dims(pdf_path_val, page_num, open_docs)
+            if src_pw == 0 and src_ph == 0:
+                src_pw, src_ph = target_w, target_h
+        except Exception:
+            pass
+    src_is_landscape = src_pw > src_ph
+    return raw_rot if (src_is_landscape != target_is_landscape) else "none"
 
 
 def build_sheet_specs(items: List[ImposingItem]) -> List[SheetArtworkSpec]:

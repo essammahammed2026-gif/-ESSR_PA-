@@ -38,12 +38,14 @@ To avoid documentation degradation across AI sessions:
 ## 3. Verification Protocol (Iterative vs. Definition of Done)
 
 ### A. Fast Inner Loop (During Active Iteration & Editing)
-Do **NOT** run full Next.js production builds (`npm run build`) or spin background polling timers after every minor code edit. This wastes tokens, CPU, and context. Use lightweight checks instead:
+Do **NOT** run full Next.js production builds (`npm run build`) after every minor code edit. This wastes tokens, CPU, and context. Use lightweight checks instead:
 
 ```bash
-# Fast TypeScript & ESLint check (< 3 seconds)
-cd frontend && npm run lint
+# Scoped ESLint on changed files + full typecheck (frontend only)
+cd frontend && npx eslint <changed-files> && npx tsc --noEmit
 ```
+
+`npm run lint` (repo-wide) takes 30–120s on this machine — prefer the scoped form above during iteration.
 
 ### B. Final Session Gate (Definition of Done — Only Run Once Before Handover or Commit)
 Before completing any major task, handing off to the user, or ending a session, the following checks MUST pass cleanly:
@@ -58,3 +60,14 @@ cd backend && python -m py_compile main.py imposing_api.py book_scan_api.py sett
 # 3. API Smoke test
 curl -s http://localhost:8000/ ; curl -s http://localhost:8000/api/settings
 ```
+
+---
+
+## 4. Guardrails (fix.md Phase 3 — Prevent Bloat Recurrence)
+
+1. **File-size cap:** No `frontend/src` file over 300 lines. Split god-files into modules/hooks/components instead.
+2. **No CV in routers:** No `cv2`/`fitz` imports in `backend/main.py`, `imposing_api.py`, `book_scan_api.py`. All vision/PDF logic lives in `backend/engines/`.
+3. **Central client + debounce:** All backend calls via `apiFetch`/`postForm`/`downloadBlob`/`getApiUrl` from `src/lib/api.ts`. Reactive inputs use `useDebounce` (350ms). No manual `typingTimeout` patterns.
+4. **Retention:** `backend/temp_uploads/` must be empty (except `.gitkeep`) at session end. Never commit `*.jpg`, `*.pdf`, flipbooks, or uploads — pre-commit blocks them.
+5. **Context hygiene:** Never traverse `.agents/skills/Omarchy/` (unrelated desktop skill), `target/`, `node_modules/`, `.venv/`, or `temp_uploads/` during code search.
+6. **Monthly audit:** `du -sh` worktree hotspots + `git count-objects -vH`; 2h TTL eviction runs on every upload/export path — verify it stays wired.

@@ -128,10 +128,11 @@ def get_dimensions_mm(file_path: str) -> tuple:
     if file_path.lower().endswith(".pdf"):
         import fitz
         doc = fitz.open(file_path)
-        rect = doc[0].rect
-        dims = ((rect.width / 72.0) * 25.4, (rect.height / 72.0) * 25.4)
-        doc.close()
-        return dims
+        try:
+            rect = doc[0].rect
+            return ((rect.width / 72.0) * 25.4, (rect.height / 72.0) * 25.4)
+        finally:
+            doc.close()
     import cv2
     img = cv2.imread(file_path)
     if img is not None:
@@ -139,3 +140,84 @@ def get_dimensions_mm(file_path: str) -> tuple:
         h, w = img.shape[:2]
         return ((w / 300.0) * 25.4, (h / 300.0) * 25.4)
     return (100.0, 100.0)
+
+
+def get_pdf_page_count(file_path: str) -> int:
+    """Single-copy page count probe — routers must not fitz.open directly."""
+    import fitz
+    try:
+        doc = fitz.open(file_path)
+        try:
+            return len(doc)
+        finally:
+            doc.close()
+    except Exception:
+        return 1
+
+
+def list_pdf_pages_mm(file_path: str) -> list:
+    """Single-copy per-page (w_mm, h_mm) probe — closes doc before return."""
+    import fitz
+    doc = fitz.open(file_path)
+    try:
+        out = []
+        for p in range(len(doc)):
+            rect = doc[p].rect
+            out.append((((rect.width / 72.0) * 25.4), ((rect.height / 72.0) * 25.4)))
+        return out
+    finally:
+        doc.close()
+
+
+def get_raster_pixel_size(file_path: str) -> tuple:
+    """Single-copy cv2.imread dimension probe — returns (w_px, h_px)."""
+    import cv2
+    try:
+        img = cv2.imread(file_path)
+        if img is None:
+            return (0, 0)
+        h, w = img.shape[:2]
+        return (w, h)
+    except Exception:
+        return (0, 0)
+
+
+def probe_source_dims(pdf_path_val: str, page_num: int, open_docs: dict) -> tuple:
+    """Single-copy opposing-orientation probe for imposing preview.
+
+    Caches open fitz handles in caller-provided `open_docs` dict (closed by
+    caller). Handles PDF pages and raster images without leaking cv2/fitz
+    imports into routers.
+    """
+    ext = pdf_path_val.lower().rsplit(".", 1)[-1] if "." in pdf_path_val else ""
+    if ext == "pdf":
+        if pdf_path_val not in open_docs:
+            try:
+                import fitz
+                open_docs[pdf_path_val] = fitz.open(pdf_path_val)
+            except Exception:
+                open_docs[pdf_path_val] = None
+        chk_doc = open_docs.get(pdf_path_val)
+        if chk_doc:
+            p_chk = min(max(0, page_num), len(chk_doc) - 1)
+            rect = chk_doc[p_chk].rect
+            return (rect.width, rect.height)
+        return (0, 0)
+    if ext in ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "avif", "webp"):
+        w, h = get_raster_pixel_size(pdf_path_val)
+        return (w, h)
+    return (0, 0)
+
+
+def write_ndarray_jpg(img, dest_path: str, quality: int = 80) -> bool:
+    """Single-copy ndarray → JPEG writer (keeps cv2.imencode out of routers)."""
+    import cv2
+    try:
+        success, enc = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if not success:
+            return False
+        with open(dest_path, "wb") as f:
+            f.write(enc.tobytes())
+        return True
+    except Exception:
+        return False

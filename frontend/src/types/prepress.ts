@@ -2,6 +2,7 @@
  * Strictly typed definitions for Prepress API payloads and responses.
  * Enforces consistency across Tauri webview, Next.js UI, and FastAPI backend.
  */
+import type { BasePage } from "./book_studio";
 
 export type PrepressUnit = "mm" | "cm" | "in" | "pt";
 
@@ -45,10 +46,10 @@ export interface ImposingItem {
 }
 
 /**
- * Individual page specification for fine-grained page-level imposition
+ * Individual page specification for fine-grained page-level imposition.
+ * Extends the shared BasePage (id + rotation in 90° steps).
  */
-export interface ImposingPage {
-  id: string;
+export interface ImposingPage extends BasePage {
   file_id: string;
   name?: string;
   original_page_num: number;
@@ -59,7 +60,6 @@ export interface ImposingPage {
   is_deleted: boolean;
   thumb_url: string;
 }
-
 /**
  * Metadata for a single page returned by upload and inspect endpoints
  */

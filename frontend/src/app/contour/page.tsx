@@ -1,113 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import Link from "next/link";
+import { Download } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { 
-  Scissors, 
-  Download, 
-  Loader2, 
-  ZoomIn, 
-  ZoomOut, 
-  Maximize2, 
-  RotateCcw, 
-  Upload, 
-  Layers, 
-  SlidersHorizontal,
-  Sparkles
-} from "lucide-react";
-import { API_BASE_URL, getApiUrl } from "@/lib/api";
-
-const PRESET_COLORS = [
-  { name: "CutContour (Magenta)", value: "#FF00FF" },
-  { name: "Red", value: "#FF0000" },
-  { name: "Green", value: "#00FF00" },
-  { name: "Blue", value: "#0000FF" },
-  { name: "Black", value: "#000000" },
-];
-
-interface NumberControlProps {
-  label: string;
-  value: string;
-  min: string;
-  max: string;
-  step: string;
-  unit?: string;
-  onChange: (val: string) => void;
-}
-
-const NumberControl: React.FC<NumberControlProps> = ({ 
-  label, 
-  value, 
-  min, 
-  max, 
-  step, 
-  unit = "", 
-  onChange 
-}) => {
-  const handleDec = () => onChange(String(Math.max(Number(min), Number(value) - Number(step))));
-  const handleInc = () => onChange(String(Math.min(Number(max), Number(value) + Number(step))));
-  
-  return (
-    <div className="space-y-1.5">
-      <div className="flex justify-between items-center text-xs">
-        <label className="font-semibold text-slate-300">{label}</label>
-        <div className="flex items-center space-x-1">
-          <button 
-            type="button"
-            onClick={handleDec} 
-            className="w-6 h-6 flex items-center justify-center bg-[#232936] rounded text-slate-300 hover:bg-[#2E3648] hover:text-white font-bold transition-colors"
-          >
-            -
-          </button>
-          <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded px-1.5 py-0.5">
-            <input 
-              type="number" 
-              min={min} 
-              max={max} 
-              step={step} 
-              value={value} 
-              onChange={(e) => onChange(e.target.value)} 
-              className="w-12 text-xs bg-transparent text-center text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none outline-none font-mono"
-            />
-            {unit && <span className="text-[10px] text-slate-400 ml-0.5">{unit}</span>}
-          </div>
-          <button 
-            type="button"
-            onClick={handleInc} 
-            className="w-6 h-6 flex items-center justify-center bg-[#232936] rounded text-slate-300 hover:bg-[#2E3648] hover:text-white font-bold transition-colors"
-          >
-            +
-          </button>
-        </div>
-      </div>
-      <input 
-        type="range" 
-        min={min} 
-        max={max} 
-        step={step} 
-        value={value} 
-        onChange={(e) => onChange(e.target.value)} 
-        className="w-full h-1.5 bg-[#232936] rounded-lg appearance-none cursor-pointer accent-pink-500"
-      />
-    </div>
-  );
-};
-
-interface DetectedProfile {
-  width: number;
-  height: number;
-  hasAlpha: boolean;
-  bgType: string;
-  suggestedOptions: {
-    offset_val: string;
-    threshold: string;
-    smoothing_factor: string;
-    keep_holes: boolean;
-    add_white_matte: boolean;
-    stroke_color: string;
-  };
-}
+import { apiFetch, getApiUrl, downloadBlob } from "@/lib/api";
+import { useDebounce } from "@/lib/useDebounce";
+import { StudioLayout } from "@/components/layout/StudioLayout";
+import { ContourControls, DetectedProfile } from "@/components/contour/ContourControls";
+import { ContourViewport } from "@/components/contour/ContourViewport";
 
 function ContourStudioContent() {
   const [fileId, setFileId] = useState<string | null>(null);
@@ -115,40 +15,20 @@ function ContourStudioContent() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detectedProfile, setDetectedProfile] = useState<DetectedProfile | null>(null);
-
-  // Prepress Parameters
   const [offsetVal, setOffsetVal] = useState("0");
   const [threshold, setThreshold] = useState("20");
   const [smoothing, setSmoothing] = useState("2");
   const [keepHoles, setKeepHoles] = useState(false);
   const [addWhiteMatte, setAddWhiteMatte] = useState(false);
   const [strokeColor, setStrokeColor] = useState("#FF00FF");
-  
-  // Viewport / Canvas Controls
   const [artworkOpacity, setArtworkOpacity] = useState("100");
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const dragStart = useRef({ x: 0, y: 0 });
-
-  const typingTimeout = useRef<NodeJS.Timeout | null>(null);
   const isFirstRender = useRef(true);
   const lastGeneratedKey = useRef<string | null>(null);
   const searchParams = useSearchParams();
 
-  const generateContour = useCallback(async (
-    id: string, 
-    offset: string, 
-    thresh: string, 
-    smooth: string, 
-    holes: boolean, 
-    matte: boolean, 
-    color: string
-  ) => {
+  const generateContour = useCallback(async (id: string, offset: string, thresh: string, smooth: string, holes: boolean, matte: boolean, color: string) => {
     setIsGenerating(true);
     setError(null);
-
     const formData = new FormData();
     formData.append("file_id", id);
     formData.append("offset_val", offset);
@@ -157,12 +37,8 @@ function ContourStudioContent() {
     formData.append("keep_holes", String(holes));
     formData.append("add_white_matte", String(matte));
     formData.append("stroke_color", color);
-
     try {
-      const res = await fetch(`${API_BASE_URL}/api/contour/generate`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await apiFetch(`/api/contour/generate`, { method: "POST", body: formData });
       const data = await res.json();
       if (data.success) {
         // Ensure relative asset URLs in SVG point to the centralized API
@@ -186,105 +62,28 @@ function ContourStudioContent() {
     const fileIdParam = searchParams.get("file_id");
     if (fileIdParam && !fileId) {
       setFileId(fileIdParam);
-      generateContour(
-        fileIdParam,
-        offsetVal,
-        threshold,
-        smoothing,
-        keepHoles,
-        addWhiteMatte,
-        strokeColor
-      );
+      generateContour(fileIdParam, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor);
     }
   }, [searchParams, generateContour, fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor]);
-
-  // Mouse wheel pan & zoom with non-passive event listener
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const handleNativeWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      
-      const zoomSensitivity = 0.002;
-      const delta = -e.deltaY * zoomSensitivity;
-      
-      const rect = canvas.getBoundingClientRect();
-      const clientX = e.clientX;
-      const clientY = e.clientY;
-      
-      setScale((prevScale) => {
-        const newScale = Math.min(Math.max(0.1, prevScale + prevScale * delta), 15);
-        const ratio = newScale / prevScale;
-        
-        const mouseX = clientX - rect.left - rect.width / 2;
-        const mouseY = clientY - rect.top - rect.height / 2;
-        
-        setPosition((prevPos) => ({
-          x: mouseX - (mouseX - prevPos.x) * ratio,
-          y: mouseY - (mouseY - prevPos.y) * ratio
-        }));
-        
-        return newScale;
-      });
-    };
-
-    canvas.addEventListener("wheel", handleNativeWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", handleNativeWheel);
-  }, []);
-
-  const rafId = useRef<number | null>(null);
-
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDragging) return;
-    const clientX = e.clientX;
-    const clientY = e.clientY;
-    if (rafId.current) return;
-    rafId.current = requestAnimationFrame(() => {
-      setPosition({
-        x: clientX - dragStart.current.x,
-        y: clientY - dragStart.current.y
-      });
-      rafId.current = null;
-    });
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
     // Reset file input value so user can re-upload or upload the same file
     e.target.value = "";
-    
-    // 1. Reset viewport / UI canvas state
-    setScale(1);
-    setPosition({ x: 0, y: 0 });
+    // Reset UI canvas state (pan/zoom resets inside ContourViewport on fileId change)
     setArtworkOpacity("100");
     setSvgContent(null);
     setError(null);
     setIsGenerating(true);
-
     const formData = new FormData();
     formData.append("file", file);
-
     try {
-      const res = await fetch(`${API_BASE_URL}/api/contour/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await apiFetch(`/api/contour/upload`, { method: "POST", body: formData });
       const data = await res.json();
       if (data.success) {
         setFileId(data.file_id);
-        
-        // 2. Configure options to fit the uploaded image
+        // Configure options to fit the uploaded image
         const suggested = data.suggested_options || {};
         const nextOffset = String(suggested.offset_val ?? "0");
         const nextThreshold = String(suggested.threshold ?? "20");
@@ -292,43 +91,27 @@ function ContourStudioContent() {
         const nextKeepHoles = Boolean(suggested.keep_holes ?? false);
         const nextAddWhiteMatte = Boolean(suggested.add_white_matte ?? false);
         const nextStrokeColor = String(suggested.stroke_color ?? "#FF00FF");
-
         setOffsetVal(nextOffset);
         setThreshold(nextThreshold);
         setSmoothing(nextSmoothing);
         setKeepHoles(nextKeepHoles);
         setAddWhiteMatte(nextAddWhiteMatte);
         setStrokeColor(nextStrokeColor);
-
         setDetectedProfile({
           width: data.width || 0,
           height: data.height || 0,
           hasAlpha: Boolean(data.has_alpha),
           bgType: data.bg_type || "unknown",
           suggestedOptions: {
-            offset_val: nextOffset,
-            threshold: nextThreshold,
-            smoothing_factor: nextSmoothing,
-            keep_holes: nextKeepHoles,
-            add_white_matte: nextAddWhiteMatte,
-            stroke_color: nextStrokeColor,
+            offset_val: nextOffset, threshold: nextThreshold, smoothing_factor: nextSmoothing,
+            keep_holes: nextKeepHoles, add_white_matte: nextAddWhiteMatte, stroke_color: nextStrokeColor,
           },
         });
-
-        // 3. Mark key so debounced effect doesn't perform a duplicate run
+        // Mark key so debounced effect doesn't perform a duplicate run
         const generatedKey = `${data.file_id}_${nextOffset}_${nextThreshold}_${nextSmoothing}_${nextKeepHoles}_${nextAddWhiteMatte}_${nextStrokeColor}`;
         lastGeneratedKey.current = generatedKey;
-
-        // 4. Immediately trigger contour generation with the new image & auto-fitted options
-        generateContour(
-          data.file_id, 
-          nextOffset, 
-          nextThreshold, 
-          nextSmoothing, 
-          nextKeepHoles, 
-          nextAddWhiteMatte, 
-          nextStrokeColor
-        );
+        // Immediately trigger contour generation with the new image & auto-fitted options
+        generateContour(data.file_id, nextOffset, nextThreshold, nextSmoothing, nextKeepHoles, nextAddWhiteMatte, nextStrokeColor);
       } else {
         setError(data.error || "Artwork upload failed.");
         setIsGenerating(false);
@@ -350,387 +133,88 @@ function ContourStudioContent() {
     setStrokeColor(opt.stroke_color);
   };
 
-  // Debounced auto-recalculation when parameters change (350ms)
+  // Debounced auto-recalculation key (350ms via shared hook — fix.md Phase 2.5)
+  const debouncedContourKey = useDebounce(
+    `${fileId}_${offsetVal}_${threshold}_${smoothing}_${keepHoles}_${addWhiteMatte}_${strokeColor}`,
+    350
+  );
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
       return;
     }
     if (!fileId) return;
-
-    const currentKey = `${fileId}_${offsetVal}_${threshold}_${smoothing}_${keepHoles}_${addWhiteMatte}_${strokeColor}`;
-    if (lastGeneratedKey.current === currentKey) {
+    if (lastGeneratedKey.current === debouncedContourKey) {
       return;
     }
+    lastGeneratedKey.current = debouncedContourKey;
+    generateContour(fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor);
+  }, [debouncedContourKey, fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor, generateContour]);
 
-    if (typingTimeout.current) clearTimeout(typingTimeout.current);
-    
-    typingTimeout.current = setTimeout(() => {
-      lastGeneratedKey.current = currentKey;
-      generateContour(fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor);
-    }, 350);
-
-    return () => {
-      if (typingTimeout.current) clearTimeout(typingTimeout.current);
-    };
-  }, [fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor, generateContour]);
+  const handleGenerate = () => {
+    if (!fileId || isGenerating) return;
+    const key = `${fileId}_${offsetVal}_${threshold}_${smoothing}_${keepHoles}_${addWhiteMatte}_${strokeColor}`;
+    lastGeneratedKey.current = key;
+    generateContour(fileId, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor);
+  };
 
   const handleDownload = async () => {
     if (!fileId) return;
     // Download production SVG with full embedded artwork from the server export endpoint
     const params = new URLSearchParams({
-      file_id: fileId,
-      offset_val: offsetVal,
-      threshold: threshold,
-      smoothing_factor: smoothing,
-      stroke_color: strokeColor,
-      keep_holes: String(keepHoles),
-      add_white_matte: String(addWhiteMatte),
+      file_id: fileId, offset_val: offsetVal, threshold: threshold,
+      smoothing_factor: smoothing, stroke_color: strokeColor,
+      keep_holes: String(keepHoles), add_white_matte: String(addWhiteMatte),
     });
     try {
-      const res = await fetch(`${API_BASE_URL}/api/contour/export?${params}`);
-      if (!res.ok) throw new Error("Export failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `cut_contour_${Date.now()}.svg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      await downloadBlob(`/api/contour/export?${params}`, `cut_contour_${Date.now()}.svg`);
     } catch {
       setError("Failed to export production SVG.");
     }
   };
 
-  const handleFitToViewport = () => {
-    setScale(1);
-    setPosition({ x: 0, y: 0 });
-  };
-
-  const handleZoom = (direction: "in" | "out") => {
-    const factor = direction === "in" ? 1.25 : 0.8;
-    setScale((prev) => Math.min(Math.max(0.1, prev * factor), 15));
-  };
-
   return (
-    <div className="w-full space-y-3 pb-4">
-      {/* Breadcrumb Header */}
-      <div className="flex items-center space-x-2 text-xs text-slate-400 pb-1">
-        <Link href="/" className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors">Home</Link>
-        <span>/</span>
-        <span className="text-white font-medium">Contour Studio</span>
-      </div>
-
-      {/* Compact Studio Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
-        <div className="flex items-center space-x-2.5">
-          <Scissors className="text-pink-400" size={20} />
-          <h1 className="text-base md:text-lg font-bold tracking-tight text-white">
-            Contour Cut Studio
-          </h1>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-pink-950 text-pink-300 border border-pink-700/50">
-            Die-Line Vector
-          </span>
-          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
-            Plotter-ready cut lines with physical scaling, bleed expansion, and choke underbase
-          </span>
-        </div>
-
-        {svgContent && (
-          <button 
+    <StudioLayout
+      title="Contour Cut Studio"
+      statusBadge={
+        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-pink-950 text-pink-300 border border-pink-700/50">
+          Die-Line Vector
+        </span>
+      }
+      headerActions={
+        svgContent ? (
+          <button
             onClick={handleDownload}
             className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm self-start sm:self-auto shrink-0"
           >
             <Download size={14} />
             <span>Export CutContour SVG</span>
           </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3.5">
-        {/* Left Settings Panel */}
-        <div className="lg:col-span-1 space-y-3.5">
-          <div className="bg-[#181D27] p-3.5 rounded-xl border border-[#242A38] space-y-3.5">
-            <div className="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-slate-400 pb-2 border-b border-[#242A38]">
-              <Upload size={14} className="text-pink-400" />
-              <span>Input Artwork</span>
-            </div>
-
-            <div>
-              <label 
-                htmlFor="contour-file-input"
-                className="w-full border-2 border-dashed border-[#2E3648] hover:border-pink-500/50 rounded-lg p-4 text-center cursor-pointer block bg-[#131720]/60 transition-colors"
-              >
-                <input 
-                  id="contour-file-input"
-                  type="file" 
-                  accept="image/*,application/pdf" 
-                  onChange={handleFileUpload} 
-                  className="hidden" 
-                />
-                <Scissors size={24} className="text-pink-400 mx-auto mb-2 opacity-80" />
-                <span className="text-xs font-semibold text-slate-300 block">
-                  Select Artwork File
-                </span>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  PNG with transparency or PDF
-                </span>
-              </label>
-            </div>
-
-            {detectedProfile && (
-              <div className="bg-[#131720] border border-[#2E3648] rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-pink-400 flex items-center gap-1.5">
-                    <Sparkles size={13} className="text-pink-400" />
-                    Auto-Configured Profile
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleResetToAuto}
-                    title="Reset options to auto-detected settings for this image"
-                    className="text-[10px] text-slate-400 hover:text-pink-300 flex items-center gap-1 hover:underline transition-colors"
-                  >
-                    <RotateCcw size={11} />
-                    Reset
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1.5 text-[10px] text-slate-400">
-                  <span className="px-1.5 py-0.5 rounded bg-[#1F2633] text-slate-300 font-mono">
-                    {detectedProfile.width} × {detectedProfile.height}px
-                  </span>
-                  <span className={`px-1.5 py-0.5 rounded font-mono ${
-                    detectedProfile.hasAlpha 
-                      ? "bg-emerald-950 text-emerald-300 border border-emerald-800/40" 
-                      : "bg-blue-950 text-blue-300 border border-blue-800/40"
-                  }`}>
-                    {detectedProfile.hasAlpha ? "Alpha Cutout" : detectedProfile.bgType.replace("_", " ")}
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded bg-[#1F2633] text-slate-300 font-mono">
-                    Thresh: {detectedProfile.suggestedOptions.threshold}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className="pt-2 border-t border-[#242A38] space-y-4">
-              <div className="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-                <SlidersHorizontal size={14} className="text-pink-400" />
-                <span>Cut Geometry</span>
-              </div>
-
-              <NumberControl 
-                label="Bleed / Choke Offset" 
-                value={offsetVal} 
-                min="-10" 
-                max="10" 
-                step="0.5" 
-                unit="mm" 
-                onChange={setOffsetVal} 
-              />
-
-              <NumberControl 
-                label="Edge Smoothing" 
-                value={smoothing} 
-                min="0" 
-                max="15" 
-                step="1" 
-                onChange={setSmoothing} 
-              />
-              
-              <NumberControl 
-                label="Detection Threshold" 
-                value={threshold} 
-                min="0" 
-                max="100" 
-                step="1" 
-                onChange={setThreshold} 
-              />
-            </div>
-
-            {/* Stroke Color */}
-            <div className="pt-3 border-t border-[#242A38]">
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Spot Stroke Swatch</label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {PRESET_COLORS.map((c) => (
-                  <button 
-                    key={c.value} 
-                    type="button"
-                    title={c.name}
-                    onClick={() => setStrokeColor(c.value)}
-                    className={`w-6 h-6 rounded-full border-2 ${
-                      strokeColor === c.value ? "border-white scale-110" : "border-transparent hover:scale-105"
-                    } transition-transform shadow-sm`}
-                    style={{ backgroundColor: c.value }}
-                  />
-                ))}
-                <div 
-                  title="Custom Spot Color" 
-                  className="relative w-6 h-6 rounded-full border border-[#2E3648] overflow-hidden cursor-pointer hover:scale-105 transition-transform flex items-center justify-center bg-[#232936]"
-                >
-                  <input 
-                    type="color" 
-                    value={strokeColor} 
-                    onChange={(e) => setStrokeColor(e.target.value)}
-                    className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer opacity-0"
-                  />
-                  <span className="text-[10px] font-bold text-slate-300">+</span>
-                </div>
-              </div>
-              <div className="text-[10px] text-slate-400 font-mono">{strokeColor.toUpperCase()} (CutContour)</div>
-            </div>
-
-            {/* Finishing Toggles */}
-            <div className="pt-3 border-t border-[#242A38] space-y-2.5">
-              <label className="flex items-center space-x-2.5 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={keepHoles} 
-                  onChange={(e) => setKeepHoles(e.target.checked)} 
-                  className="rounded bg-[#131720] border-[#2E3648] text-pink-500 focus:ring-pink-500" 
-                />
-                <span className="text-xs font-medium text-slate-300">Preserve Internal Cut Holes</span>
-              </label>
-              
-              <label className="flex items-center space-x-2.5 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={addWhiteMatte} 
-                  onChange={(e) => setAddWhiteMatte(e.target.checked)} 
-                  className="rounded bg-[#131720] border-[#2E3648] text-pink-500 focus:ring-pink-500" 
-                />
-                <span className="text-xs font-medium text-slate-300">Underbase White Matte Base</span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        {/* Live Canvas Area */}
-        <div className="lg:col-span-3 flex flex-col space-y-3">
-          {error && (
-            <div className="p-3.5 bg-red-500/10 text-red-400 rounded-xl border border-red-500/30 text-xs">
-              {error}
-            </div>
-          )}
-
-          <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex-1 flex flex-col overflow-hidden min-h-[720px] h-[calc(100vh-140px)] shadow-sm relative">
-            {/* Canvas Toolbar */}
-            <div className="p-2.5 border-b border-[#242A38] flex justify-between items-center bg-[#141822]">
-              <div className="flex items-center space-x-3">
-                <span className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
-                  <Layers size={14} className="text-pink-400" />
-                  <span>Interactive Proof Canvas</span>
-                </span>
-                {isGenerating && (
-                  <span className="text-xs text-pink-400 flex items-center font-medium">
-                    <Loader2 className="animate-spin mr-1.5" size={13} />
-                    Tracing Die Lines...
-                  </span>
-                )}
-              </div>
-              
-              <div className="flex items-center space-x-3">
-                <div className="flex items-center space-x-2 bg-[#1A202C] px-2.5 py-1 rounded border border-[#2E3648]">
-                  <label className="text-[10px] font-semibold text-slate-400 uppercase">Artwork Opacity</label>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="100" 
-                    value={artworkOpacity} 
-                    onChange={(e) => setArtworkOpacity(e.target.value)} 
-                    className="w-20 h-1 bg-[#2E3648] rounded appearance-none cursor-pointer accent-slate-300"
-                  />
-                  <span className="text-[10px] font-mono text-slate-300 w-7 text-right">{artworkOpacity}%</span>
-                </div>
-              </div>
-            </div>
-            
-            {/* Viewport Canvas */}
-            <div 
-              ref={canvasRef}
-              className="flex-1 bg-[#0F1218] flex items-center justify-center p-8 overflow-hidden relative cursor-grab active:cursor-grabbing select-none"
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-            >
-              {!svgContent && !isGenerating && (
-                <div className="text-slate-400 flex flex-col items-center">
-                  <Scissors size={44} className="mb-3 opacity-30 text-pink-400" />
-                  <p className="text-sm font-medium text-slate-300">Upload artwork to trace contour cut path</p>
-                  <p className="text-xs text-slate-400 mt-1">Automatic transparent boundary vectorization</p>
-                </div>
-              )}
-              
-              {svgContent && (
-                <div 
-                  className="drop-shadow-2xl transition-opacity duration-200"
-                  style={{ 
-                    opacity: isGenerating ? 0.6 : 1,
-                    transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
-                    transformOrigin: "center",
-                    willChange: "transform",
-                    transition: isDragging ? "none" : "transform 0.08s ease-out"
-                  }}
-                >
-                  <style>{`
-                    #Artwork { opacity: ${Number(artworkOpacity) / 100}; transition: opacity 0.1s; } 
-                    .canvas-svg-container > svg { width: 100% !important; height: 100% !important; max-height: 78vh; pointer-events: none; }
-                  `}</style>
-                  <div 
-                    dangerouslySetInnerHTML={{ __html: svgContent }} 
-                    className="canvas-svg-container w-full h-full object-contain" 
-                    style={{ maxHeight: "78vh" }} 
-                  />
-                </div>
-              )}
-
-              {/* Floating Viewport HUD Controls */}
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-1 bg-[#181D27]/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-[#2E3648] shadow-lg z-10">
-                <button
-                  type="button"
-                  onClick={() => handleZoom("in")}
-                  className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
-                  title="Zoom In (+)"
-                >
-                  <ZoomIn size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleZoom("out")}
-                  className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
-                  title="Zoom Out (-)"
-                >
-                  <ZoomOut size={15} />
-                </button>
-                <div className="w-px h-3.5 bg-[#2E3648] mx-1" />
-                <button
-                  type="button"
-                  onClick={handleFitToViewport}
-                  className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
-                  title="Fit to Screen"
-                >
-                  <Maximize2 size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleFitToViewport}
-                  className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
-                  title="Reset Pan & Zoom"
-                >
-                  <RotateCcw size={15} />
-                </button>
-                <span className="text-[10px] font-mono text-slate-400 pl-1.5 pr-0.5">
-                  {Math.round(scale * 100)}%
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+        ) : undefined
+      }
+      error={error}
+      leftLabel="Controls"
+      leftPanel={
+        <ContourControls
+          offsetVal={offsetVal} setOffsetVal={setOffsetVal}
+          threshold={threshold} setThreshold={setThreshold}
+          smoothing={smoothing} setSmoothing={setSmoothing}
+          keepHoles={keepHoles} setKeepHoles={setKeepHoles}
+          addWhiteMatte={addWhiteMatte} setAddWhiteMatte={setAddWhiteMatte}
+          strokeColor={strokeColor} setStrokeColor={setStrokeColor}
+          detectedProfile={detectedProfile}
+          fileId={fileId} svgContent={svgContent} isGenerating={isGenerating}
+          handleFileUpload={handleFileUpload} handleGenerate={handleGenerate}
+          handleDownload={handleDownload} handleResetToAuto={handleResetToAuto}
+        />
+      }
+      centerViewport={
+        <ContourViewport
+          fileId={fileId} svgContent={svgContent} isGenerating={isGenerating}
+          artworkOpacity={artworkOpacity} setArtworkOpacity={setArtworkOpacity}
+        />
+      }
+    />
   );
 }
 
