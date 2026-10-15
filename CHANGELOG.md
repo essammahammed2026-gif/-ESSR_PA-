@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **CI / GitHub Actions**:
+  - Added `actions/setup-node@v4` with Node 20 and npm caching, along with `npm ci` before running frontend lint and build in `.github/workflows/ci.yml`.
 - **Book Studio Crop Module: unified single interface with per-line cut axes**:
   - Enabling Crop starts as plain crop (zero cut lines); operators add up to 3 cut lines, each independently switchable between vertical (pages) and horizontal (strips) with its own slider plus exact % type-in field.
   - Mixed-axis cuts run as two backend phases (vertical first, then horizontal across the new slices) for full grid cuts; dimension box shows column/row breakdowns and pages-per-sheet.
