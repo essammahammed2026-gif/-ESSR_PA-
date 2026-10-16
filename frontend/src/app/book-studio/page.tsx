@@ -90,6 +90,11 @@ function BookStudioContent() {
     <StudioLayout
       className="book-studio"
       title="Book Studio"
+      breadcrumbs={
+        sessionId && pages.length > 0
+          ? [{ label: searchParams.get("name") || (fileSingle?.name || "Book Session") }]
+          : undefined
+      }
       disablePanelHotkeys={true}
       headerLeftActions={
         <div className="flex items-center bg-[#131720] border border-[#242A38] rounded-lg p-0.5 ml-1">

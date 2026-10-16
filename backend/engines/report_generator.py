@@ -6,7 +6,7 @@ from typing import Dict, Any
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable, Image
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -22,9 +22,9 @@ def format_file_size(size_bytes: int) -> str:
 
 def generate_prepress_report_pdf(analysis: Dict[str, Any]) -> bytes:
     """
-    Synthesizes a clean, high-resolution A4 PDF Prepress Quality & Preflight Audit Report.
+    Synthesizes a clean, high-resolution A4 PDF Prepress Quality Audit Report.
     Includes document metrics, traffic-light checklist, granular page-by-page findings,
-    and remediation steps.
+    and customer sign-off approval.
     """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -113,17 +113,37 @@ def generate_prepress_report_pdf(analysis: Dict[str, Any]) -> bytes:
     checks = report_data.get("checks", {})
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    header_table_data = [
-        [
-            Paragraph("<b>FLINT PREPRESS STUDIO</b><br/><font color='#64748B'>Technical Quality & Preflight Audit Report</font>", title_style),
-            Paragraph(f"<font color='#0284C7'><b>STATUS: {'ACTION REQUIRED' if overall_status == 'warning' else 'READY FOR PRINT'}</b></font><br/><font color='#64748B'>Audited: {now_str}</font>", ParagraphStyle('RHead', parent=subtitle_style, alignment=TA_RIGHT))
+    logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "public", "flint_mark.png"))
+    if not os.path.exists(logo_path):
+        logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "flint_logo_mark.png"))
+
+    if os.path.exists(logo_path):
+        logo_img = Image(logo_path, width=36, height=36)
+        header_table_data = [
+            [
+                logo_img,
+                Paragraph("<b>FLINT PREPRESS</b><br/><font color='#64748B'>Technical Quality & Prepress Audit Report</font>", title_style),
+                Paragraph(f"<font color='#0284C7'><b>STATUS: {'ACTION REQUIRED' if overall_status == 'warning' else 'READY FOR PRINT'}</b></font><br/><font color='#64748B'>Audited: {now_str}</font>", ParagraphStyle('RHead', parent=subtitle_style, alignment=TA_RIGHT))
+            ]
         ]
-    ]
-    header_table = Table(header_table_data, colWidths=[340, 180])
-    header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-    ]))
+        header_table = Table(header_table_data, colWidths=[44, 300, 179])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+    else:
+        header_table_data = [
+            [
+                Paragraph("<b>FLINT PREPRESS</b><br/><font color='#64748B'>Technical Quality & Prepress Audit Report</font>", title_style),
+                Paragraph(f"<font color='#0284C7'><b>STATUS: {'ACTION REQUIRED' if overall_status == 'warning' else 'READY FOR PRINT'}</b></font><br/><font color='#64748B'>Audited: {now_str}</font>", ParagraphStyle('RHead', parent=subtitle_style, alignment=TA_RIGHT))
+            ]
+        ]
+        header_table = Table(header_table_data, colWidths=[344, 179])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+
     story.append(header_table)
     story.append(Spacer(1, 8))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#0284C7"), spaceBefore=0, spaceAfter=12))
@@ -290,7 +310,7 @@ def generate_prepress_report_pdf(analysis: Dict[str, Any]) -> bytes:
     # Bleed Information
     pages_missing_bleed = bleed_check.get("pages_missing_bleed", [])
     if pages_missing_bleed:
-        findings_items.append(Paragraph(f"• <b>Bleed Missing:</b> Pages {format_page_ranges(pages_missing_bleed)} have 0mm bleed margin defined. Use Flint Book Studio or Imposing Studio to synthesize mirrored bleeds.", body_style))
+        findings_items.append(Paragraph(f"• <b>Bleed Missing:</b> Pages {format_page_ranges(pages_missing_bleed)} have 0mm bleed margin defined. A 3mm bleed margin is recommended for clean trimming and finishing.", body_style))
     else:
         findings_items.append(Paragraph("• <b>Bleed Allowance:</b> Valid bleed margins detected across document.", body_style))
 
@@ -304,27 +324,40 @@ def generate_prepress_report_pdf(analysis: Dict[str, Any]) -> bytes:
     story.extend(findings_items)
     story.append(Spacer(1, 14))
 
-    # 5. Remediation Recommendations
-    story.append(Paragraph("<b>3. Recommended Operator Remediations</b>", section_heading))
+    # 3. Customer Sign-off & Production Approval
+    story.append(Paragraph("<b>3. Customer Sign-off & Production Approval</b>", section_heading))
     story.append(Spacer(1, 4))
+    story.append(Paragraph(
+        "Please review the technical specifications and audit findings above. "
+        "By signing below, you authorize commercial print production with these parameters.",
+        subtitle_style
+    ))
+    story.append(Spacer(1, 10))
 
-    remedy_bullets = []
-    if pages_missing_bleed:
-        remedy_bullets.append("<b>Scanned Book Studio:</b> Open asset to auto-synthesize 3mm mirrored bleeds and straighten/deskew content.")
-    if page_count > 1:
-        remedy_bullets.append("<b>Imposing Studio:</b> Impose pages into standard publication saddle-stitch or perfect bound sheets.")
-    else:
-        remedy_bullets.append("<b>Imposing Studio (Gang Run):</b> Step-and-repeat single page artwork onto SRA3 or B2 press sheets with trim marks.")
-    if analysis.get("has_transparency"):
-        remedy_bullets.append("<b>Contour Studio:</b> Generate vector CutContour die-lines and white ink underbase mask for sticker cutting.")
+    approval_data = [
+        [
+            Paragraph("<b>Customer Signature:</b>", body_style),
+            Paragraph("________________________________________", body_style),
+            Paragraph("<b>Date:</b>", body_style),
+            Paragraph("____________________", body_style),
+        ],
+        [
+            Paragraph("<b>Customer Name (Print):</b>", body_style),
+            Paragraph("________________________________________", body_style),
+            Paragraph("<b>Approval Status:</b>", body_style),
+            Paragraph("[  ] Approved for Print<br/>[  ] Revisions Required", body_style),
+        ]
+    ]
 
-    for bullet in remedy_bullets:
-        story.append(Paragraph(f"→ {bullet}", body_style))
-        story.append(Spacer(1, 2))
-
-    story.append(Spacer(1, 14))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E1"), spaceBefore=0, spaceAfter=8))
-    story.append(Paragraph("Flint Prepress Studio Engine • Local-First Prepress & Print Production Suite • Generated automatically", subtitle_style))
+    approval_table = Table(approval_data, colWidths=[115, 185, 95, 128])
+    approval_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    story.append(approval_table)
 
     doc.build(story)
     pdf_bytes = buffer.getvalue()

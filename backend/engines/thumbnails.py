@@ -20,7 +20,7 @@ def render_pdf_thumb(src_path: str, dest_path: str, page_num: int = 0,
             doc.close()
             return False
         p = min(max(0, page_num), len(doc) - 1)
-        pix = doc[p].get_pixmap(matrix=fitz.Matrix(scale, scale))
+        pix = doc[p].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         pix.save(dest_path)
         doc.close()
         return True
@@ -70,7 +70,7 @@ def pregen_pdf_thumbnails(file_path: str, stem: str, page_count: int,
         for p in range(page_count):
             thumb_path = os.path.join("temp_uploads", f"{stem}_thumb_p{p}.jpg")
             if not os.path.exists(thumb_path):
-                pix = doc[p].get_pixmap(matrix=mat)
+                pix = doc[p].get_pixmap(matrix=mat, alpha=False)
                 pix.save(thumb_path)
         doc.close()
     except Exception as exc:

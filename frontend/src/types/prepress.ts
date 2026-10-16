@@ -184,7 +184,7 @@ export interface UniversalAssetInspection {
   embedded_images_count: number;
   preview_url: string;
   recommendations: {
-    target_studio: "imposing" | "contour" | "book-studio" | "flipbook" | "preflight";
+    target_studio: "imposing" | "contour" | "book-studio" | "flipbook";
     reason: string;
   }[];
 }

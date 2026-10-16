@@ -3,20 +3,19 @@ from settings_api import router as settings_router
 from imposing_api import router as imposing_router, _pregen_all_thumbnails
 from book_scan_api import router as book_scan_router
 from fastapi import UploadFile, File, Form, BackgroundTasks, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import shutil
 import os
 import uuid
-from typing import List
-from engines.preflight import run_preflight
+from typing import List, Dict, Any
 from engines.contour_engine import generate_contour_cut_svg, analyze_image_for_contour
 from engines.flipbook_worker import generate_flipbook_task, export_flipbook_task, refresh_flipbook_html
 from engines.units import parse_page_selection
 from engines.asset_inspector import analyze_universal_asset
 from engines.report_generator import generate_prepress_report_pdf
 import time
-from typing import List, Dict, Any
 
 import signal
 import threading
@@ -111,14 +110,14 @@ async def inspect_asset(file: UploadFile = File(...)):
     thumb_p0_disk_path = f"temp_uploads/{thumb_p0_filename}"
     thumb_filename = f"{file_id}_thumb.jpg"
     thumb_disk_path = f"temp_uploads/{thumb_filename}"
+    analysis["thumbnail_url"] = f"/api/inspect/thumbnail/{full_file_id}"
     try:
         from engines.thumbnails import render_thumb_for_file, get_pdf_page_count
         if ext == ".pdf":
             num_pages = get_pdf_page_count(file_path)
             if num_pages > 0:
-                render_thumb_for_file(file_path, thumb_p0_disk_path, page_num=0)
-                shutil.copy(thumb_p0_disk_path, thumb_disk_path)
-                analysis["thumbnail_url"] = f"/temp_uploads/{thumb_filename}"
+                if render_thumb_for_file(file_path, thumb_p0_disk_path, page_num=0):
+                    shutil.copy(thumb_p0_disk_path, thumb_disk_path)
 
             # For multi-page PDFs (books), pre-generate ALL remaining page thumbnails
             # in background thread for instant disk cache hits in Imposing Studio
@@ -134,7 +133,6 @@ async def inspect_asset(file: UploadFile = File(...)):
             from engines.thumbnails import render_image_thumb
             if render_image_thumb(file_path, thumb_p0_disk_path):
                 shutil.copy(thumb_p0_disk_path, thumb_disk_path)
-                analysis["thumbnail_url"] = f"/temp_uploads/{thumb_filename}"
     except Exception as e_thumb:
         print(f"Notice: thumbnail generation failed: {e_thumb}")
 
@@ -168,9 +166,36 @@ def _lookup_inspect_analysis(file_id: str):
     candidate = resolve_temp_file(file_id)
     if candidate and os.path.exists(candidate):
         analysis = analyze_universal_asset(candidate, os.path.basename(candidate))
+        analysis["file_id"] = file_id
+        analysis["file_path"] = candidate
+        analysis["thumbnail_url"] = f"/api/inspect/thumbnail/{file_id}"
         INSPECT_CACHE[file_id] = analysis
         return analysis
     return None
+
+@app.get("/api/inspect/thumbnail/{file_id}")
+def get_inspect_thumbnail(file_id: str):
+    """Serves or dynamically renders page 0 thumbnail for inspected assets."""
+    safe_file_id = os.path.basename(file_id)
+    stem = os.path.splitext(safe_file_id)[0]
+    thumb_path = os.path.join("temp_uploads", f"{stem}_thumb.jpg")
+    if os.path.exists(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    thumb_p0_path = os.path.join("temp_uploads", f"{stem}_thumb_p0.jpg")
+    if os.path.exists(thumb_p0_path):
+        return FileResponse(thumb_p0_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    from engines.thumbnails import resolve_temp_file, render_thumb_for_file
+    src_path = resolve_temp_file(file_id)
+    if not src_path or not os.path.exists(src_path):
+        raise HTTPException(status_code=404, detail="Artwork file not found")
+
+    ok = render_thumb_for_file(src_path, thumb_path, page_num=0)
+    if ok and os.path.exists(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    raise HTTPException(status_code=500, detail="Failed to render thumbnail")
 
 def _report_pdf_response(analysis: dict):
     pdf_bytes = generate_prepress_report_pdf(analysis)
@@ -206,40 +231,6 @@ async def export_report_pdf(request: Request):
     if not analysis:
         raise HTTPException(status_code=400, detail="Missing analysis data for PDF report generation")
     return _report_pdf_response(analysis)
-
-@app.post("/api/preflight")
-async def analyze_pdfs(
-    files: List[UploadFile] = File(default=[]),
-    existing_file_id: str = Form(None)
-):
-    saved_paths = []
-    to_delete = []
-    try:
-        if files:
-            for file in files:
-                file_path = f"temp_uploads/{file.filename}"
-                with open(file_path, "wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
-                saved_paths.append(file_path)
-                to_delete.append(file_path)
-        elif existing_file_id:
-            from engines.thumbnails import resolve_temp_file
-            file_path = resolve_temp_file(existing_file_id)
-            if file_path and os.path.exists(file_path):
-                saved_paths.append(file_path)
-
-        if not saved_paths:
-            raise HTTPException(status_code=400, detail="No files provided for preflight")
-            
-        result = run_preflight(saved_paths)
-        return result
-    finally:
-        for path in to_delete:
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
 
 @app.post("/api/flipbook")
 async def create_flipbook(

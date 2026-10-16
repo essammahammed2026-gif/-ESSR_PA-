@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
 import { apiFetch, downloadBlob } from "@/lib/api";
+import { LengthUnit, UNIT_OPTIONS, getStoredUnit, setStoredUnit } from "@/lib/units";
 import type { UniversalAnalysis } from "@/components/home/types";
 import { DropzonePanel } from "@/components/home/DropzonePanel";
 import { AssetPanel } from "@/components/home/AssetPanel";
@@ -11,6 +12,7 @@ import { AuditReport } from "@/components/home/AuditReport";
 
 export default function HomePage() {
   const router = useRouter();
+  const [unit, setUnitState] = useState<LengthUnit>("mm");
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
@@ -32,16 +34,32 @@ export default function HomePage() {
       })
       .catch(() => setBackendStatus("offline"));
 
-    // Load recent files from session storage
+    // Load stored length unit preference
+    setUnitState(getStoredUnit("mm"));
+
+    // Load recent files from session storage and sanitize legacy studio entries
     try {
       const stored = sessionStorage.getItem("flint_recent_jobs");
       if (stored) {
-        setRecentJobs(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.map((j: UniversalAnalysis) => ({
+            ...j,
+            suggested_studios: (j.suggested_studios || []).filter((s) => s.studio !== "preflight"),
+          }));
+          setRecentJobs(sanitized);
+          sessionStorage.setItem("flint_recent_jobs", JSON.stringify(sanitized));
+        }
       }
     } catch {
       // sessionStorage unavailable
     }
   }, []);
+
+  const handleUnitChange = (newUnit: LengthUnit) => {
+    setUnitState(newUnit);
+    setStoredUnit(newUnit);
+  };
 
   const handleProcessFile = useCallback(async (file: File) => {
     setIsAnalyzing(true);
@@ -138,7 +156,11 @@ export default function HomePage() {
   };
 
   const handleSelectRecent = (job: UniversalAnalysis) => {
-    setAnalysis(job);
+    const sanitized: UniversalAnalysis = {
+      ...job,
+      suggested_studios: (job.suggested_studios || []).filter((s) => s.studio !== "preflight"),
+    };
+    setAnalysis(sanitized);
   };
 
   const handleClearRecent = () => {
@@ -209,29 +231,76 @@ export default function HomePage() {
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-4 pb-8 animate-in fade-in duration-200">
-      {/* Top Header */}
+      {/* Top Header & Breadcrumbs */}
       <div className="flex items-center justify-between pb-3 border-b border-[#242A38]">
-        <div>
-          <h1 className="text-base md:text-lg font-bold tracking-tight text-white flex items-center space-x-2">
-            <span>Home</span>
-          </h1>
+        <div className="flex items-center space-x-2 text-sm">
+          {!analysis ? (
+            <h1 className="text-base md:text-lg font-bold tracking-tight text-white flex items-center space-x-2">
+              <span>Home</span>
+            </h1>
+          ) : (
+            <nav className="flex items-center space-x-2 text-sm" aria-label="Breadcrumb">
+              <button
+                type="button"
+                onClick={handleAnalyzeAnother}
+                className="font-medium hover:underline transition-all flex items-center space-x-1 cursor-pointer"
+                style={{ color: "var(--app-accent, #06b6d4)" }}
+                title="Return to Home dropzone"
+              >
+                <span>Home</span>
+              </button>
+              <span className="text-slate-500">/</span>
+              <span className="font-semibold text-white">Inspector</span>
+              <span className="text-slate-500">/</span>
+              <span
+                className="text-xs font-mono text-slate-400 truncate max-w-[200px] sm:max-w-xs"
+                title={analysis.filename}
+              >
+                {analysis.filename}
+              </span>
+            </nav>
+          )}
         </div>
 
-        {/* Engine Heartbeat */}
-        <div className="flex items-center space-x-2 bg-[#181D27] px-2.5 py-1 rounded-lg border border-[#242A38] text-xs">
-          <Cpu size={14} className={backendStatus === "online" ? "text-cyan-400" : "text-slate-500"} />
-          <span className="text-slate-400 text-[11px]">Core Engine:</span>
-          {backendStatus === "online" ? (
-            <span className="text-emerald-400 font-medium text-[11px] flex items-center space-x-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse mr-1" />
-              Ready
-            </span>
-          ) : (
-            <span className="text-rose-400 font-medium text-[11px] flex items-center space-x-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block mr-1" />
-              Connecting
-            </span>
-          )}
+        {/* Header Right Actions */}
+        <div className="flex items-center space-x-2">
+          {/* Global Length Unit Dropdown */}
+          <div className="flex items-center space-x-1.5 bg-[#181D27] border border-[#242A38] rounded-lg px-2.5 py-1 text-xs">
+            <span className="text-[10px] uppercase font-bold text-slate-500">Unit</span>
+            <select
+              value={unit}
+              onChange={(e) => handleUnitChange(e.target.value as LengthUnit)}
+              className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer"
+              title="Global length unit (applied across inspections and studio launches)"
+            >
+              {UNIT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} className="bg-[#181D27] text-slate-200">
+                  {opt.label} ({opt.short})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Engine Heartbeat */}
+          <div className="flex items-center space-x-2 bg-[#181D27] px-2.5 py-1 rounded-lg border border-[#242A38] text-xs">
+            <Cpu
+              size={14}
+              style={{ color: backendStatus === "online" ? "var(--app-accent, #06b6d4)" : undefined }}
+              className={backendStatus !== "online" ? "text-slate-500" : ""}
+            />
+            <span className="text-slate-400 text-[11px]">Core Engine:</span>
+            {backendStatus === "online" ? (
+              <span className="text-emerald-400 font-medium text-[11px] flex items-center space-x-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse mr-1" />
+                Ready
+              </span>
+            ) : (
+              <span className="text-rose-400 font-medium text-[11px] flex items-center space-x-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block mr-1" />
+                Connecting
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -243,6 +312,7 @@ export default function HomePage() {
           analysisProgress={analysisProgress}
           analysisStatusText={analysisStatusText}
           recentJobs={recentJobs}
+          unit={unit}
           fileInputRef={fileInputRef}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
@@ -267,9 +337,16 @@ export default function HomePage() {
         <div className="space-y-4">
           {/* Routing Progress Overlay Indicator */}
           {routingStudio && (
-            <div className="p-2.5 rounded-lg bg-cyan-950/60 border border-cyan-700/60 text-cyan-300 text-xs flex items-center space-x-2.5 animate-in fade-in">
-              <Loader2 size={16} className="animate-spin text-cyan-400" />
-              <span>Loading artwork into studio...</span>
+            <div
+              className="p-2.5 rounded-lg border text-xs flex items-center space-x-2.5 animate-in fade-in"
+              style={{
+                backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
+                borderColor: "var(--app-accent, #06b6d4)",
+                color: "var(--app-accent, #06b6d4)",
+              }}
+            >
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-white font-medium">Loading artwork into studio...</span>
             </div>
           )}
 
@@ -278,6 +355,7 @@ export default function HomePage() {
             <AssetPanel
               analysis={analysis}
               routingStudio={routingStudio}
+              unit={unit}
               onRouteToStudio={handleRouteToStudio}
               onAnalyzeAnother={handleAnalyzeAnother}
               formatFileSize={formatFileSize}
@@ -287,6 +365,7 @@ export default function HomePage() {
             <AuditReport
               analysis={analysis}
               isExportingPdf={isExportingPdf}
+              unit={unit}
               onExportPdf={handleExportPdfReport}
             />
           </div>

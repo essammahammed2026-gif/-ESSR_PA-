@@ -10,7 +10,6 @@ import { Settings, Power } from "lucide-react";
 import {
   IconHome,
   IconBookStudio,
-  IconPreflightStudio,
   IconImposingStudio,
   IconContourStudio,
   IconFlipbookStudio,
@@ -153,7 +152,6 @@ export default function RootLayout({
             <nav className="space-y-1">
               <NavItem href="/" icon={<IconHome size={18}/>} label="Home" isCollapsed={isSidebarCollapsed} pathname={pathname} />
               <NavItem href="/book-studio" icon={<IconBookStudio size={18}/>} label="Book Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              <NavItem href="/preflight" icon={<IconPreflightStudio size={18}/>} label="Preflight Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
               <NavItem href="/imposing" icon={<IconImposingStudio size={18}/>} label="Imposing Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
               <NavItem href="/contour" icon={<IconContourStudio size={18}/>} label="Contour Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
               <NavItem href="/flipbook" icon={<IconFlipbookStudio size={18}/>} label="Flipbook Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />

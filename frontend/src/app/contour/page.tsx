@@ -176,6 +176,11 @@ function ContourStudioContent() {
   return (
     <StudioLayout
       title="Contour Cut Studio"
+      breadcrumbs={
+        fileId
+          ? [{ label: searchParams.get("name") || "Die-Cut Artwork" }]
+          : undefined
+      }
       statusBadge={
         <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-pink-950 text-pink-300 border border-pink-700/50">
           Die-Line Vector

@@ -8,10 +8,17 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+export interface StudioBreadcrumbItem {
+  label: string;
+  href?: string;
+  onClick?: () => void;
+}
+
 export interface StudioLayoutProps {
   title: string;
   className?: string;
   homeHref?: string;
+  breadcrumbs?: StudioBreadcrumbItem[];
   statusBadge?: React.ReactNode;
   headerLeftActions?: React.ReactNode;
   headerActions?: React.ReactNode;
@@ -44,6 +51,7 @@ export function StudioLayout({
   title,
   className = "",
   homeHref = "/",
+  breadcrumbs,
   statusBadge,
   headerLeftActions,
   headerActions,
@@ -125,13 +133,48 @@ export function StudioLayout({
       <div className="flex items-center justify-between pb-2 border-b border-[#242A38]">
         {/* Breadcrumb Links & Left Header Actions */}
         <div className="flex items-center space-x-3 text-sm text-slate-300">
-          <div className="flex items-center space-x-2">
-            <Link href={homeHref} className="text-cyan-400 hover:text-cyan-300 transition-colors font-medium">
+          <nav className="flex items-center space-x-2" aria-label="Breadcrumb">
+            <Link
+              href={homeHref}
+              className="font-medium hover:underline transition-all"
+              style={{ color: "var(--app-accent, #06b6d4)" }}
+            >
               Home
             </Link>
             <span className="text-slate-500">/</span>
-            <span className="font-semibold text-white">{title}</span>
-          </div>
+            {breadcrumbs && breadcrumbs.length > 0 ? (
+              <span className="text-slate-300 font-medium">{title}</span>
+            ) : (
+              <span className="font-semibold text-white">{title}</span>
+            )}
+            {breadcrumbs?.map((crumb, idx) => (
+              <React.Fragment key={idx}>
+                <span className="text-slate-500">/</span>
+                {crumb.href ? (
+                  <Link
+                    href={crumb.href}
+                    className="hover:underline transition-all"
+                    style={{ color: "var(--app-accent, #06b6d4)" }}
+                  >
+                    {crumb.label}
+                  </Link>
+                ) : crumb.onClick ? (
+                  <button
+                    type="button"
+                    onClick={crumb.onClick}
+                    className="hover:underline transition-all cursor-pointer"
+                    style={{ color: "var(--app-accent, #06b6d4)" }}
+                  >
+                    {crumb.label}
+                  </button>
+                ) : (
+                  <span className="font-semibold text-white truncate max-w-[200px]" title={crumb.label}>
+                    {crumb.label}
+                  </span>
+                )}
+              </React.Fragment>
+            ))}
+          </nav>
           {headerLeftActions}
         </div>
 

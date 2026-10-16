@@ -117,6 +117,14 @@ function ImposingStudioContent() {
   return (
     <StudioLayout
       title="Imposing Studio"
+      breadcrumbs={
+        items.length > 0
+          ? [
+              { label: jobMode === "book" ? "Book Mode" : "Gang Run" },
+              { label: items[0].name },
+            ]
+          : [{ label: jobMode === "book" ? "Book Mode" : "Gang Run" }]
+      }
       statusBadge={
         <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#181D27] border border-[#242A38] text-xs">
           <span className="text-slate-400 font-mono font-medium">{sheetW}×{sheetH}{unit}</span>

@@ -96,24 +96,10 @@ function FlipbookStudioContent() {
       });
   }, [searchParams, taskId, isGenerating, resultUrl, direction, bindingStyle]);
 
-  const runPreflight = async (selectedFiles: File[]) => {
-    if (selectedFiles.length === 0) return;
-    const d = new FormData();
-    selectedFiles.forEach((f) => d.append("files", f));
-    try {
-      const r = await apiFetch(`/api/preflight`, { method: "POST", body: d });
-      const j = await r.json();
-      if (j.success) setNumPages(j.data.num_pages);
-    } catch {
-      /* optional non-blocking preflight count */
-    }
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const selected = Array.from(e.target.files);
     setFiles(selected);
-    runPreflight(selected);
     setTaskId(null);
     setResultUrl(null);
     lastApplied.current = { direction: "", bindingStyle: "", magPadChoice: "", addFlyleaves: false };
@@ -288,23 +274,34 @@ function FlipbookStudioContent() {
 
   return (
     <div className="w-full space-y-3 pb-4">
-      <div className="flex items-center space-x-2 text-xs text-slate-400 pb-1">
-        <Link href="/" className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors">
-          Home
-        </Link>
-        <span>/</span>
-        <span className="text-white font-medium">Flipbook Studio</span>
-      </div>
-
+      {/* Top Header & Breadcrumbs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
-        <div className="flex items-center space-x-2.5">
-          <Layers className="text-indigo-400" size={20} />
-          <h1 className="text-base md:text-lg font-bold tracking-tight text-white">Flipbook Studio</h1>
+        <div className="flex items-center space-x-3 text-sm text-slate-300">
+          <nav className="flex items-center space-x-2" aria-label="Breadcrumb">
+            <Link
+              href="/"
+              className="font-medium hover:underline transition-all"
+              style={{ color: "var(--app-accent, #06b6d4)" }}
+            >
+              Home
+            </Link>
+            <span className="text-slate-500">/</span>
+            {files.length > 0 ? (
+              <span className="text-slate-300 font-medium">Flipbook Studio</span>
+            ) : (
+              <span className="font-semibold text-white">Flipbook Studio</span>
+            )}
+            {files.length > 0 && (
+              <>
+                <span className="text-slate-500">/</span>
+                <span className="font-semibold text-white font-mono text-xs truncate max-w-[200px]" title={files[0].name}>
+                  {files[0].name}
+                </span>
+              </>
+            )}
+          </nav>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700/50">
             HTML5 3D Proof
-          </span>
-          <span className="hidden xl:inline text-xs text-slate-400 border-l border-[#242A38] pl-2.5">
-            Convert print PDFs into realistic 3D virtual publications for digital soft-proofing
           </span>
         </div>
 

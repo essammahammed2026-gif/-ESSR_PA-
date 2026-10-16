@@ -13,9 +13,9 @@ import {
   IconImposingStudio,
   IconContourStudio,
   IconBookStudio,
-  IconPreflightStudio,
   IconFlipbookStudio,
 } from "@/components/shared/StudioIcons";
+import { formatMmInUnit, LengthUnit } from "@/lib/units";
 import type { UniversalAnalysis } from "./types";
 
 export interface DropzonePanelProps {
@@ -24,6 +24,7 @@ export interface DropzonePanelProps {
   analysisProgress: number;
   analysisStatusText: string;
   recentJobs: UniversalAnalysis[];
+  unit?: LengthUnit;
   fileInputRef: React.Ref<HTMLInputElement>;
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
   onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
@@ -40,6 +41,7 @@ export function DropzonePanel({
   analysisProgress,
   analysisStatusText,
   recentJobs,
+  unit = "mm",
   fileInputRef,
   onDrop,
   onDragOver,
@@ -50,7 +52,8 @@ export function DropzonePanel({
   onClearRecent,
 }: DropzonePanelProps) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Artwork Drag & Drop Triage Area */}
       <div
         onDrop={onDrop}
         onDragOver={onDragOver}
@@ -80,11 +83,23 @@ export function DropzonePanel({
           )}
         </div>
 
-        <div className="space-y-1 max-w-sm">
+        <div className="space-y-1.5 max-w-sm">
           <p className="text-xs md:text-sm font-semibold text-white">
             {isAnalyzing ? "Inspecting Prepress File..." : "Drop print artwork here or click to browse"}
           </p>
-          <p className="text-[11px] text-slate-400">PDF, PNG, JPG, TIFF, WEBP</p>
+          <p className="text-[11px] text-slate-400">
+            Instant DPI, trim boxes, geometry audit, and smart studio triage
+          </p>
+          <div className="flex items-center justify-center gap-1.5 pt-1">
+            {["PDF", "PNG", "JPG", "TIFF", "WEBP"].map((ext) => (
+              <span
+                key={ext}
+                className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#11141B] text-slate-400 border border-[#242A38]"
+              >
+                {ext}
+              </span>
+            ))}
+          </div>
         </div>
 
         {/* Active Analysis Progress Bar */}
@@ -110,7 +125,7 @@ export function DropzonePanel({
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold text-slate-400 flex items-center space-x-1.5">
               <FolderOpen size={13} className="text-slate-400" />
-              <span>Recent Files</span>
+              <span>Recent Inspections</span>
             </h2>
             <button
               onClick={onClearRecent}
@@ -132,7 +147,10 @@ export function DropzonePanel({
                     {job.filename}
                   </p>
                   <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                    {job.width_mm} × {job.height_mm} mm • {job.page_count}p
+                    {unit && unit !== "mm"
+                      ? `${formatMmInUnit(job.width_mm, unit)} × ${formatMmInUnit(job.height_mm, unit)}`
+                      : `${job.width_mm} × ${job.height_mm} mm`}{" "}
+                    • {job.page_count} {job.page_count === 1 ? "page" : "pages"}
                   </p>
                 </div>
                 <span className="text-[11px] text-cyan-400 font-medium shrink-0 flex items-center space-x-1">
@@ -145,72 +163,88 @@ export function DropzonePanel({
         </div>
       )}
 
-      {/* Production Studios Quick Launch */}
+      {/* Production Studios Quick Launch (4 Core Studios - Navbar Order) */}
       <div className="space-y-2.5 pt-2 border-t border-[#242A38]">
         <div className="text-xs font-semibold text-slate-400 flex items-center space-x-1.5">
           <Compass size={13} className="text-slate-400" />
-          <span>Studios</span>
+          <span>Production Studios</span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-          <Link
-            href="/imposing"
-            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-emerald-500/50 rounded-lg transition-all flex flex-col justify-between group"
-          >
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 w-fit mb-2">
-              <IconImposingStudio size={16} />
-            </div>
-            <div className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors">
-              Imposing Studio
-            </div>
-          </Link>
-
-          <Link
-            href="/contour"
-            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-pink-500/50 rounded-lg transition-all flex flex-col justify-between group"
-          >
-            <div className="p-2 rounded-lg bg-pink-500/10 text-pink-400 w-fit mb-2">
-              <IconContourStudio size={16} />
-            </div>
-            <div className="text-xs font-bold text-white group-hover:text-pink-300 transition-colors">
-              Contour Studio
-            </div>
-          </Link>
-
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* 1. Book Studio */}
           <Link
             href="/book-studio"
-            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-amber-500/50 rounded-lg transition-all flex flex-col justify-between group"
+            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] rounded-xl transition-all flex items-center space-x-3 group shadow-sm hover:border-[var(--app-accent,#06b6d4)]"
           >
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 w-fit mb-2">
-              <IconBookStudio size={16} />
+            <div
+              className="p-2 rounded-lg shrink-0 group-hover:scale-105 transition-transform"
+              style={{
+                backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
+                color: "var(--app-accent, #06b6d4)",
+              }}
+            >
+              <IconBookStudio size={18} />
             </div>
-            <div className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
+            <span className="text-xs font-bold text-white group-hover:text-[var(--app-accent,#06b6d4)] transition-colors truncate">
               Book Studio
-            </div>
+            </span>
           </Link>
 
+          {/* 2. Imposing Studio */}
           <Link
-            href="/preflight"
-            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-blue-500/50 rounded-lg transition-all flex flex-col justify-between group"
+            href="/imposing"
+            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] rounded-xl transition-all flex items-center space-x-3 group shadow-sm hover:border-[var(--app-accent,#06b6d4)]"
           >
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 w-fit mb-2">
-              <IconPreflightStudio size={16} />
+            <div
+              className="p-2 rounded-lg shrink-0 group-hover:scale-105 transition-transform"
+              style={{
+                backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
+                color: "var(--app-accent, #06b6d4)",
+              }}
+            >
+              <IconImposingStudio size={18} />
             </div>
-            <div className="text-xs font-bold text-white group-hover:text-blue-300 transition-colors">
-              Preflight Studio
-            </div>
+            <span className="text-xs font-bold text-white group-hover:text-[var(--app-accent,#06b6d4)] transition-colors truncate">
+              Imposing Studio
+            </span>
           </Link>
 
+          {/* 3. Contour Studio */}
+          <Link
+            href="/contour"
+            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] rounded-xl transition-all flex items-center space-x-3 group shadow-sm hover:border-[var(--app-accent,#06b6d4)]"
+          >
+            <div
+              className="p-2 rounded-lg shrink-0 group-hover:scale-105 transition-transform"
+              style={{
+                backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
+                color: "var(--app-accent, #06b6d4)",
+              }}
+            >
+              <IconContourStudio size={18} />
+            </div>
+            <span className="text-xs font-bold text-white group-hover:text-[var(--app-accent,#06b6d4)] transition-colors truncate">
+              Contour Studio
+            </span>
+          </Link>
+
+          {/* 4. Flipbook Studio */}
           <Link
             href="/flipbook"
-            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-indigo-500/50 rounded-lg transition-all flex flex-col justify-between group"
+            className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] rounded-xl transition-all flex items-center space-x-3 group shadow-sm hover:border-[var(--app-accent,#06b6d4)]"
           >
-            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 w-fit mb-2">
-              <IconFlipbookStudio size={16} />
+            <div
+              className="p-2 rounded-lg shrink-0 group-hover:scale-105 transition-transform"
+              style={{
+                backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
+                color: "var(--app-accent, #06b6d4)",
+              }}
+            >
+              <IconFlipbookStudio size={18} />
             </div>
-            <div className="text-xs font-bold text-white group-hover:text-indigo-300 transition-colors">
+            <span className="text-xs font-bold text-white group-hover:text-[var(--app-accent,#06b6d4)] transition-colors truncate">
               Flipbook Studio
-            </div>
+            </span>
           </Link>
         </div>
       </div>

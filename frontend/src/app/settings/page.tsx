@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Settings, Layers, Scissors, BookOpen, RotateCcw, Save, CheckCircle2, AlertCircle, Sliders, HardDrive, Palette, Keyboard } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import SheetsSection from "@/components/settings/SheetsSection";
@@ -59,10 +60,22 @@ export default function SettingsPage() {
   return (
     <div className="h-full flex flex-col overflow-y-auto bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 p-2 md:p-3">
       <div className="w-full mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-gray-200 dark:border-gray-800">
-        <div className="flex items-center space-x-2.5">
-          <Settings size={20} style={{ color: "var(--app-accent, #9333ea)" }} />
-          <h1 className="text-base md:text-lg font-bold tracking-tight">System Settings</h1>
-          <span className="hidden xl:inline text-xs text-gray-500 dark:text-gray-400 border-l border-gray-300 dark:border-gray-700 pl-2.5">Configure defaults, print media formats, and studio engine preferences</span>
+        <div className="flex items-center space-x-3 text-sm text-slate-300">
+          <nav className="flex items-center space-x-2" aria-label="Breadcrumb">
+            <Link
+              href="/"
+              className="font-medium hover:underline transition-all"
+              style={{ color: "var(--app-accent, #9333ea)" }}
+            >
+              Home
+            </Link>
+            <span className="text-slate-500">/</span>
+            <span className="text-slate-400 font-medium">Settings</span>
+            <span className="text-slate-500">/</span>
+            <span className="font-semibold text-slate-100 flex items-center space-x-1.5">
+              <span>{TABS.find((t) => t.id === activeTab)?.label || "Preferences"}</span>
+            </span>
+          </nav>
         </div>
         <div className="flex items-center space-x-2 self-start sm:self-auto shrink-0">
           <button onClick={handleResetDefaults} disabled={saving} className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition cursor-pointer"><RotateCcw size={13} /><span>Reset Defaults</span></button>

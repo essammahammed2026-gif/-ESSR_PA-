@@ -2,6 +2,27 @@
 
 ## Date: 2026-10-16
 
+### Preflight Studio Deprecation & Command Center (Home) Polish
+- **Objective**: Completely deprecate and remove the obsolete Preflight Studio (`frontend/src/app/preflight/`, `backend/engines/preflight.py`, and `/api/preflight`), consolidating all artwork verification and prepress inspection into the Command Center / Home Studio. Polish the Home Studio with unit management, 4-studio launchpad, metric telemetry tiles, dynamic accent styling, and customer-ready PDF report generation.
+- **Rules Followed**: Fast lookup index in `docs/architecture.md`, canonical single-source-of-truth registry in `AGENTS.md` (`src/lib/units.ts`, `src/lib/api.ts`), 30s code inspection and cleanup in-stride, fast inner-loop checks only (`tsc --noEmit` & `py_compile`), zero-retention storage cleanup, and user-only git permissions.
+- **Changes Completed**:
+  1. **Preflight Removal**: Deleted `frontend/src/app/preflight/`, removed `IconPreflightStudio` and nav item from `frontend/src/app/layout.tsx`, removed `backend/engines/preflight.py`, and pruned `/api/preflight` from `backend/main.py`. Scrubbed lingering preflight runtime references in `asset_inspector.py`, `flipbook/page.tsx`, and `prepress.ts`.
+  2. **Navigation Map Synchronization**: Updated `docs/architecture.md` (routers table, studio routes table, and topology diagram) in the same turn.
+  3. **Studio Launchpad Order & Dynamic Accent Theme**: Rebalanced `DropzonePanel.tsx` studio cards to match the exact sidebar navbar order: **Book Studio, Imposing Studio, Contour Studio, Flipbook Studio**, styled with dynamic theme accent (`var(--app-accent)`) and no redundant descriptions.
+  4. **Prominent Artwork Thumbnail Preview**: Enlarged artwork thumbnail in `AssetPanel.tsx` from 56px to a prominent container (`w-full h-52 sm:h-60`) with centered contain-fit rendering above artwork metadata.
+  5. **Customer-Facing Prepress Quality PDF Report**:
+     - Embedded app logo mark (`flint_mark.png`) in header table.
+     - Removed internal operator studio remediation references and software marketing footer.
+     - Added clean customer sign-off fields (`Customer Signature`, `Date`, `Customer Name (Print)`, `Approval Status`).
+  6. **Home Prepress Audit Report Streamlining**: Condensed `AuditReport.tsx` into a minimal non-repeating 2×2 grid (Trim & Geometry, Image Resolution, Bleed Margins, Color Separation), stripping out duplicate metric tiles and verbose paragraphs.
+  7. **Header & Global Unit Sync**: Added header unit dropdown (`mm`, `cm`, `inches`, `pixels`) with localStorage persistence in `src/app/page.tsx`.
+  8. **Universal Breadcrumbs Across Studios & Settings**: Integrated unified breadcrumb navigation into the top header of every studio and the settings page (`Home / Studio / [Sub-items/Filename]`). Inside Home Studio, opening an inspection displays an interactive breadcrumb returning directly to the intake dropzone.
+  9. **PDF Thumbnail Alpha Fix & Dynamic On-Demand Endpoint**: Resolved thumbnail rendering failures on books with transparency (`ValueError: 'jpg' cannot have alpha`) by enforcing `alpha=False` in `thumbnails.py`. Added `/api/inspect/thumbnail/{file_id}` to dynamically generate thumbnails on-the-fly, accompanied by a clean fallback card in `AssetPanel.tsx`.
+  10. **Recent Inspections Sanitization**: Sanitized legacy `flint_recent_jobs` in `sessionStorage` and added component-level filtering in `AssetPanel.tsx` and `page.tsx` so the deprecated Preflight Studio never appears.
+  11. **Verification & Storage Clean**: Passed `tsc --noEmit` (0 errors) and `py_compile` on backend (0 errors). `StorageCleaner.clean('runtime')` executed cleanly.
+
+---
+
 ### 1. Context & Objective
 - **Objective**: Execute the comprehensive Architectural Optimization & De-Fragmentation plan across Book Studio, Imposing Studio, Flipbook Studio, and `backend/engines/` to eliminate legacy 300-line file-splitting debt, remove duplicate math/geometry routines, and establish the `docs/architecture.md` Repository Navigation Map.
 - **Rules Followed**: Centralized API client (`src/lib/api.ts`), strict TypeScript with zero `any`, thin FastAPI routers / pure engines, fast inner-loop checks (`npx tsc --noEmit` & `py_compile`), zero-retention runtime storage cleanup (`StorageCleaner.clean('runtime')`), and user-only Git commit authority.

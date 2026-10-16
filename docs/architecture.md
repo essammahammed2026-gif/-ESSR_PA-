@@ -15,19 +15,18 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 | `backend/book_scan_api.py` | `/api/book-scan/*` (Sessions, Crop, Split, Deskew, Page Ops, History, Export) | `book_scan_engine.py`, `schemas.py` |
 | `backend/imposing_api.py` | `/api/imposing/*` (Upload, Book & Gang Preview, Nesting, PDF/SVG Export) | `imposing_prep.py`, `sheet_packer.py`, `roll_packer.py`, `sheet_gang_exporter.py`, `thumbnails.py`, `schemas.py` |
 | `backend/settings_api.py` | `/api/settings/*` (Presets CRUD, Defaults, Runtime Storage Cleanup) | `storage_cleaner.py` *(persists config to `backend/settings.json`)* |
-| `backend/main.py` | `/api/inspect`, `/api/preflight`, `/api/contour/*`, `/api/flipbook/*`, `/api/report/*` | `asset_inspector.py`, `preflight.py`, `contour_engine.py`, `flipbook_worker.py`, `report_generator.py`, `units.py` |
+| `backend/main.py` | `/api/inspect`, `/api/inspect/thumbnail/*`, `/api/contour/*`, `/api/flipbook/*`, `/api/report/*` | `asset_inspector.py`, `contour_engine.py`, `flipbook_worker.py`, `report_generator.py`, `thumbnails.py`, `units.py` |
 | *Shared Engine Utilities* | Cross-engine helpers, geometry/unit math, Pydantic models | `schemas.py`, `units.py`, `thumbnails.py` |
 
 ### 2. Frontend: Studio Page Routes (`frontend/src/app/`) $\leftrightarrow$ Component Folders (`frontend/src/components/`)
 
 | Studio Route & Page File | Component Folder (`frontend/src/components/`) | Key Components, Hooks & Utilities |
 | :--- | :--- | :--- |
-| **`/`** (Command Center & Triage)<br>`src/app/page.tsx` | `src/components/home/` | `DropzonePanel.tsx`, `AssetPanel.tsx`, `AuditReport.tsx`, `types.ts` |
+| **`/`** (Command Center & Triage)<br>`src/app/page.tsx` | `src/components/home/` | `DropzonePanel.tsx`, `AssetPanel.tsx`, `AuditReport.tsx`, `types.ts`<br>**Types & Lib:** `src/lib/units.ts`, `src/lib/api.ts` |
 | **`/book-studio`** (Scanned Book Studio)<br>`src/app/book-studio/page.tsx` | `src/components/book-studio/`<br>`src/components/book-studio/modules/` | **Views:** `BookWorkspace.tsx`, `PageCanvas.tsx`, `BookLeftPanel.tsx`, `BookRightPanel.tsx`, `WorkspaceToolbar.tsx`, `DeckCard.tsx`, `DeckListView.tsx`, `PageContextMenu.tsx`, `PagePropertiesModal.tsx`, `HistoryPopover.tsx`, `RestoreOriginalModal.tsx`, `RotateDropdown.tsx`, `FileUploadQueue.tsx`, `ExportProgressModal.tsx`<br>**Modules:** `CropSplitPanel.tsx`, `SplitLinesEditor.tsx`, `CropTargetPopover.tsx`, `DeskewPanel.tsx`, `BleedPanel.tsx`, `RestorePanel.tsx`, `PageScopeSelector.tsx`<br>**Hooks (`src/hooks/`):** `useBookStudioState.ts`, `useBookSession.ts`, `useBookModules.ts`, `useBookPageOps.ts`, `useBookHistory.ts`, `useBookShortcuts.ts`<br>**Types & Lib:** `src/types/book_studio.ts`, `src/lib/splitLines.ts`, `src/lib/pageScope.ts`, `src/lib/units.ts` |
 | **`/imposing`** (Book & Gang Imposition)<br>`src/app/imposing/page.tsx` | `src/components/imposing/` | `LeftAssetPanel.tsx`, `PreviewViewport.tsx`, `SheetCanvas.tsx`, `RightControlPanel.tsx`<br>**Hooks (`src/hooks/`):** `useImpositionStudio.ts`<br>**Types:** `src/types/prepress.ts` |
 | **`/contour`** (Die-Cut Vectorization)<br>`src/app/contour/page.tsx` | `src/components/contour/` | `ContourViewport.tsx`, `ContourControls.tsx` |
 | **`/flipbook`** (3D Virtual Proofing)<br>`src/app/flipbook/page.tsx` | `src/components/flipbook/` | `FlipbookViewport.tsx`, `FlipbookControls.tsx` |
-| **`/preflight`** (PDF Geometry & DPI Audit)<br>`src/app/preflight/page.tsx` | *(Self-contained route)* + `src/components/home/` | Inline preflight view in `src/app/preflight/page.tsx`; executive audit shared via `src/components/home/AuditReport.tsx` |
 | **`/settings`** (System & Presets Config)<br>`src/app/settings/page.tsx` | `src/components/settings/` | `SheetsSection.tsx`, `RollsSection.tsx`, `DefaultsSection.tsx`, `StorageSection.tsx`, `AppearanceSection.tsx`, `ShortcutsSection.tsx`, `types.ts` |
 | *Shared Shell, Context & Core Libs* | `src/components/layout/`<br>`src/components/shared/`<br>`src/components/ui/` | `StudioLayout.tsx`, `DeckGrid.tsx`, `NumberControl.tsx`, `StudioIcons.tsx`, `button.tsx`<br>**Context:** `src/context/AppearanceContext.tsx`<br>**Core Libs (`src/lib/`):** `api.ts`, `useDebounce.ts`, `units.ts`, `utils.ts` |
 
@@ -44,12 +43,11 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 |   React 18 * TypeScript Strict * Tailwind CSS * Lucide       |
 |                                                              |
 |   Studios:                                                   |
-|   /             Command Center & Engine Heartbeat            |
+|   /             Command Center & Prepress Triage             |
 |   /book-studio  Scanned Book Intake & Bleed Synthesis        |
 |   /imposing     Gang Run, Multi-file Batch Ingest, Per-Item Stretch/Pad|
 |   /contour      Die-Cut Contour Vectorization                |
 |   /flipbook     Interactive 3D Virtual Proofing              |
-|   /preflight    PDF Geometry, DPI, & Color Inspection        |
 |   /settings     Substrate Sizes & Machine Presets            |
 +------------------------------+-------------------------------+
                                |

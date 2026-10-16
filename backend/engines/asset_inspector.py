@@ -323,14 +323,6 @@ def analyze_universal_asset(file_path: str, filename: str) -> Dict[str, Any]:
                         "primary": False
                     })
 
-                analysis["suggested_studios"].append({
-                    "studio": "preflight",
-                    "name": "Preflight Studio",
-                    "badge": "Detailed QA",
-                    "reason": "Deep PDF box & DPI inspection.",
-                    "primary": False
-                })
-
             doc.close()
         except Exception as e:
             analysis["warnings"].append(f"PDF Inspection notice: {str(e)}")
