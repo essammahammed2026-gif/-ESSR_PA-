@@ -9,6 +9,7 @@ import { StudioLayout } from "@/components/layout/StudioLayout";
 import { BookLeftPanel } from "@/components/book-studio/BookLeftPanel";
 import { BookWorkspace } from "@/components/book-studio/BookWorkspace";
 import { BookRightPanel } from "@/components/book-studio/BookRightPanel";
+import { ExportProgressModal } from "@/components/book-studio/ExportProgressModal";
 
 function BookStudioContent() {
   const {
@@ -54,6 +55,8 @@ function BookStudioContent() {
     canPaste,
     extractPage,
     exportPdf,
+    exportProgress,
+    dismissExportProgress,
     getThumbnailUrl,
     history,
     currentHistoryIndex,
@@ -83,6 +86,7 @@ function BookStudioContent() {
   }, [searchParams, sessionId, isInitializing, setIntakeMode, initSession]);
 
   return (
+    <>
     <StudioLayout
       className="book-studio"
       title="Book Studio"
@@ -147,7 +151,7 @@ function BookStudioContent() {
             {isExporting ? (
               <>
                 <RefreshCw size={13} className="animate-spin text-slate-950" />
-                <span>Exporting...</span>
+                <span>Exporting ({exportProgress.progress}%)...</span>
               </>
             ) : (
               <>
@@ -275,6 +279,11 @@ function BookStudioContent() {
         />
       }
     />
+    <ExportProgressModal
+      progress={exportProgress}
+      onDismiss={dismissExportProgress}
+    />
+    </>
   );
 }
 

@@ -127,6 +127,8 @@ class ExportRequest(BaseModel):
     show_crop_marks: bool = True
 
     dpi: int = 200
+    quality: int = 88
+    optimize_compression: bool = True
     clean_borders: bool = True
     border_margin_px: int = 15
     border_threshold: int = 210

@@ -13,6 +13,7 @@ import {
   CropModuleConfig,
   CropBox,
   SplitLine,
+  ExportJobProgress,
 } from "@/types/book_studio";
 
 /** Typed args for the unified module-config, split/crop, and export hook. */
@@ -52,6 +53,26 @@ export function useBookModules({
   const [previewCleaned, setPreviewCleaned] = useState<boolean>(true);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] = useState<ExportJobProgress>({
+    jobId: null,
+    status: "idle",
+    progress: 0,
+    stage: "idle",
+    message: "",
+    totalPages: 0,
+    currentPage: 0,
+    fileSizeBytes: null,
+    error: null,
+  });
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Modular Processing Framework: All modules off by default.
   // Crop starts with NO cut lines (plain crop); the operator adds lines as needed.
@@ -448,64 +469,156 @@ export function useBookModules({
     }
   }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.target, pages, setPages, updateCropModule, clearPageCrops, recordStep]);
 
-  // Export print-ready PDF (intakeMode supplied by the composer for the filename)
+  const dismissExportProgress = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    setExportProgress((prev) => ({ ...prev, status: "idle" }));
+    setIsExporting(false);
+  }, []);
+
+  // Export print-ready PDF with real-time job progress tracking
   const exportPdf = useCallback(async (intakeMode: BookIntakeMode = "single_page") => {
     if (!sessionId) return;
     setIsExporting(true);
     setExportError(null);
 
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    setExportProgress({
+      jobId: null,
+      status: "pending",
+      progress: 0,
+      stage: "queued",
+      message: "Submitting export job...",
+      totalPages: pages.length,
+      currentPage: 0,
+      fileSizeBytes: null,
+      error: null,
+    });
+
+    const exportPayload = {
+      bleed_mm: bleedModule.bleedMm,
+      bleed_mode: bleedModule.mode,
+      bleed_color: bleedModule.solidColor,
+      bleed_placement: bleedModule.placement,
+      show_crop_marks: bleedModule.showCropMarks,
+      dpi: bleedModule.exportDpi,
+      quality: 88,
+      optimize_compression: true,
+      clean_borders: restorationModule.cleanBorders,
+      border_margin_px: restorationModule.borderMarginPx,
+      border_threshold: restorationModule.borderThreshold,
+      enhance_colors: restorationModule.enhanceColors,
+      saturation: restorationModule.saturation,
+      contrast: restorationModule.contrast,
+      color_mode: restorationModule.colorMode,
+      bw_threshold: restorationModule.bwThreshold,
+      whiten_bg: restorationModule.whitenBg,
+      deskew: false,
+      sharpen: restorationModule.sharpen,
+
+      // Modular configurations & page scopes
+      deskew_module_enabled: deskewModule.enabled,
+      deskew_mode: deskewModule.mode,
+      deskew_angle: deskewModule.angle,
+      deskew_max_angle: deskewModule.maxAngle,
+      deskew_ignore_borders: deskewModule.ignoreBorders,
+      deskew_scope_mode: deskewModule.scope.mode,
+      deskew_custom_range: deskewModule.scope.customRange,
+
+      bleed_module_enabled: bleedModule.enabled,
+      bleed_scope_mode: bleedModule.scope.mode,
+      bleed_custom_range: bleedModule.scope.customRange,
+
+      restoration_module_enabled: restorationModule.enabled,
+      restoration_scope_mode: restorationModule.scope.mode,
+      restoration_custom_range: restorationModule.scope.customRange,
+    };
+
     try {
-      await downloadBlob(
-        `/api/book-scan/export/${sessionId}`,
-        `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            bleed_mm: bleedModule.bleedMm,
-            bleed_mode: bleedModule.mode,
-            bleed_color: bleedModule.solidColor,
-            bleed_placement: bleedModule.placement,
-            show_crop_marks: bleedModule.showCropMarks,
-            dpi: bleedModule.exportDpi,
-            clean_borders: restorationModule.cleanBorders,
-            border_margin_px: restorationModule.borderMarginPx,
-            border_threshold: restorationModule.borderThreshold,
-            enhance_colors: restorationModule.enhanceColors,
-            saturation: restorationModule.saturation,
-            contrast: restorationModule.contrast,
-            color_mode: restorationModule.colorMode,
-            bw_threshold: restorationModule.bwThreshold,
-            whiten_bg: restorationModule.whitenBg,
-            deskew: false,
-            sharpen: restorationModule.sharpen,
+      const startRes = await apiFetch(`/api/book-scan/export-job/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(exportPayload),
+      });
 
-            // Modular configurations & page scopes
-            deskew_module_enabled: deskewModule.enabled,
-            deskew_mode: deskewModule.mode,
-            deskew_angle: deskewModule.angle,
-            deskew_max_angle: deskewModule.maxAngle,
-            deskew_ignore_borders: deskewModule.ignoreBorders,
-            deskew_scope_mode: deskewModule.scope.mode,
-            deskew_custom_range: deskewModule.scope.customRange,
+      if (!startRes.ok) {
+        const errData = await startRes.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to start export job.");
+      }
 
-            bleed_module_enabled: bleedModule.enabled,
-            bleed_scope_mode: bleedModule.scope.mode,
-            bleed_custom_range: bleedModule.scope.customRange,
+      const { job_id, total_pages } = await startRes.json();
+      setExportProgress((prev) => ({
+        ...prev,
+        jobId: job_id,
+        status: "processing",
+        progress: 2,
+        stage: "processing_pages",
+        message: `Processing 1 of ${total_pages || pages.length}...`,
+        totalPages: total_pages || pages.length,
+      }));
 
-            restoration_module_enabled: restorationModule.enabled,
-            restoration_scope_mode: restorationModule.scope.mode,
-            restoration_custom_range: restorationModule.scope.customRange,
-          }),
+      // Poll every 350ms for smooth progress animation
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const pollRes = await apiFetch(`/api/book-scan/export-job/${job_id}`);
+          if (!pollRes.ok) return;
+          const data = await pollRes.json();
+
+          setExportProgress({
+            jobId: job_id,
+            status: data.status,
+            progress: data.progress ?? 0,
+            stage: data.stage ?? "processing",
+            message: data.message ?? "",
+            totalPages: data.total_pages ?? pages.length,
+            currentPage: data.current_page ?? 0,
+            fileSizeBytes: data.file_size_bytes ?? null,
+            error: data.error ?? null,
+          });
+
+          if (data.status === "success") {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setIsExporting(false);
+
+            // Automatically trigger download
+            const targetFilename = `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
+            const downloadUrl = data.download_url || `/api/book-scan/export-download/${job_id}`;
+            downloadBlob(downloadUrl, targetFilename).catch((e) => {
+              console.error("Auto download failed:", e);
+            });
+          } else if (data.status === "failed") {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setIsExporting(false);
+            setExportError(data.error || "Export failed.");
+          }
+        } catch (pollErr) {
+          console.warn("Export polling hiccup:", pollErr);
         }
-      );
+      }, 350);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setExportError(msg);
-    } finally {
+      setExportProgress((prev) => ({
+        ...prev,
+        status: "failed",
+        error: msg,
+        message: `Failed: ${msg}`,
+      }));
       setIsExporting(false);
     }
-  }, [sessionId, bleedModule, restorationModule, deskewModule]);
+  }, [sessionId, pages.length, bleedModule, restorationModule, deskewModule]);
 
   return {
     clearPageCrops,
@@ -530,5 +643,7 @@ export function useBookModules({
     exportError,
     setExportError,
     exportPdf,
+    exportProgress,
+    dismissExportProgress,
   };
 }

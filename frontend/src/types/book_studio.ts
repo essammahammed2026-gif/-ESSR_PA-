@@ -2,7 +2,7 @@
  * Strictly typed definitions for Book Studio state, intake presets, and processing options.
  */
 
-export type BookIntakeMode = "single_page" | "spread" | "dual_pass" | "digital";
+export type BookIntakeMode = "single_page" | "spread" | "dual_pass";
 
 export interface CropBox {
   x1: number; // 0.0 to 1.0 (relative left)
@@ -188,3 +188,14 @@ export interface ThumbnailRenderOpts {
   showCropMarks: boolean;
 }
 
+export interface ExportJobProgress {
+  jobId: string | null;
+  status: "idle" | "pending" | "processing" | "success" | "failed";
+  progress: number;
+  stage: string;
+  message: string;
+  totalPages: number;
+  currentPage: number;
+  fileSizeBytes: number | null;
+  error: string | null;
+}

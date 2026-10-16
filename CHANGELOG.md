@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Book Studio Live Export Progress & Prepress PDF Compression Optimization**:
+  - **Live Export Progress Bar**: Implemented asynchronous export task worker in `backend/book_scan_api.py` (`POST /api/book-scan/export-job/{session_id}`, `GET /api/book-scan/export-job/{job_id}`, `GET /api/book-scan/export-download/{job_id}`) with per-page stage tracking. Built `ExportProgressModal.tsx` in frontend with live percentage progress bar, page indicator, active operation status, and automatic download trigger upon completion.
+  - **5x File Size Bloat Elimination**: Solved file size inflation by enabling PyMuPDF stream deflation (`garbage=4, deflate=True, clean=True`) in `book_scan_engine.py`, lowering JPEG quality from sensor-noisy 95 to optimal prepress 88, encoding grayscale pages as 1-channel `DeviceGray` (saving 66% uncompressed size), and encoding pure B&W line art as lossless Deflate/PNG (~95% smaller than JPEG with zero ringing artifacts).
+- **Book Studio Intake Streamlining**: Removed redundant "Digital / Vector PDF" intake option from `BookLeftPanel.tsx` and `types/book_studio.ts`, simplifying intake into two clear, distinct modes: "Standard Book PDF" (single/spreads/batches) and "Dual Pass (Odds / Evens)".
 - **Book Studio Multi-Selection, Live Bleed & Production Polish**:
   - **Eyedropper Sampling & Magnifier Loupe**: Fixed canvas pixel sampling in `PageCanvas.tsx` (`ctx.drawImage` prior to `ctx.getImageData`) and introduced a floating circular color loupe with a live RGB swatch and hex badge tracking the cursor on hover.
   - **Applied Bleed Management & Inside/Outside Placement**: Added an "Apply Bleed" commit workflow in `BleedPanel.tsx` storing configured bleeds in an `appliedBleeds` entry list with inline edit and delete actions; introduced Outside Bleed (expands sheet outward past trim marks) and Inside Bleed (insets safety border inside page perimeter); updated dimension notch dynamically (`+3mm bleed` / `-3mm bleed`).

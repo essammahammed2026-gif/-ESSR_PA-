@@ -1,7 +1,7 @@
 import os
 import uuid
 import shutil
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from typing import List, Optional, Dict, Any
 from engines.book_scan_engine import BookScanEngine, PageOpError
@@ -23,6 +23,9 @@ SESSIONS: Dict[str, Dict[str, Any]] = {}
 SESSION_TIMESTAMPS: Dict[str, float] = {}
 SESSION_TTL_SECONDS = 7200  # 2 hours
 
+# Export jobs tracking
+EXPORT_JOBS: Dict[str, Dict[str, Any]] = {}
+
 def evict_stale_sessions():
     now = time.time()
     stale_ids = [sid for sid, ts in SESSION_TIMESTAMPS.items() if now - ts > SESSION_TTL_SECONDS]
@@ -31,6 +34,9 @@ def evict_stale_sessions():
         sess = SESSIONS.pop(sid, None)
         if sess and "session_dir" in sess:
             cleanup_session_dir(sess["session_dir"])
+    stale_jobs = [jid for jid, j in EXPORT_JOBS.items() if now - j.get("created_at", now) > SESSION_TTL_SECONDS]
+    for jid in stale_jobs:
+        EXPORT_JOBS.pop(jid, None)
 
 def cleanup_session_dir(session_dir: str):
     if os.path.exists(session_dir):
@@ -468,6 +474,141 @@ async def restore_pages(session_id: str, req: RestorePagesRequest):
         "pages": session["pages"]
     }
 
+def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        EXPORT_JOBS[job_id]["status"] = "failed"
+        EXPORT_JOBS[job_id]["error"] = "Session not found or expired."
+        EXPORT_JOBS[job_id]["message"] = "Session not found or expired."
+        return
+
+    pages = session.get("pages", [])
+    total_pages = len(pages)
+    EXPORT_JOBS[job_id]["total_pages"] = total_pages
+    EXPORT_JOBS[job_id]["status"] = "processing"
+    EXPORT_JOBS[job_id]["progress"] = 2
+    EXPORT_JOBS[job_id]["stage"] = "processing_pages"
+    EXPORT_JOBS[job_id]["message"] = f"Initializing export for {total_pages} page(s)..."
+
+    doc_map = BookScanEngine.open_session_docs(session)
+    try:
+        def render_progress(cur, total, msg):
+            pct = int((cur / max(1, total)) * 60)
+            EXPORT_JOBS[job_id]["progress"] = max(2, min(60, pct))
+            EXPORT_JOBS[job_id]["current_page"] = cur
+            EXPORT_JOBS[job_id]["stage"] = "processing_pages"
+            EXPORT_JOBS[job_id]["message"] = msg
+
+        processed_images, per_page_bleed_list = BookScanEngine.render_export_pages(
+            doc_map, pages, req, progress_callback=render_progress
+        )
+
+        export_filename = f"cleaned_book_{session_id[:8]}.pdf"
+        output_pdf_path = os.path.join(session["session_dir"], export_filename)
+
+        def bleed_progress(cur, total, msg):
+            pct = 60 + int((cur / max(1, total)) * 38)
+            EXPORT_JOBS[job_id]["progress"] = max(60, min(98, pct))
+            EXPORT_JOBS[job_id]["current_page"] = cur
+            EXPORT_JOBS[job_id]["stage"] = "compiling_pdf"
+            EXPORT_JOBS[job_id]["message"] = msg
+
+        effective_quality = getattr(req, "quality", 88) or 88
+        success = BookScanEngine.add_bleed_and_export_pdf(
+            processed_images=processed_images,
+            output_pdf_path=output_pdf_path,
+            bleed_mm=req.bleed_mm,
+            bleed_mode=req.bleed_mode,
+            bleed_color=req.bleed_color,
+            show_crop_marks=req.show_crop_marks,
+            dpi=req.dpi,
+            jpeg_quality=effective_quality,
+            per_page_bleed=per_page_bleed_list,
+            bleed_placement=req.bleed_placement,
+            progress_callback=bleed_progress,
+        )
+
+        if not success or not os.path.exists(output_pdf_path):
+            EXPORT_JOBS[job_id]["status"] = "failed"
+            EXPORT_JOBS[job_id]["error"] = "PDF compilation failed."
+            EXPORT_JOBS[job_id]["message"] = "PDF compilation failed."
+            return
+
+        file_size = os.path.getsize(output_pdf_path)
+        EXPORT_JOBS[job_id]["status"] = "success"
+        EXPORT_JOBS[job_id]["progress"] = 100
+        EXPORT_JOBS[job_id]["stage"] = "completed"
+        EXPORT_JOBS[job_id]["message"] = f"Export complete ({total_pages} pages)"
+        EXPORT_JOBS[job_id]["output_path"] = output_pdf_path
+        EXPORT_JOBS[job_id]["filename"] = export_filename
+        EXPORT_JOBS[job_id]["file_size_bytes"] = file_size
+        EXPORT_JOBS[job_id]["download_url"] = f"/api/book-scan/export-download/{job_id}"
+    except Exception as e:
+        EXPORT_JOBS[job_id]["status"] = "failed"
+        EXPORT_JOBS[job_id]["error"] = str(e)
+        EXPORT_JOBS[job_id]["message"] = f"Export failed: {str(e)}"
+    finally:
+        BookScanEngine.close_session_docs(doc_map)
+
+@router.post("/export-job/{session_id}")
+async def start_export_job(
+    session_id: str,
+    req: ExportRequest,
+    background_tasks: BackgroundTasks,
+):
+    evict_stale_sessions()
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    pages = session.get("pages", [])
+    if not pages:
+        raise HTTPException(status_code=400, detail="No pages available to export.")
+
+    job_id = str(uuid.uuid4())[:12]
+    EXPORT_JOBS[job_id] = {
+        "job_id": job_id,
+        "session_id": session_id,
+        "status": "pending",
+        "progress": 0,
+        "stage": "queued",
+        "message": "Export queued...",
+        "total_pages": len(pages),
+        "current_page": 0,
+        "output_path": None,
+        "filename": None,
+        "file_size_bytes": None,
+        "download_url": None,
+        "error": None,
+        "created_at": time.time(),
+    }
+
+    background_tasks.add_task(_run_export_job, job_id, session_id, req)
+    return {"job_id": job_id, "status": "started", "total_pages": len(pages)}
+
+@router.get("/export-job/{job_id}")
+async def get_export_job_status(job_id: str):
+    job = EXPORT_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Export job not found or expired.")
+    return job
+
+@router.get("/export-download/{job_id}")
+async def download_export_file(job_id: str):
+    job = EXPORT_JOBS.get(job_id)
+    if not job or job.get("status") != "success":
+        raise HTTPException(status_code=404, detail="Export not found or still processing.")
+
+    output_path = job.get("output_path")
+    if not output_path or not os.path.exists(output_path):
+        raise HTTPException(status_code=404, detail="Exported PDF file missing on server.")
+
+    return FileResponse(
+        output_path,
+        media_type="application/pdf",
+        filename=job.get("filename", "exported_book.pdf")
+    )
+
 @router.post("/export/{session_id}")
 async def export_book_pdf(
     session_id: str,
@@ -492,6 +633,7 @@ async def export_book_pdf(
         export_filename = f"cleaned_book_{session_id[:8]}.pdf"
         output_pdf_path = os.path.join(session["session_dir"], export_filename)
 
+        effective_quality = getattr(req, "quality", 88) or 88
         success = BookScanEngine.add_bleed_and_export_pdf(
             processed_images=processed_images,
             output_pdf_path=output_pdf_path,
@@ -500,11 +642,10 @@ async def export_book_pdf(
             bleed_color=req.bleed_color,
             show_crop_marks=req.show_crop_marks,
             dpi=req.dpi,
-            jpeg_quality=95,
+            jpeg_quality=effective_quality,
             per_page_bleed=per_page_bleed_list,
             bleed_placement=req.bleed_placement,
         )
-
 
         if not success:
             raise HTTPException(status_code=500, detail="PDF generation failed.")

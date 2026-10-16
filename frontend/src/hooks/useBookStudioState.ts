@@ -292,6 +292,8 @@ export function useBookStudioState() {
     canPaste: pageOps.canPaste,
     extractPage: pageOps.extractPage,
     exportPdf,
+    exportProgress: modules.exportProgress,
+    dismissExportProgress: modules.dismissExportProgress,
     getThumbnailUrl,
     // History & Safety Journal API
     history: history.history,

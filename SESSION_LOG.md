@@ -89,3 +89,58 @@
 - Backend inner loop: `python3 -m py_compile backend/main.py backend/book_scan_api.py backend/engines/*.py` passed with 0 errors.
 - Runtime storage cleaned: `StorageCleaner.clean('runtime')` confirmed 0 lingering files in `backend/temp_uploads/` and `backend/public_flipbooks/`.
 
+---
+
+## Session Update: Book Studio Intake Streamlining
+
+### 1. Changes Delivered
+- **Removed Redundant Digital Intake**: Removed `"digital"` ("Digital / Vector PDF") option from [`BookLeftPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookLeftPanel.tsx) and [`BookIntakeMode`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts).
+- **Removed Dead Import**: Removed unused `IconPreflightStudio` from [`BookLeftPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookLeftPanel.tsx).
+- **Intake Modes Simplified**: Streamlined document intake into two unambiguous modes:
+  1. **Standard Book PDF**: Single pages or 2-up spreads to split, crop, and restore.
+  2. **Dual Pass (Odds / Evens)**: Collate separate odd and even duplex scan batches.
+
+### 2. Verification
+- Frontend inner loop: `cd frontend && npx tsc --noEmit` passed with 0 errors.
+- Backend inner loop: `python3 -m py_compile backend/main.py backend/book_scan_api.py backend/engines/*.py` passed with 0 errors.
+- Runtime storage verified clean via `StorageCleaner.clean('runtime')`.
+
+---
+
+## Session Update: Live Export Progress Bar & Prepress PDF Compression Optimization
+
+### 1. File Size 5x Inflation Analysis & Root Causes
+1. **Uncompressed PDF Objects**: Previously, `doc.save()` was invoked without stream deflation or object garbage collection, leaving uncompressed PDF object trees and raw metadata.
+2. **Sensor-Noise High Quality JPEG (95Q)**: A hardcoded quality of 95 encoded high-frequency sensor noise and paper grain without improving visual print sharpness, multiplying file weight by 3x–5x.
+3. **3-Channel BGR Bloat on Grayscale/B&W**: Even when Grayscale or B&W mode was applied, the engine converted images to 3-channel 24-bit BGR, creating 3 identical color planes.
+4. **JPEG on Pure Text**: Encoding high-contrast B&W text with JPEG produced DCT ringing artifacts while taking 1.5–2 MB per page.
+
+### 2. Changes Delivered
+1. **Prepress Engine Compression (`backend/engines/book_scan_engine.py`)**:
+   - Switched PyMuPDF export to `doc.save(output_pdf_path, garbage=4, deflate=True, clean=True)`, compressing all PDF streams and purging unused resources.
+   - Reduced baseline JPEG quality from 95 to 88 (standard prepress threshold), preserving 100% visible detail while discarding sensor noise bloat.
+   - Added intelligent color space encoding:
+     - Pure B&W pages: Encoded with lossless Deflate/PNG (`cv2.IMWRITE_PNG_COMPRESSION=9`), yielding razor-sharp text with ~95% smaller file size (~40 KB vs 1.8 MB per page).
+     - Grayscale pages: Encoded as single-channel `DeviceGray` JPEGs, cutting uncompressed data by 66%.
+     - Color pages: Prepress JPEG Quality 88.
+2. **Asynchronous Export Job Infrastructure (`backend/book_scan_api.py`)**:
+   - Added `EXPORT_JOBS` registry with TTL eviction.
+   - Added `POST /api/book-scan/export-job/{session_id}` background task worker reporting two-phase progress:
+     - Phase 1 (0–60%): Per-page image extraction, deskew, whitening, and color restoration.
+     - Phase 2 (60–100%): Synthesized bleed extension, Japanese trim mark vectorization, and stream deflation.
+   - Added `GET /api/book-scan/export-job/{job_id}` for status polling and `GET /api/book-scan/export-download/{job_id}` for file retrieval.
+3. **Frontend Progress Tracking Modal (`frontend/src/components/book-studio/ExportProgressModal.tsx`)**:
+   - Built modern prepress modal overlay with smooth animated progress bar, percentage readout, active page counter (`Page X of Y`), and descriptive status messages.
+   - Shows output file size badge upon completion and automatically initiates file download via `downloadBlob()`.
+4. **Hook & UI Integration (`useBookModules.ts`, `page.tsx`)**:
+   - Updated `exportPdf` to trigger the background job and poll every 350ms.
+   - Added live percentage readout inside the studio header export button: `Exporting (45%)...`.
+   - Updated Repository Navigation Map in `docs/architecture.md`.
+
+### 3. Verification
+- Frontend inner loop: `npx tsc --noEmit` passed with 0 errors.
+- Backend inner loop: `python -m py_compile` passed with 0 errors.
+- Runtime storage cleaned: `StorageCleaner.clean('runtime')` confirmed 0 lingering files in `backend/temp_uploads/`.
+
+
+

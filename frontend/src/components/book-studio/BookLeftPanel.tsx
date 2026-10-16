@@ -5,7 +5,6 @@ import { Upload, RefreshCw, ChevronLeft, ChevronDown } from "lucide-react";
 import {
   IconBookStudio,
   IconImposingStudio,
-  IconPreflightStudio,
 } from "@/components/shared/StudioIcons";
 import { BookIntakeMode, BookStudioPage } from "@/types/book_studio";
 import { LengthUnit } from "@/lib/units";
@@ -197,7 +196,6 @@ export function BookLeftPanel({
   const intakeModes: { id: BookIntakeMode; title: string; tooltip: string; icon: React.ReactNode }[] = [
     { id: "single_page", title: "Standard Book PDF", tooltip: "Single pages or 2-up spreads to split in studio", icon: <IconBookStudio size={15} /> },
     { id: "dual_pass", title: "Dual Pass (Odds / Evens)", tooltip: "Collate separate odd and even duplex scan batches", icon: <IconImposingStudio size={15} /> },
-    { id: "digital", title: "Digital / Vector PDF", tooltip: "Born-digital or pre-cleaned PDF book", icon: <IconPreflightStudio size={15} /> },
   ];
   return (
     <div className="flex flex-col h-full bg-[#181D27] rounded-xl border border-[#242A38] overflow-hidden select-none">
