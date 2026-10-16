@@ -11,6 +11,10 @@ export interface BookShortcutHandlers {
   toggleOriginal?: () => void;
   rotateCW?: () => void;
   deletePage?: () => void;
+  zoomIn?: () => void;
+  zoomOut?: () => void;
+  zoomReset?: () => void;
+  togglePan?: () => void;
 }
 
 export interface UseBookShortcutsArgs {
@@ -19,7 +23,7 @@ export interface UseBookShortcutsArgs {
   enabled?: boolean;
 }
 
-const DEFAULT_SHORTCUTS: Record<string, string> = {
+export const DEFAULT_BOOK_SHORTCUTS: Record<string, string> = {
   undo: "ctrl+z",
   redo: "ctrl+y",
   restore_original: "ctrl+shift+r",
@@ -27,20 +31,24 @@ const DEFAULT_SHORTCUTS: Record<string, string> = {
   next_page: "]",
   toggle_original: "o",
   rotate: "r",
+  zoom_in: "=",
+  zoom_out: "-",
+  zoom_reset: "ctrl+0",
+  pan: "h",
 };
 
 export function useBookShortcuts({
   handlers,
-  shortcuts = DEFAULT_SHORTCUTS,
+  shortcuts = DEFAULT_BOOK_SHORTCUTS,
   enabled = true,
 }: UseBookShortcutsArgs) {
   const activeShortcuts = useMemo(
-    () => ({ ...DEFAULT_SHORTCUTS, ...shortcuts }),
+    () => ({ ...DEFAULT_BOOK_SHORTCUTS, ...shortcuts }),
     [shortcuts]
   );
 
   const formatCombo = useCallback((action: string): string => {
-    const raw = activeShortcuts[action] || DEFAULT_SHORTCUTS[action] || "";
+    const raw = activeShortcuts[action] || DEFAULT_BOOK_SHORTCUTS[action] || "";
     if (!raw) return "";
     return raw
       .split("+")

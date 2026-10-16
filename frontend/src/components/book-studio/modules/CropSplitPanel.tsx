@@ -3,16 +3,15 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   ChevronDown,
-  Sparkles,
   RefreshCw,
-  Scissors,
   Plus,
+  RotateCcw,
 } from "lucide-react";
-import { CropModuleConfig, CropBox, BookStudioPage, SplitLine, CropTargetBase, CropParity } from "@/types/book_studio";
-import { DimensionsBox } from "./DimensionsBox";
+import { IconToolCropSplit, IconAutoDetect } from "@/components/shared/StudioIcons";
+import { CropModuleConfig, CropBox, SplitLine, CropTargetBase, CropParity } from "@/types/book_studio";
 import { SplitLinesEditor } from "./SplitLinesEditor";
 import { CropTargetPopover } from "./CropTargetPopover";
-import { buildSegments, getNextCutLine } from "@/lib/splitLines";
+import { getNextCutLine } from "@/lib/splitLines";
 
 export interface CropSplitPanelProps {
   cropModule: CropModuleConfig;
@@ -22,14 +21,7 @@ export interface CropSplitPanelProps {
   splitSpread?: () => Promise<void>;
   revertSpread?: (mode?: "current" | "all", pageId?: string) => Promise<void>;
   applyCrop?: () => Promise<void>;
-  selectedPage?: BookStudioPage;
   selectedPageId?: string | null;
-  isSelectedPageSplit: boolean;
-  hasSplitPages: boolean;
-  currentCropWidthMm: number;
-  currentCropHeightMm: number;
-  pageBaseWidthMm?: number;
-  pageBaseHeightMm?: number;
   sessionId: string | null;
   open: boolean;
   onToggle: () => void;
@@ -42,11 +34,7 @@ export function CropSplitPanel({
   detectCrop,
   splitSpread,
   applyCrop,
-  selectedPage,
   selectedPageId,
-  isSelectedPageSplit,
-  currentCropWidthMm,
-  currentCropHeightMm,
   sessionId,
   open,
   onToggle,
@@ -56,12 +44,6 @@ export function CropSplitPanel({
   const splitLines = cropModule.splitLines;
   const hasCutLines = splitLines.length > 0;
 
-  const segments = useMemo(
-    () => buildSegments(splitLines, currentCropWidthMm, currentCropHeightMm),
-    [splitLines, currentCropWidthMm, currentCropHeightMm]
-  );
-
-  // Close target dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -90,10 +72,10 @@ export function CropSplitPanel({
 
   const targetLabel = useMemo(() => {
     const t = cropModule.target;
-    if (t.base === "current") return "Current Page";
+    if (t.base === "current") return "Current";
     if (t.base === "range") return `Range (${t.customRange || "..."})`;
-    if (t.parity === "odds") return "Odd Pages";
-    if (t.parity === "evens") return "Even Pages";
+    if (t.parity === "odds") return "Odds";
+    if (t.parity === "evens") return "Evens";
     return "All Pages";
   }, [cropModule.target]);
 
@@ -106,73 +88,66 @@ export function CropSplitPanel({
   };
 
   return (
-    <div className={`rounded-xl border transition-all ${
-      cropModule.enabled
-        ? "bg-[#181D27] border-amber-500/40 shadow-sm shadow-amber-950/20"
-        : "bg-[#181D27] border-[#242A38]"
-    } p-3 space-y-3 select-none`}>
-      {/* Header: Caret, Scissors Badge, Title, Styled Toggle Switch */}
+    <div
+      className={`rounded-lg border transition-colors ${
+        cropModule.enabled ? "bg-[#181D27] border-[#333D52]" : "bg-[#181D27] border-[#242A38]"
+      } px-2.5 py-2 space-y-2 select-none`}
+    >
+      {/* Header */}
       <div className="flex items-center justify-between">
         <button
           type="button"
           onClick={onToggle}
           className="flex items-center space-x-2 text-left hover:opacity-90 transition-opacity cursor-pointer"
+          title="Trim page margins or split spreads along vertical/horizontal cut lines"
         >
-          <div className={`transition-transform duration-150 text-slate-400 ${open ? "rotate-0" : "-rotate-90"}`}>
-            <ChevronDown size={15} />
-          </div>
-          <div className="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
-            <Scissors size={14} />
-          </div>
-          <span className="text-sm font-bold text-slate-100">Crop & Split</span>
+          <ChevronDown
+            size={13}
+            className={`transition-transform duration-150 text-slate-400 ${open ? "rotate-0" : "-rotate-90"}`}
+          />
+          <IconToolCropSplit
+            size={14}
+            className={cropModule.enabled ? "" : "text-slate-400"}
+            style={cropModule.enabled ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+          />
+          <span className="text-xs font-semibold text-slate-200">Crop & Split</span>
         </button>
 
-        {/* Master ON/OFF Switch matching concept.png */}
-        <button
-          type="button"
-          onClick={() => setCropModule((prev) => ({ ...prev, enabled: !prev.enabled }))}
-          className={`flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold font-mono transition-all ${
-            cropModule.enabled
-              ? "bg-cyan-600/90 text-white shadow-sm ring-1 ring-cyan-400/50"
-              : "bg-slate-800 text-slate-400 hover:text-slate-200"
-          }`}
-          title="Toggle Crop & Split"
-        >
-          {cropModule.enabled ? "ON" : "OFF"}
-        </button>
+        <label className="relative inline-flex items-center cursor-pointer" title="Toggle Crop & Split">
+          <input
+            type="checkbox"
+            checked={cropModule.enabled}
+            onChange={(e) => setCropModule((prev) => ({ ...prev, enabled: e.target.checked }))}
+            className="sr-only peer"
+          />
+          <div className="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-amber-500" style={cropModule.enabled ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined} />
+        </label>
       </div>
 
-      {/* Accordion Content */}
+      {/* Body */}
       {open && (
-        <div className={`space-y-3 pt-1 border-t border-[#242A38] ${!cropModule.enabled ? "opacity-75" : ""}`}>
-          {/* Live Resulting Dimensions Box (presentational) */}
-          <DimensionsBox
-            currentCropWidthMm={currentCropWidthMm}
-            currentCropHeightMm={currentCropHeightMm}
-            segments={segments}
-            hasCutLines={hasCutLines}
-            isSelectedPageSplit={isSelectedPageSplit}
-            splitPageWidthMm={selectedPage?.width_mm}
-            splitPageHeightMm={selectedPage?.height_mm}
-          />
-
-          {/* Split Sheet (N Cuts) Row with + Add Cut Line */}
-          <div className="flex items-center justify-between pt-1">
-            <span className="text-xs font-semibold text-slate-300">
-              Split Sheet <span className="text-slate-500 font-mono text-[11px]">({splitLines.length} Cuts)</span>
+        <div className={`space-y-2 pt-2 border-t border-[#242A38] ${!cropModule.enabled ? "opacity-60 pointer-events-none" : ""}`}>
+          {/* Splits Header + Add Cut */}
+          <div className="flex items-center justify-between">
+            <span
+              className="text-[11px] font-medium text-slate-400"
+              title="Add vertical or horizontal cut lines to slice sheets into separate pages"
+            >
+              Splits <span className="font-mono text-slate-500">({splitLines.length})</span>
             </span>
             <button
               type="button"
               onClick={handleAddCutLine}
               disabled={!cropModule.enabled}
-              className="flex items-center space-x-1 px-2.5 py-1 rounded-md text-[11px] font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-colors disabled:opacity-40 cursor-pointer"
+              className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-medium text-slate-200 hover:text-white bg-[#131720] hover:bg-slate-800 border border-[#283040] transition-colors cursor-pointer"
+              title="Add a cut line to split the page"
             >
-              <Plus size={12} />
-              <span>Add Cut Line</span>
+              <Plus size={11} style={{ color: "var(--app-accent, #f59e0b)" }} />
+              <span>Add Cut</span>
             </button>
           </div>
 
-          {/* Cut Line sliders when cuts exist */}
+          {/* Cut Line rows */}
           {hasCutLines && (
             <SplitLinesEditor
               lines={splitLines}
@@ -181,24 +156,24 @@ export function CropSplitPanel({
             />
           )}
 
-
-          {/* Action Buttons: Auto-Detect Bounds + Reset */}
-          <div className="grid grid-cols-[1fr_auto] gap-2 pt-0.5">
+          {/* Auto-Detect + Reset */}
+          <div className="grid grid-cols-[1fr_auto] gap-1.5">
             <button
               type="button"
               onClick={() => detectCrop && detectCrop(selectedPageId || undefined)}
               disabled={isDetectingCrop || !sessionId || !cropModule.enabled}
-              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-[#131720] hover:bg-slate-800 border border-[#2E3648] hover:border-amber-500/40 text-slate-200 hover:text-amber-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 cursor-pointer"
+              className="flex items-center justify-center space-x-1 py-1 px-2 bg-[#131720] hover:bg-slate-800 border border-[#283040] text-slate-200 rounded text-[10px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
+              title="Automatically detect content bounding box and spine fold"
             >
               {isDetectingCrop ? (
                 <>
-                  <RefreshCw size={13} className="animate-spin text-amber-400" />
-                  <span>Analyzing...</span>
+                  <RefreshCw size={11} className="animate-spin" style={{ color: "var(--app-accent, #f59e0b)" }} />
+                  <span>Detecting...</span>
                 </>
               ) : (
                 <>
-                  <Sparkles size={13} className="text-amber-400" />
-                  <span>Auto-Detect Bounds</span>
+                  <IconAutoDetect size={12} style={{ color: "var(--app-accent, #f59e0b)" }} />
+                  <span>Auto-Detect</span>
                 </>
               )}
             </button>
@@ -212,42 +187,40 @@ export function CropSplitPanel({
                 }))
               }
               disabled={!cropModule.enabled}
-              className="px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-[#131720] hover:bg-slate-800 border border-[#2E3648] rounded-lg transition-colors cursor-pointer disabled:opacity-40"
-              title="Reset crop to full sheet"
+              className="px-2 py-1 text-[10px] font-medium text-slate-400 hover:text-white bg-[#131720] hover:bg-slate-800 border border-[#283040] rounded transition-colors cursor-pointer disabled:opacity-40 flex items-center"
+              title="Reset crop box to full sheet bounds"
             >
-              Reset
+              <RotateCcw size={11} />
             </button>
           </div>
 
-          {/* Unified Action Dropdown Button: [ Apply to All Pages ˅ ] */}
-          <div className="relative pt-1" ref={menuRef}>
-            <div className="flex rounded-xl overflow-hidden shadow-lg shadow-amber-950/30">
+          {/* Apply / Split Action Button with Target Popover */}
+          <div className="relative z-30" ref={menuRef}>
+            <div className="flex rounded-lg overflow-hidden">
               <button
                 type="button"
                 onClick={handleApplyAction}
                 disabled={!sessionId || !cropModule.enabled}
-                className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5"
+                className="flex-1 py-1.5 px-2.5 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 text-[11px] font-bold transition-colors cursor-pointer flex items-center justify-center"
                 style={{ backgroundColor: "var(--app-accent, #f59e0b)" }}
+                title={hasCutLines ? `Commit split & crop to ${targetLabel}` : `Commit crop to ${targetLabel}`}
               >
                 <span>
-                  {hasCutLines
-                    ? `Split Sheet: Apply to ${targetLabel}`
-                    : `Apply to ${targetLabel}`}
+                  {hasCutLines ? `Split (${targetLabel})` : `Apply (${targetLabel})`}
                 </span>
               </button>
               <button
                 type="button"
                 onClick={() => setTargetMenuOpen((p) => !p)}
                 disabled={!sessionId || !cropModule.enabled}
-                className="px-2.5 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 border-l border-amber-600/60 transition-colors cursor-pointer flex items-center justify-center"
+                className="px-2 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 border-l border-black/20 transition-colors cursor-pointer flex items-center justify-center"
                 style={{ backgroundColor: "var(--app-accent, #d97706)" }}
-                title="Change Target Pages"
+                title="Select target pages (All, Current, Odds, Evens, or Custom Range)"
               >
-                <ChevronDown size={14} className={`transition-transform ${targetMenuOpen ? "rotate-180" : ""}`} />
+                <ChevronDown size={13} className={`transition-transform ${targetMenuOpen ? "rotate-180" : ""}`} />
               </button>
             </div>
 
-            {/* Target Options Popover Menu */}
             {targetMenuOpen && (
               <CropTargetPopover target={cropModule.target} onSelectTarget={setTarget} />
             )}

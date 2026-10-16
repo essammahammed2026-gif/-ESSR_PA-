@@ -6,16 +6,15 @@ import React, { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { 
-  Home, 
-  FileCheck, 
-  BookOpen, 
-  Scissors, 
-  LayoutDashboard, 
-  Settings, 
-  Layers,
-  Power
-} from "lucide-react";
+import { Settings, Power } from "lucide-react";
+import {
+  IconHome,
+  IconBookStudio,
+  IconPreflightStudio,
+  IconImposingStudio,
+  IconContourStudio,
+  IconFlipbookStudio,
+} from "@/components/shared/StudioIcons";
 import { AppearanceProvider } from "@/context/AppearanceContext";
 
 const font = Roboto({
@@ -152,12 +151,12 @@ export default function RootLayout({
           {/* Navigation Links (Ungrouped Studio List) */}
           <div className={`flex-1 ${isSidebarCollapsed ? "overflow-visible" : "overflow-y-auto"} py-2.5 px-2`}>
             <nav className="space-y-1">
-              <NavItem href="/" icon={<Home size={18}/>} label="Home" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              <NavItem href="/book-studio" icon={<BookOpen size={18}/>} label="Book Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              <NavItem href="/preflight" icon={<FileCheck size={18}/>} label="Preflight Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              <NavItem href="/imposing" icon={<LayoutDashboard size={18}/>} label="Imposing Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              <NavItem href="/contour" icon={<Scissors size={18}/>} label="Contour Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
-              <NavItem href="/flipbook" icon={<Layers size={18}/>} label="Flipbook Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/" icon={<IconHome size={18}/>} label="Home" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/book-studio" icon={<IconBookStudio size={18}/>} label="Book Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/preflight" icon={<IconPreflightStudio size={18}/>} label="Preflight Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/imposing" icon={<IconImposingStudio size={18}/>} label="Imposing Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/contour" icon={<IconContourStudio size={18}/>} label="Contour Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
+              <NavItem href="/flipbook" icon={<IconFlipbookStudio size={18}/>} label="Flipbook Studio" isCollapsed={isSidebarCollapsed} pathname={pathname} />
             </nav>
           </div>
           

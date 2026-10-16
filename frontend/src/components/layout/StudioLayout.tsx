@@ -37,6 +37,7 @@ export interface StudioLayoutProps {
   defaultRightCollapsed?: boolean;
   isRightCollapsed?: boolean;
   onToggleRight?: () => void;
+  disablePanelHotkeys?: boolean;
 }
 
 export function StudioLayout({
@@ -59,10 +60,11 @@ export function StudioLayout({
 
   rightPanel,
   rightLabel = "Controls",
-  rightWidthClass = "w-full lg:w-[320px] xl:w-[340px]",
+  rightWidthClass = "w-full lg:w-[300px] xl:w-[310px]",
   defaultRightCollapsed = false,
   isRightCollapsed: controlledRightCollapsed,
   onToggleRight,
+  disablePanelHotkeys = false,
 }: StudioLayoutProps) {
   // Support both controlled and uncontrolled sidebar state
   const [internalLeftCollapsed, setInternalLeftCollapsed] = useState<boolean>(defaultLeftCollapsed);
@@ -92,8 +94,9 @@ export function StudioLayout({
     }
   }, [onToggleRight]);
 
-  // Global hotkeys: [ toggles left panel, ] toggles right panel
+  // Global hotkeys: [ toggles left panel, ] toggles right panel (unless studio binds them to page navigation)
   useEffect(() => {
+    if (disablePanelHotkeys) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
         e.target instanceof HTMLInputElement ||
@@ -114,7 +117,7 @@ export function StudioLayout({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [leftPanel, rightPanel, toggleLeft, toggleRight]);
+  }, [leftPanel, rightPanel, toggleLeft, toggleRight, disablePanelHotkeys]);
 
   return (
     <div className={`flex flex-col h-full min-h-0 space-y-2 select-none ${className}`}>

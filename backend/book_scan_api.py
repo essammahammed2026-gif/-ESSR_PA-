@@ -157,6 +157,9 @@ async def get_page_thumbnail(
     enhance_colors: bool = True,
     saturation: float = 1.30,
     contrast: float = 1.10,
+    color_mode: str = "color",
+    bw_threshold: int = 180,
+    whiten_bg: bool = False,
     deskew: bool = False,
     dpi: int = 100,
     deskew_module_enabled: bool = False,
@@ -164,6 +167,11 @@ async def get_page_thumbnail(
     deskew_angle: float = 0.0,
     deskew_max_angle: float = 10.0,
     deskew_ignore_borders: bool = True,
+    bleed_mm: float = 0.0,
+    bleed_mode: str = "mirror",
+    bleed_color: str = "#ffffff",
+    bleed_placement: str = "outside",
+    show_crop_marks: bool = False,
     rev: int = 0,
 ):
     session = SESSIONS.get(session_id)
@@ -194,9 +202,12 @@ async def get_page_thumbnail(
     if sb:
         cache_tag += f"_sb_{int(sb.get('x1', 0)*1000)}_{int(sb.get('y1', 0)*1000)}_{int(sb.get('x2', 1)*1000)}_{int(sb.get('y2', 1)*1000)}"
     if preview_clean:
-        cache_tag += f"_{border_margin_px}_{int(saturation*100)}_{int(contrast*100)}_{int(deskew)}"
+        cache_tag += f"_{border_margin_px}_{int(saturation*100)}_{int(contrast*100)}_{color_mode}_{bw_threshold}_{int(whiten_bg)}_{int(deskew)}"
         if deskew_module_enabled:
             cache_tag += f"_dm_{deskew_mode}_{int(deskew_angle*10)}_{int(deskew_max_angle)}_{int(deskew_ignore_borders)}"
+    if bleed_mm > 0:
+        clean_hex = (bleed_color or "#ffffff").lstrip("#")
+        cache_tag += f"_bl_{int(bleed_mm*100)}_{bleed_mode}_{clean_hex}_{int(show_crop_marks)}_{bleed_placement}"
     thumb_path = os.path.join(session["session_dir"], f"{cache_tag}.jpg")
 
     if os.path.exists(thumb_path):
@@ -215,6 +226,9 @@ async def get_page_thumbnail(
                 enhance_colors=enhance_colors,
                 saturation=saturation,
                 contrast=contrast,
+                color_mode=color_mode,
+                bw_threshold=bw_threshold,
+                whiten_bg=whiten_bg,
                 deskew=deskew,
                 sharpen=True,
                 deskew_module_enabled=deskew_module_enabled,
@@ -225,6 +239,21 @@ async def get_page_thumbnail(
             )
         else:
             proc_img = raw_img
+
+        if bleed_mm > 0:
+            h_px, w_px = proc_img.shape[:2]
+            w_mm_val = float(page_info.get("width_mm") or 0.0)
+            px_per_mm = (w_px / w_mm_val) if w_mm_val > 0 else (dpi / 25.4)
+            bleed_px = int(round(max(0.0, float(bleed_mm)) * px_per_mm))
+            proc_img = BookScanEngine.apply_bleed_to_image(
+                proc_img,
+                bleed_px=bleed_px,
+                bleed_mode=bleed_mode,
+                bleed_color=bleed_color,
+                draw_crop_marks=show_crop_marks,
+                placement=bleed_placement,
+            )
+
 
         if not BookScanEngine.write_thumbnail_jpg(proc_img, thumb_path, quality=80):
             raise HTTPException(status_code=500, detail="Failed to encode thumbnail.")
@@ -264,6 +293,11 @@ async def rotate_page(session_id: str, req: PageRotateRequest):
         raise HTTPException(status_code=404, detail="Page not found.")
 
     page_info["rotation"] = (page_info.get("rotation", 0) + req.rotation_delta) % 360
+    if abs(req.rotation_delta) % 180 == 90:
+        if "width_mm" in page_info and "height_mm" in page_info:
+            page_info["width_mm"], page_info["height_mm"] = page_info["height_mm"], page_info["width_mm"]
+        if "orig_width_mm" in page_info and "orig_height_mm" in page_info:
+            page_info["orig_width_mm"], page_info["orig_height_mm"] = page_info["orig_height_mm"], page_info["orig_width_mm"]
     try:
         page_info["rev"] = int(page_info.get("rev", 0)) + 1
     except (TypeError, ValueError):
@@ -462,11 +496,15 @@ async def export_book_pdf(
             processed_images=processed_images,
             output_pdf_path=output_pdf_path,
             bleed_mm=req.bleed_mm,
+            bleed_mode=req.bleed_mode,
+            bleed_color=req.bleed_color,
             show_crop_marks=req.show_crop_marks,
             dpi=req.dpi,
             jpeg_quality=95,
-            per_page_bleed=per_page_bleed_list
+            per_page_bleed=per_page_bleed_list,
+            bleed_placement=req.bleed_placement,
         )
+
 
         if not success:
             raise HTTPException(status_code=500, detail="PDF generation failed.")

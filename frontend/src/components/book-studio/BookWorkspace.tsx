@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { BookOpen } from "lucide-react";
-import { BookStudioPage, CropModuleConfig, CropBox } from "@/types/book_studio";
+import { Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
+import { IconBookStudio, IconHandPan } from "@/components/shared/StudioIcons";
+import { BookStudioPage, CropModuleConfig, BleedModuleConfig, CropBox } from "@/types/book_studio";
+import type { LengthUnit } from "@/lib/units";
 import { WorkspaceToolbar } from "./WorkspaceToolbar";
 import { PageCanvas } from "./PageCanvas";
 import type { HistoryEntry } from "@/hooks/useBookHistory";
@@ -13,10 +15,14 @@ interface BookWorkspaceProps {
   setSelectedPageId: (id: string) => void;
   getThumbnailUrl: (pageId: string, isClean: boolean, dpi?: number) => string;
   rotatePage: (pageId: string, delta?: number) => void;
-  deletePage: (pageId: string) => void;
   sessionId: string | null;
+  unit?: LengthUnit;
   showGrid?: boolean;
+  gridColor?: string;
+  eyedropperActive?: boolean;
+  onPickColor?: (hex: string) => void;
   cropModule?: CropModuleConfig;
+  bleedModule?: BleedModuleConfig;
   setCropModule?: React.Dispatch<React.SetStateAction<CropModuleConfig>>;
   onUndo?: () => void;
   canUndo?: boolean;
@@ -26,21 +32,27 @@ interface BookWorkspaceProps {
   history?: HistoryEntry[];
   currentHistoryIndex?: number;
   onSelectHistoryStep?: (index: number) => void;
+  shortcuts?: Record<string, string>;
   shortcutLabels?: Record<string, string>;
 }
 
 export function BookWorkspace({
   pages, selectedPageId, setSelectedPageId, getThumbnailUrl, rotatePage,
-  deletePage, sessionId, showGrid = false, cropModule, setCropModule,
+  sessionId, unit = "mm", showGrid = false, gridColor = "#06b6d4",
+  eyedropperActive = false, onPickColor,
+  cropModule, bleedModule, setCropModule,
   onUndo, canUndo, onRedo, canRedo, onRestoreOriginal,
-  history, currentHistoryIndex, onSelectHistoryStep, shortcutLabels,
+  history, currentHistoryIndex, onSelectHistoryStep, shortcuts = {}, shortcutLabels = {},
 }: BookWorkspaceProps) {
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState<number>(1.0);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState<boolean>(false);
+  const [isPanMode, setIsPanMode] = useState<boolean>(false);
+  const [showSplitSizes, setShowSplitSizes] = useState<boolean>(true);
   const startPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [activeCropDrag, setActiveCropDrag] = useState<string | null>(null);
   const cropDragStartRef = useRef<{ relX: number; relY: number; box: CropBox } | null>(null);
@@ -52,32 +64,52 @@ export function BookWorkspace({
   const selectedPage = selectedIdx >= 0 ? pages[selectedIdx] : null;
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const splitLines = cropModule?.splitLines ?? [];
+
   const pageBaseWidthMm = useMemo(() => {
     if (selectedPage?.width_mm) return selectedPage.width_mm;
     if (selectedPage?.orig_width_mm) return selectedPage.orig_width_mm;
     if (naturalSize) return Math.round((naturalSize.w / 150) * 25.4 * 10) / 10;
     return 297.0;
   }, [selectedPage, naturalSize]);
+
   const pageBaseHeightMm = useMemo(() => {
     if (selectedPage?.height_mm) return selectedPage.height_mm;
     if (selectedPage?.orig_height_mm) return selectedPage.orig_height_mm;
     if (naturalSize) return Math.round((naturalSize.h / 150) * 25.4 * 10) / 10;
     return 210.0;
   }, [selectedPage, naturalSize]);
+
   const boxW = Math.max(0.01, (cropModule?.cropBox.x2 ?? 1) - (cropModule?.cropBox.x1 ?? 0));
   const boxH = Math.max(0.01, (cropModule?.cropBox.y2 ?? 1) - (cropModule?.cropBox.y1 ?? 0));
   const currentCropWidthMm = Math.round(pageBaseWidthMm * boxW * 10) / 10;
   const currentCropHeightMm = Math.round(pageBaseHeightMm * boxH * 10) / 10;
+
   const goToNextPage = useCallback(() => {
     if (selectedIdx < pages.length - 1) setSelectedPageId(pages[selectedIdx + 1].id);
   }, [selectedIdx, pages, setSelectedPageId]);
+
   const goToPrevPage = useCallback(() => {
     if (selectedIdx > 0) setSelectedPageId(pages[selectedIdx - 1].id);
   }, [selectedIdx, pages, setSelectedPageId]);
+
+  const zoomIn = useCallback(() => {
+    setZoom((z) => Math.min(4.0, Math.round((z + 0.2) * 100) / 100));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoom((z) => Math.max(0.4, Math.round((z - 0.2) * 100) / 100));
+  }, []);
+
+  const zoomReset = useCallback(() => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
   useEffect(() => {
     setZoom(1.0);
     setPan({ x: 0, y: 0 });
   }, [selectedPageId]);
+
   const toggleFullscreen = useCallback(async () => {
     const el = viewportRef.current;
     if (!el) return;
@@ -89,16 +121,18 @@ export function BookWorkspace({
       catch (err) { console.error("Exit fullscreen failed:", err); }
     }
   }, []);
+
   useEffect(() => {
     const handleFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", handleFsChange);
     return () => document.removeEventListener("fullscreenchange", handleFsChange);
   }, []);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) {
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         const rect = el.getBoundingClientRect();
         const mouseX = e.clientX - rect.left - rect.width / 2;
@@ -117,17 +151,23 @@ export function BookWorkspace({
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, []);
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 0 && (zoom > 1.0 || e.altKey)) {
+    if (e.button === 1 || (e.button === 0 && (isPanMode || zoom > 1.0 || e.altKey))) {
+      e.preventDefault();
       setIsPanning(true);
       startPanRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
     }
   };
+
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) setPan({ x: e.clientX - startPanRef.current.x, y: e.clientY - startPanRef.current.y });
   };
+
   const handleMouseUp = () => setIsPanning(false);
+
   const handleCropPointerDown = (handle: string, e: React.PointerEvent) => {
+    if (isPanMode) return;
     e.stopPropagation(); e.preventDefault();
     setActiveCropDrag(handle);
     if (overlayRef.current && cropModule) {
@@ -212,20 +252,82 @@ export function BookWorkspace({
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
     return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
   }, [activeCropDrag, setCropModule]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
-      if (e.ctrlKey && (e.key === "0" || e.code === "Digit0")) {
-        e.preventDefault(); setZoom(1.0); setPan({ x: 0, y: 0 }); return;
-      }
-      if (e.code === "Space") { e.preventDefault(); setIsHoldingSpace(true); }
-      else if (e.key === "o" || e.key === "O") { e.preventDefault(); setIsLockedOriginal((prev) => !prev); }
-      else if (e.key === "ArrowLeft" || e.key === "[") { e.preventDefault(); goToPrevPage(); }
-      else if (e.key === "ArrowRight" || e.key === "]") { e.preventDefault(); goToNextPage(); }
-      else if ((e.key === "r" || e.key === "R") && selectedPage) {
+
+      const parts: string[] = [];
+      if (e.ctrlKey || e.metaKey) parts.push("ctrl");
+      if (e.shiftKey) parts.push("shift");
+      if (e.altKey) parts.push("alt");
+      let keyName = e.key.toLowerCase();
+      if (keyName === " ") keyName = "space";
+      else if (keyName === "arrowleft") keyName = "left";
+      else if (keyName === "arrowright") keyName = "right";
+      else if (keyName === "arrowup") keyName = "up";
+      else if (keyName === "arrowdown") keyName = "down";
+      parts.push(keyName);
+      const combo = parts.join("+");
+
+      const zoomInShortcut = shortcuts.zoom_in || "=";
+      const zoomOutShortcut = shortcuts.zoom_out || "-";
+      const zoomResetShortcut = shortcuts.zoom_reset || "ctrl+0";
+      const panShortcut = shortcuts.pan || "h";
+      const prevShortcut = shortcuts.prev_page || "[";
+      const nextShortcut = shortcuts.next_page || "]";
+      const toggleOrigShortcut = shortcuts.toggle_original || "o";
+
+      // Zoom In: configured shortcut or standard + / = / Ctrl+=
+      if (combo === zoomInShortcut || combo === "=" || combo === "shift++" || combo === "+" || combo === "ctrl+=" || combo === "ctrl+shift++") {
         e.preventDefault();
-        rotatePage(selectedPage.id, e.shiftKey ? -90 : 90);
+        zoomIn();
+        return;
       }
+      // Zoom Out: configured shortcut or standard - / Ctrl+-
+      if (combo === zoomOutShortcut || combo === "-" || combo === "ctrl+-") {
+        e.preventDefault();
+        zoomOut();
+        return;
+      }
+      // Zoom Reset: configured shortcut or Ctrl+0
+      if (combo === zoomResetShortcut || (e.ctrlKey && (e.key === "0" || e.code === "Digit0"))) {
+        e.preventDefault();
+        zoomReset();
+        return;
+      }
+      // Pan / Hand Tool toggle
+      if (combo === panShortcut) {
+        e.preventDefault();
+        setIsPanMode((p) => !p);
+        return;
+      }
+
+      // When in Pan mode or zoomed in with Shift+Arrows, allow keyboard nudging of pan
+      if (isPanMode && (keyName === "left" || keyName === "right" || keyName === "up" || keyName === "down")) {
+        e.preventDefault();
+        const step = 40;
+        setPan((prev) => ({
+          x: prev.x + (keyName === "left" ? step : keyName === "right" ? -step : 0),
+          y: prev.y + (keyName === "up" ? step : keyName === "down" ? -step : 0),
+        }));
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        setIsHoldingSpace(true);
+      } else if (combo === toggleOrigShortcut) {
+        e.preventDefault();
+        setIsLockedOriginal((prev) => !prev);
+      } else if (combo === prevShortcut || (!isPanMode && keyName === "left")) {
+        e.preventDefault();
+        goToPrevPage();
+      } else if (combo === nextShortcut || (!isPanMode && keyName === "right")) {
+        e.preventDefault();
+        goToNextPage();
+      }
+      // Note: 'r' (Rotate 90° CW) is handled centrally by useBookShortcuts in useBookStudioState
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") { e.preventDefault(); setIsHoldingSpace(false); }
@@ -233,34 +335,25 @@ export function BookWorkspace({
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     return () => { window.removeEventListener("keydown", handleKeyDown); window.removeEventListener("keyup", handleKeyUp); };
-  }, [goToNextPage, goToPrevPage, rotatePage, selectedPage]);
+  }, [goToNextPage, goToPrevPage, zoomIn, zoomOut, zoomReset, isPanMode, shortcuts]);
+
   if (!sessionId || pages.length === 0) {
     return (
-      <div className="h-full bg-[#181D27] rounded-xl border border-[#242A38] flex flex-col items-center justify-center p-8 text-center select-none shadow-sm">
-        <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mb-4 text-cyan-400">
-          <BookOpen size={32} />
+      <div className="h-full bg-[#181D27] rounded-xl border border-[#242A38] flex flex-col items-center justify-center p-8 text-center select-none">
+        <div
+          className="w-14 h-14 rounded-2xl bg-[#131720] border border-[#242A38] flex items-center justify-center mb-3"
+          style={{ color: "var(--app-accent, #f59e0b)" }}
+        >
+          <IconBookStudio size={28} />
         </div>
-        <h3 className="text-base font-semibold text-white mb-1">Book Studio Ready</h3>
-        <p className="text-xs text-slate-400 max-w-sm mb-6 leading-relaxed">
-          Select an intake mode in the left panel and drop your book PDF to preview, deskew, clean margins, and add print bleed.
+        <h3 className="text-sm font-semibold text-white mb-1">Book Studio Ready</h3>
+        <p className="text-xs text-slate-400 max-w-xs leading-relaxed">
+          Drop or browse a book PDF in the left panel to crop, split spreads, deskew, and prepare print-ready pages.
         </p>
-        <div className="grid grid-cols-3 gap-3 text-left max-w-md w-full">
-          <div className="p-3 bg-[#131720] border border-[#242A38] rounded-lg">
-            <div className="text-[11px] font-semibold text-cyan-400 mb-0.5">1. Deck Intake</div>
-            <div className="text-[10px] text-slate-400">Thumbnails load in left column</div>
-          </div>
-          <div className="p-3 bg-[#131720] border border-[#242A38] rounded-lg">
-            <div className="text-[11px] font-semibold text-cyan-400 mb-0.5">2. Full Viewport</div>
-            <div className="text-[10px] text-slate-400">High-res canvas & space overlay</div>
-          </div>
-          <div className="p-3 bg-[#131720] border border-[#242A38] rounded-lg">
-            <div className="text-[11px] font-semibold text-cyan-400 mb-0.5">3. Print Output</div>
-            <div className="text-[10px] text-slate-400">Print bleed & crop cut marks</div>
-          </div>
-        </div>
       </div>
     );
   }
+
   if (!selectedPage) {
     return (
       <div className="h-full bg-[#181D27] rounded-xl border border-[#242A38] flex items-center justify-center text-slate-400 text-xs">
@@ -268,27 +361,123 @@ export function BookWorkspace({
       </div>
     );
   }
+
   return (
-    <div ref={viewportRef} className={`flex flex-col h-full bg-[#181D27] rounded-xl border border-[#242A38] overflow-hidden shadow-sm select-none relative ${isFullscreen ? "fixed inset-0 z-50 rounded-none border-none" : ""}`}>
+    <div ref={viewportRef} className={`flex flex-col h-full bg-[#181D27] rounded-xl border border-[#242A38] overflow-hidden select-none relative ${isFullscreen ? "fixed inset-0 z-50 rounded-none border-none" : ""}`}>
       <WorkspaceToolbar
-        selectedIdx={selectedIdx} totalPages={pages.length} isViewingOriginal={isViewingOriginal} zoom={zoom} isFullscreen={isFullscreen}
-        onPrev={goToPrevPage} onNext={goToNextPage} onToggleOriginal={() => setIsLockedOriginal((p) => !p)}
-        onRotate={(d) => rotatePage(selectedPage.id, d)} onZoomOut={() => setZoom((z) => Math.max(0.4, z - 0.2))}
-        onZoomIn={() => setZoom((z) => Math.min(4.0, z + 0.2))} onZoomReset={() => { setZoom(1.0); setPan({ x: 0, y: 0 }); }}
-        onToggleFullscreen={toggleFullscreen} onDelete={() => deletePage(selectedPage.id)}
-        onUndo={onUndo} canUndo={canUndo} onRedo={onRedo} canRedo={canRedo}
-        onRestoreOriginal={onRestoreOriginal} history={history} currentHistoryIndex={currentHistoryIndex}
-        onSelectHistoryStep={onSelectHistoryStep} shortcutLabels={shortcutLabels}
+        selectedIdx={selectedIdx}
+        totalPages={pages.length}
+        isViewingOriginal={isViewingOriginal}
+        showSplitSizes={showSplitSizes}
+        onPrev={goToPrevPage}
+        onNext={goToNextPage}
+        onToggleOriginal={() => setIsLockedOriginal((p) => !p)}
+        onToggleSplitSizes={() => setShowSplitSizes((p) => !p)}
+        onRotate={(d) => rotatePage(selectedPage.id, d)}
+        onUndo={onUndo}
+        canUndo={canUndo}
+        onRedo={onRedo}
+        canRedo={canRedo}
+        onRestoreOriginal={onRestoreOriginal}
+        history={history}
+        currentHistoryIndex={currentHistoryIndex}
+        onSelectHistoryStep={onSelectHistoryStep}
+        shortcutLabels={shortcutLabels}
       />
+
       <PageCanvas
-        containerRef={containerRef} overlayRef={overlayRef} imageSrc={getThumbnailUrl(selectedPage.id, !isViewingOriginal, 150)}
-        imageAlt={`Page ${selectedIdx + 1}`} zoom={zoom} pan={pan} isPanning={isPanning} showGrid={showGrid}
-        cropModule={cropModule} splitLines={splitLines} hideCutLines={false}
-        currentCropHeightMm={currentCropHeightMm} currentCropWidthMm={currentCropWidthMm}
-        onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
+        containerRef={containerRef}
+        overlayRef={overlayRef}
+        imageSrc={getThumbnailUrl(selectedPage.id, !isViewingOriginal, 150)}
+        imageAlt={`Page ${selectedIdx + 1}`}
+        zoom={zoom}
+        pan={pan}
+        isPanning={isPanning}
+        isPanMode={isPanMode}
+        unit={unit}
+        showGrid={showGrid}
+        gridColor={gridColor}
+        showSplitSizes={showSplitSizes}
+        eyedropperActive={eyedropperActive}
+        onPickColor={onPickColor}
+        cropModule={cropModule}
+        bleedModule={bleedModule}
+        splitLines={splitLines}
+
+        hideCutLines={false}
+        pageBaseWidthMm={pageBaseWidthMm}
+        pageBaseHeightMm={pageBaseHeightMm}
+        currentCropHeightMm={currentCropHeightMm}
+        currentCropWidthMm={currentCropWidthMm}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
         onImageLoad={(w, h) => setNaturalSize({ w, h })}
-        onCropPointerDown={handleCropPointerDown} activeDrag={activeCropDrag}
+        onCropPointerDown={handleCropPointerDown}
+        activeDrag={activeCropDrag}
       />
+
+      {/* Floating Bottom Zoom & Pan HUD Bar */}
+      <div className="absolute bottom-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center space-x-1 px-2 py-1 rounded-full bg-[#131720]/95 backdrop-blur-md border border-[#283040] shadow-xl">
+        <button
+          type="button"
+          onClick={() => setIsPanMode((p) => !p)}
+          className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+            isPanMode
+              ? "bg-slate-800 text-white"
+              : "text-slate-400 hover:text-white hover:bg-slate-800/70"
+          }`}
+          style={isPanMode ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+          title={`Pan / Hand Tool (${shortcutLabels.pan || "H"} or Middle-Click Drag)`}
+        >
+          <IconHandPan size={13} />
+        </button>
+
+        <div className="h-3.5 w-px bg-[#242A38]" />
+
+        <button
+          type="button"
+          onClick={zoomOut}
+          className="p-1.5 rounded-full text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer"
+          title={`Zoom Out (${shortcutLabels.zoom_out || "-"})`}
+        >
+          <ZoomOut size={13} />
+        </button>
+
+        <button
+          type="button"
+          onClick={zoomReset}
+          className="text-[11px] font-mono font-semibold text-slate-300 hover:text-white px-2 py-0.5 min-w-[44px] text-center rounded-full hover:bg-slate-800/70 transition-colors cursor-pointer"
+          title={`Reset Zoom to 100% (${shortcutLabels.zoom_reset || "Ctrl+0"})`}
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+
+        <button
+          type="button"
+          onClick={zoomIn}
+          className="p-1.5 rounded-full text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer"
+          title={`Zoom In (${shortcutLabels.zoom_in || "="})`}
+        >
+          <ZoomIn size={13} />
+        </button>
+
+        <div className="h-3.5 w-px bg-[#242A38]" />
+
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+            isFullscreen
+              ? "bg-slate-800 text-white"
+              : "text-slate-400 hover:text-white hover:bg-slate-800/70"
+          }`}
+          style={isFullscreen ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+          title={isFullscreen ? "Exit Fullscreen" : "Toggle Fullscreen"}
+        >
+          {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
+      </div>
     </div>
   );
 }

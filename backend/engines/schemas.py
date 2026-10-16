@@ -82,6 +82,9 @@ class ProcessPageRequest(BaseModel):
     enhance_colors: bool = True
     saturation: float = 1.30
     contrast: float = 1.10
+    color_mode: str = "color"  # "color" | "grayscale" | "bw"
+    bw_threshold: int = 180
+    whiten_bg: bool = False
     deskew: bool = False
     sharpen: bool = True
 
@@ -118,7 +121,11 @@ class CropPageRequest(BaseModel):
 
 class ExportRequest(BaseModel):
     bleed_mm: float = 3.0
+    bleed_mode: str = "mirror"  # "mirror" | "solid"
+    bleed_color: str = "#ffffff"
+    bleed_placement: str = "outside"  # "outside" | "inside"
     show_crop_marks: bool = True
+
     dpi: int = 200
     clean_borders: bool = True
     border_margin_px: int = 15
@@ -126,6 +133,9 @@ class ExportRequest(BaseModel):
     enhance_colors: bool = True
     saturation: float = 1.30
     contrast: float = 1.10
+    color_mode: str = "color"  # "color" | "grayscale" | "bw"
+    bw_threshold: int = 180
+    whiten_bg: bool = False
     deskew: bool = False
     sharpen: bool = True
     deskew_module_enabled: bool = False

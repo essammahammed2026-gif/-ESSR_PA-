@@ -11,7 +11,7 @@ export interface DeckCardProps {
   isDragTarget: boolean;
   isSelfDragging: boolean;
   thumbnailUrl: string;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, e?: React.MouseEvent) => void;
   onDragStart: (e: React.DragEvent<HTMLDivElement>, index: number) => void;
   onDragOver: (e: React.DragEvent<HTMLDivElement>, index: number) => void;
   onDrop: (e: React.DragEvent<HTMLDivElement>, index: number) => void;
@@ -40,7 +40,7 @@ export function DeckCard({
       onDragOver={(e) => onDragOver(e, index)}
       onDrop={(e) => onDrop(e, index)}
       onDragEnd={onDragEnd}
-      onClick={() => onSelect(page.id)}
+      onClick={(e) => onSelect(page.id, e)}
       onContextMenu={(e) => {
         if (onContextMenu) {
           e.preventDefault();
@@ -65,7 +65,6 @@ export function DeckCard({
           loading="lazy"
           decoding="async"
           className="object-contain max-h-full max-w-full pointer-events-none transition-transform duration-150"
-          style={{ transform: `rotate(${page.rotation}deg)` }}
         />
         {page.rotation !== 0 && (
           <span className="absolute top-1 right-1 bg-cyan-950/80 text-cyan-300 border border-cyan-700/50 text-[8px] font-mono px-1 rounded shadow-sm">

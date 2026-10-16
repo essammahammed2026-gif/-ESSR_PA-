@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadBlob } from "@/lib/api";
 import { useDebounce } from "@/lib/useDebounce";
 import { groupSplitLines } from "@/lib/splitLines";
 import { resolveCropTarget } from "@/lib/pageScope";
@@ -158,15 +158,20 @@ export function useBookModules({
     maxAngle: 10.0,
     ignoreBorders: true,
     showGrid: false,
+    gridColor: "#06b6d4",
     scope: { mode: "all", customRange: "" },
   });
 
   const [bleedModule, setBleedModule] = useState<BleedModuleConfig>({
     enabled: false,
     bleedMm: 3.0,
+    mode: "mirror",
+    solidColor: "#ffffff",
+    placement: "outside",
     showCropMarks: true,
     exportDpi: 200,
     scope: { mode: "all", customRange: "" },
+    appliedBleeds: [],
   });
 
   const [restorationModule, setRestorationModule] = useState<RestorationModuleConfig>({
@@ -177,16 +182,21 @@ export function useBookModules({
     enhanceColors: true,
     saturation: 1.30,
     contrast: 1.10,
+    colorMode: "color",
+    bwThreshold: 180,
+    whitenBg: false,
     sharpen: true,
     scope: { mode: "all", customRange: "" },
   });
 
-  // Golden Rule: Debounce reactive slider controls (350ms)
-  const debouncedMargin = useDebounce(restorationModule.borderMarginPx, 350);
-  const debouncedSaturation = useDebounce(restorationModule.saturation, 350);
-  const debouncedContrast = useDebounce(restorationModule.contrast, 350);
-  const debouncedBleed = useDebounce(bleedModule.bleedMm, 350);
-  const debouncedDeskewAngle = useDebounce(deskewModule.angle, 350);
+  // Responsive slider controls (50ms for live dragging preview)
+  const debouncedMargin = useDebounce(restorationModule.borderMarginPx, 50);
+  const debouncedSaturation = useDebounce(restorationModule.saturation, 50);
+  const debouncedContrast = useDebounce(restorationModule.contrast, 50);
+  const debouncedBwThreshold = useDebounce(restorationModule.bwThreshold, 50);
+  const debouncedBleed = useDebounce(bleedModule.bleedMm, 50);
+  const debouncedBleedColor = useDebounce(bleedModule.solidColor, 50);
+  const debouncedDeskewAngle = useDebounce(deskewModule.angle, 150);
 
   // Consolidated settings
   const settings: BookProcessSettings = useMemo(() => ({
@@ -235,14 +245,19 @@ export function useBookModules({
       maxAngle: 10.0,
       ignoreBorders: true,
       showGrid: false,
+      gridColor: "#06b6d4",
       scope: { mode: "all", customRange: "" },
     });
     setBleedModule({
       enabled: false,
       bleedMm: 3.0,
+      mode: "mirror",
+      solidColor: "#ffffff",
+      placement: "outside",
       showCropMarks: true,
       exportDpi: 200,
       scope: { mode: "all", customRange: "" },
+      appliedBleeds: [],
     });
     setRestorationModule({
       enabled: false,
@@ -252,11 +267,15 @@ export function useBookModules({
       enhanceColors: true,
       saturation: 1.30,
       contrast: 1.10,
+      colorMode: "color",
+      bwThreshold: 180,
+      whitenBg: false,
       sharpen: true,
       scope: { mode: "all", customRange: "" },
     });
     setExportError(null);
   }, []);
+
 
   // One backend split pass along a single axis. Returns fresh pages + new slice ids.
   const runSplitPhase = useCallback(async (
@@ -436,54 +455,50 @@ export function useBookModules({
     setExportError(null);
 
     try {
-      const res = await apiFetch(`/api/book-scan/export/${sessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bleed_mm: bleedModule.bleedMm,
-          show_crop_marks: bleedModule.showCropMarks,
-          dpi: bleedModule.exportDpi,
-          clean_borders: restorationModule.cleanBorders,
-          border_margin_px: restorationModule.borderMarginPx,
-          border_threshold: restorationModule.borderThreshold,
-          enhance_colors: restorationModule.enhanceColors,
-          saturation: restorationModule.saturation,
-          contrast: restorationModule.contrast,
-          deskew: false,
-          sharpen: restorationModule.sharpen,
+      await downloadBlob(
+        `/api/book-scan/export/${sessionId}`,
+        `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bleed_mm: bleedModule.bleedMm,
+            bleed_mode: bleedModule.mode,
+            bleed_color: bleedModule.solidColor,
+            bleed_placement: bleedModule.placement,
+            show_crop_marks: bleedModule.showCropMarks,
+            dpi: bleedModule.exportDpi,
+            clean_borders: restorationModule.cleanBorders,
+            border_margin_px: restorationModule.borderMarginPx,
+            border_threshold: restorationModule.borderThreshold,
+            enhance_colors: restorationModule.enhanceColors,
+            saturation: restorationModule.saturation,
+            contrast: restorationModule.contrast,
+            color_mode: restorationModule.colorMode,
+            bw_threshold: restorationModule.bwThreshold,
+            whiten_bg: restorationModule.whitenBg,
+            deskew: false,
+            sharpen: restorationModule.sharpen,
 
-          // Modular configurations & page scopes
-          deskew_module_enabled: deskewModule.enabled,
-          deskew_mode: deskewModule.mode,
-          deskew_angle: deskewModule.angle,
-          deskew_max_angle: deskewModule.maxAngle,
-          deskew_ignore_borders: deskewModule.ignoreBorders,
-          deskew_scope_mode: deskewModule.scope.mode,
-          deskew_custom_range: deskewModule.scope.customRange,
+            // Modular configurations & page scopes
+            deskew_module_enabled: deskewModule.enabled,
+            deskew_mode: deskewModule.mode,
+            deskew_angle: deskewModule.angle,
+            deskew_max_angle: deskewModule.maxAngle,
+            deskew_ignore_borders: deskewModule.ignoreBorders,
+            deskew_scope_mode: deskewModule.scope.mode,
+            deskew_custom_range: deskewModule.scope.customRange,
 
-          bleed_module_enabled: bleedModule.enabled,
-          bleed_scope_mode: bleedModule.scope.mode,
-          bleed_custom_range: bleedModule.scope.customRange,
+            bleed_module_enabled: bleedModule.enabled,
+            bleed_scope_mode: bleedModule.scope.mode,
+            bleed_custom_range: bleedModule.scope.customRange,
 
-          restoration_module_enabled: restorationModule.enabled,
-          restoration_scope_mode: restorationModule.scope.mode,
-          restoration_custom_range: restorationModule.scope.customRange,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Export PDF failed on server.");
-      }
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+            restoration_module_enabled: restorationModule.enabled,
+            restoration_scope_mode: restorationModule.scope.mode,
+            restoration_custom_range: restorationModule.scope.customRange,
+          }),
+        }
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setExportError(msg);
@@ -500,9 +515,11 @@ export function useBookModules({
     bleedModule, setBleedModule,
     restorationModule, setRestorationModule,
     debouncedBleed,
+    debouncedBleedColor,
     debouncedMargin,
     debouncedSaturation,
     debouncedContrast,
+    debouncedBwThreshold,
     debouncedDeskewAngle,
     settings,
     resetModules,

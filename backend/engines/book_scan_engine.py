@@ -5,7 +5,7 @@ import fitz  # PyMuPDF
 import cv2
 import numpy as np
 from typing import List, Dict, Any, Optional
-from engines.units import MM_TO_PTS, PTS_TO_MM
+from engines.units import MM_TO_PTS, PTS_TO_MM, hex_to_rgb
 
 class BookScanEngine:
     """
@@ -188,10 +188,47 @@ class BookScanEngine:
         Creates an ordered sequence of logical pages from the uploaded file(s).
         When is_spread=False, pages are treated as-is without any splitting.
         """
+        def _make_entry(dp: fitz.Page, source: str, doc_idx: int, label: str) -> Dict[str, Any]:
+            w_mm = round(dp.rect.width * PTS_TO_MM, 1)
+            h_mm = round(dp.rect.height * PTS_TO_MM, 1)
+            color_space = "RGB"
+            dpi = 300
+            try:
+                imgs = dp.get_images(full=True)
+                if imgs:
+                    # imgs[0]: (xref, smask, width, height, bpc, colorspace, ...)
+                    img_w = int(imgs[0][2] or 0)
+                    cs_raw = str(imgs[0][5] or "").upper()
+                    if "CMYK" in cs_raw:
+                        color_space = "CMYK"
+                    elif "GRAY" in cs_raw or "GREY" in cs_raw:
+                        color_space = "Grayscale"
+                    if img_w > 0 and dp.rect.width > 0:
+                        est_dpi = int(round(img_w / (dp.rect.width / 72.0)))
+                        if 50 <= est_dpi <= 1200:
+                            dpi = est_dpi
+            except Exception:
+                pass
+            return {
+                "id": str(uuid.uuid4())[:8],
+                "source": source,
+                "doc_idx": doc_idx,
+                "half": "full",
+                "is_spread": is_spread,
+                "split_pos": spread_split_pos if is_spread else 0.5,
+                "rotation": 0,
+                "label": label,
+                "width_mm": w_mm,
+                "height_mm": h_mm,
+                "orig_width_mm": w_mm,
+                "orig_height_mm": h_mm,
+                "color_space": color_space,
+                "dpi": dpi,
+            }
+
         pages = []
 
         if single_doc is not None:
-            # Single file mode
             num_pages = len(single_doc)
             page_indices = list(range(num_pages))
             if odds_order == "reverse":
@@ -199,38 +236,8 @@ class BookScanEngine:
 
             for p_idx in page_indices:
                 dp = single_doc[p_idx]
-                w_mm = round(dp.rect.width * 25.4 / 72.0, 1)
-                h_mm = round(dp.rect.height * 25.4 / 72.0, 1)
-                if is_spread:
-                    pages.append({
-                        "id": str(uuid.uuid4())[:8],
-                        "source": "single",
-                        "doc_idx": p_idx,
-                        "half": "full",
-                        "is_spread": True,
-                        "split_pos": spread_split_pos,
-                        "rotation": 0,
-                        "label": f"Sheet {p_idx+1} (Spread)",
-                        "width_mm": w_mm,
-                        "height_mm": h_mm,
-                        "orig_width_mm": w_mm,
-                        "orig_height_mm": h_mm,
-                    })
-                else:
-                    pages.append({
-                        "id": str(uuid.uuid4())[:8],
-                        "source": "single",
-                        "doc_idx": p_idx,
-                        "half": "full",
-                        "is_spread": False,
-                        "split_pos": 0.5,
-                        "rotation": 0,
-                        "label": f"Page {p_idx+1}",
-                        "width_mm": w_mm,
-                        "height_mm": h_mm,
-                        "orig_width_mm": w_mm,
-                        "orig_height_mm": h_mm,
-                    })
+                lbl = f"Sheet {p_idx+1} (Spread)" if is_spread else f"Page {p_idx+1}"
+                pages.append(_make_entry(dp, "single", p_idx, lbl))
             return pages
 
         # Dual file mode: odds + evens
@@ -246,88 +253,15 @@ class BookScanEngine:
             evens_indices.reverse()
 
         max_sheets = max(len(odds_indices), len(evens_indices))
+        spread_suffix = " (Spread)" if is_spread else ""
 
-        if is_spread:
-            for i in range(max_sheets):
-                if i < len(odds_indices):
-                    p_odd = odds_indices[i]
-                    dp = odds_doc[p_odd]
-                    w_mm = round(dp.rect.width * 25.4 / 72.0, 1)
-                    h_mm = round(dp.rect.height * 25.4 / 72.0, 1)
-                    pages.append({
-                        "id": str(uuid.uuid4())[:8],
-                        "source": "odds",
-                        "doc_idx": p_odd,
-                        "half": "full",
-                        "is_spread": True,
-                        "split_pos": spread_split_pos,
-                        "rotation": 0,
-                        "label": f"Odds Sheet {p_odd+1} (Spread)",
-                        "width_mm": w_mm,
-                        "height_mm": h_mm,
-                        "orig_width_mm": w_mm,
-                        "orig_height_mm": h_mm,
-                    })
-                if i < len(evens_indices):
-                    p_even = evens_indices[i]
-                    dp = evens_doc[p_even]
-                    w_mm = round(dp.rect.width * 25.4 / 72.0, 1)
-                    h_mm = round(dp.rect.height * 25.4 / 72.0, 1)
-                    pages.append({
-                        "id": str(uuid.uuid4())[:8],
-                        "source": "evens",
-                        "doc_idx": p_even,
-                        "half": "full",
-                        "is_spread": True,
-                        "split_pos": spread_split_pos,
-                        "rotation": 0,
-                        "label": f"Evens Sheet {p_even+1} (Spread)",
-                        "width_mm": w_mm,
-                        "height_mm": h_mm,
-                        "orig_width_mm": w_mm,
-                        "orig_height_mm": h_mm,
-                    })
-        else:
-            # Treat AS-IS: 1 sheet per scan, collated Odd 1, Even 1, Odd 2, Even 2...
-            for i in range(max_sheets):
-                if i < len(odds_indices):
-                    p_odd = odds_indices[i]
-                    dp = odds_doc[p_odd]
-                    w_mm = round(dp.rect.width * 25.4 / 72.0, 1)
-                    h_mm = round(dp.rect.height * 25.4 / 72.0, 1)
-                    pages.append({
-                        "id": str(uuid.uuid4())[:8],
-                        "source": "odds",
-                        "doc_idx": p_odd,
-                        "half": "full",
-                        "is_spread": False,
-                        "split_pos": 0.5,
-                        "rotation": 0,
-                        "label": f"Odds Sheet {p_odd+1}",
-                        "width_mm": w_mm,
-                        "height_mm": h_mm,
-                        "orig_width_mm": w_mm,
-                        "orig_height_mm": h_mm,
-                    })
-                if i < len(evens_indices):
-                    p_even = evens_indices[i]
-                    dp = evens_doc[p_even]
-                    w_mm = round(dp.rect.width * 25.4 / 72.0, 1)
-                    h_mm = round(dp.rect.height * 25.4 / 72.0, 1)
-                    pages.append({
-                        "id": str(uuid.uuid4())[:8],
-                        "source": "evens",
-                        "doc_idx": p_even,
-                        "half": "full",
-                        "is_spread": False,
-                        "split_pos": 0.5,
-                        "rotation": 0,
-                        "label": f"Evens Sheet {p_even+1}",
-                        "width_mm": w_mm,
-                        "height_mm": h_mm,
-                        "orig_width_mm": w_mm,
-                        "orig_height_mm": h_mm,
-                    })
+        for i in range(max_sheets):
+            if i < len(odds_indices) and odds_doc is not None:
+                p_odd = odds_indices[i]
+                pages.append(_make_entry(odds_doc[p_odd], "odds", p_odd, f"Odds Sheet {p_odd+1}{spread_suffix}"))
+            if i < len(evens_indices) and evens_doc is not None:
+                p_even = evens_indices[i]
+                pages.append(_make_entry(evens_doc[p_even], "evens", p_even, f"Evens Sheet {p_even+1}{spread_suffix}"))
 
         return pages
 
@@ -781,6 +715,9 @@ class BookScanEngine:
         enhance_colors: bool = True,
         saturation: float = 1.30,
         contrast: float = 1.10,
+        color_mode: str = "color",
+        bw_threshold: int = 180,
+        whiten_bg: bool = False,
         deskew: bool = False,
         sharpen: bool = True,
         deskew_module_enabled: bool = False,
@@ -793,8 +730,9 @@ class BookScanEngine:
         Runs the refined processing pipeline:
         1. Intelligent Deskew & Alignment module (straightens content first)
         2. Minimal border cleaning (cleans straight outer edges cleanly)
-        3. Color restoration (anti-washout & levels stretch)
-        4. Sharpening
+        3. Paper whitening (deshadow / remove yellow-gray scan tint)
+        4. Color restoration & Color Mode conversion (Color / Grayscale / B&W)
+        5. Sharpening
         """
         img = image
 
@@ -816,12 +754,56 @@ class BookScanEngine:
         if clean_borders and border_margin_px > 0:
             img = BookScanEngine.clean_outer_borders(img, margin_px=border_margin_px, threshold=border_threshold)
 
-        # 3. Restore washed-out colors & richness
-        if enhance_colors:
-            img = BookScanEngine.enhance_colors_and_richness(img, saturation=saturation, contrast=contrast)
+        # 3. Paper background whitening (clears yellow/gray paper cast & light bleed-through)
+        if whiten_bg:
+            try:
+                gray_bg = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+                paper_mask = gray_bg >= 212
+                whitened = img.copy()
+                whitened[paper_mask] = 255
+                # Smooth transition between 190..212
+                mid_mask = (gray_bg >= 190) & (gray_bg < 212)
+                if np.any(mid_mask):
+                    alpha = ((gray_bg[mid_mask].astype(np.float32) - 190.0) / 22.0)[:, None]
+                    whitened[mid_mask] = np.clip(
+                        img[mid_mask].astype(np.float32) * (1.0 - alpha) + 255.0 * alpha,
+                        0, 255
+                    ).astype(np.uint8)
+                img = whitened
+            except Exception:
+                pass
 
-        # 4. Sharpen
-        if sharpen:
+        # 4. Restore washed-out colors & apply Color Mode (color / grayscale / bw)
+        mode_norm = (color_mode or "color").lower()
+        if mode_norm == "bw":
+            try:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+                if contrast != 1.0:
+                    gray = np.clip((gray.astype(np.float32) - 128.0) * contrast + 128.0, 0, 255).astype(np.uint8)
+                thr = max(40, min(250, int(bw_threshold)))
+                # Combine adaptive illumination with global threshold for clean text & solid fills
+                adapt = cv2.adaptiveThreshold(
+                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 12
+                )
+                _, glob = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY)
+                bw = cv2.bitwise_and(adapt, glob)
+                img = cv2.cvtColor(bw, cv2.COLOR_GRAY2BGR)
+            except Exception:
+                pass
+        elif mode_norm == "grayscale":
+            try:
+                if enhance_colors:
+                    img = BookScanEngine.enhance_colors_and_richness(img, saturation=1.0, contrast=contrast)
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+                img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            except Exception:
+                pass
+        else:
+            if enhance_colors:
+                img = BookScanEngine.enhance_colors_and_richness(img, saturation=saturation, contrast=contrast)
+
+        # 5. Sharpen (skip for binary B&W where edges are already 1-bit crisp)
+        if sharpen and mode_norm != "bw":
             try:
                 gaussian = cv2.GaussianBlur(img, (0, 0), 2.0)
                 img = cv2.addWeighted(img, 1.3, gaussian, -0.3, 0)
@@ -831,18 +813,130 @@ class BookScanEngine:
         return img
 
     @staticmethod
+    def apply_bleed_to_image(
+        img: np.ndarray,
+        bleed_px: int,
+        bleed_mode: str = "mirror",
+        bleed_color: str = "#ffffff",
+        draw_crop_marks: bool = False,
+        placement: str = "outside"
+    ) -> np.ndarray:
+        """
+        Extends or insets bleed on an image using either:
+        - 'mirror' (BORDER_REFLECT_101)
+        - 'solid' (BORDER_CONSTANT filled with bleed_color)
+        Placement:
+        - 'outside': Expands sheet outward by bleed_px on all 4 sides.
+        - 'inside': Insets bleed within existing dimensions on all 4 sides.
+        Optionally draws corner crop marks on the raster image for live preview.
+        """
+        if bleed_px <= 0:
+            return img
+
+        h, w = img.shape[:2]
+        mode_norm = (bleed_mode or "mirror").lower()
+        placement_norm = (placement or "outside").lower()
+
+        if placement_norm == "inside":
+            extended = img.copy()
+            b_px = min(bleed_px, min(max(1, h // 2 - 1), max(1, w // 2 - 1)))
+            if mode_norm == "solid":
+                r, g, b = hex_to_rgb(bleed_color or "#ffffff")
+                bgr_val = (int(round(b * 255)), int(round(g * 255)), int(round(r * 255)))
+                extended[:b_px, :] = bgr_val
+                extended[-b_px:, :] = bgr_val
+                extended[:, :b_px] = bgr_val
+                extended[:, -b_px:] = bgr_val
+            else:
+                if 2 * b_px <= h and 2 * b_px <= w:
+                    extended[:b_px, :] = cv2.flip(img[b_px:2*b_px, :], 0)
+                    extended[-b_px:, :] = cv2.flip(img[-2*b_px:-b_px, :], 0)
+                    extended[:, :b_px] = cv2.flip(img[:, b_px:2*b_px], 1)
+                    extended[:, -b_px:] = cv2.flip(img[:, -2*b_px:-b_px], 1)
+
+            if draw_crop_marks and b_px >= 3:
+                x0, y0 = b_px, b_px
+                x1, y1 = w - b_px, h - b_px
+                off = max(2, int(round(b_px * 0.4)))
+                thick = max(1, int(round(min(w, h) / 600)))
+                for color, t in [((255, 255, 255), thick + 2), ((20, 20, 20), thick)]:
+                    cv2.line(extended, (max(0, x0 - off), y0), (min(w - 1, x0 + off), y0), color, t)
+                    cv2.line(extended, (x0, max(0, y0 - off)), (x0, min(h - 1, y0 + off)), color, t)
+                    cv2.line(extended, (max(0, x1 - off), y0), (min(w - 1, x1 + off), y0), color, t)
+                    cv2.line(extended, (x1, max(0, y0 - off)), (x1, min(h - 1, y0 + off)), color, t)
+                    cv2.line(extended, (max(0, x0 - off), y1), (min(w - 1, x0 + off), y1), color, t)
+                    cv2.line(extended, (x0, max(0, y1 - off)), (x0, min(h - 1, y1 + off)), color, t)
+                    cv2.line(extended, (max(0, x1 - off), y1), (min(w - 1, x1 + off), y1), color, t)
+                    cv2.line(extended, (x1, max(0, y1 - off)), (x1, min(h - 1, y1 + off)), color, t)
+
+            return extended
+
+        # Outside bleed (expands canvas outward)
+        if mode_norm == "solid":
+            r, g, b = hex_to_rgb(bleed_color or "#ffffff")
+            bgr_val = (int(round(b * 255)), int(round(g * 255)), int(round(r * 255)))
+            extended = cv2.copyMakeBorder(
+                img, bleed_px, bleed_px, bleed_px, bleed_px,
+                cv2.BORDER_CONSTANT, value=bgr_val
+            )
+        else:
+            max_reflect = max(1, min(h - 1, w - 1))
+            if bleed_px <= max_reflect:
+                extended = cv2.copyMakeBorder(
+                    img, bleed_px, bleed_px, bleed_px, bleed_px, cv2.BORDER_REFLECT_101
+                )
+            else:
+                extended = img
+                rem = bleed_px
+                while rem > 0:
+                    eh, ew = extended.shape[:2]
+                    step = min(rem, max(1, min(eh - 1, ew - 1)))
+                    extended = cv2.copyMakeBorder(
+                        extended, step, step, step, step, cv2.BORDER_REFLECT_101
+                    )
+                    rem -= step
+
+        if draw_crop_marks and bleed_px >= 3:
+            ext_h, ext_w = extended.shape[:2]
+            x0, y0 = bleed_px, bleed_px
+            x1, y1 = bleed_px + w, bleed_px + h
+            off = max(2, int(round(bleed_px * 0.25)))
+            thick = max(1, int(round(min(ext_w, ext_h) / 600)))
+
+            # Draw high-contrast white halo + black crop mark lines at all 4 trim corners
+            for color, t in [((255, 255, 255), thick + 2), ((20, 20, 20), thick)]:
+                # Top-Left
+                cv2.line(extended, (0, y0), (max(0, x0 - off), y0), color, t)
+                cv2.line(extended, (x0, 0), (x0, max(0, y0 - off)), color, t)
+                # Top-Right
+                cv2.line(extended, (min(ext_w - 1, x1 + off), y0), (ext_w - 1, y0), color, t)
+                cv2.line(extended, (x1, 0), (x1, max(0, y0 - off)), color, t)
+                # Bottom-Left
+                cv2.line(extended, (0, y1), (max(0, x0 - off), y1), color, t)
+                cv2.line(extended, (x0, min(ext_h - 1, y1 + off)), (x0, ext_h - 1), color, t)
+                # Bottom-Right
+                cv2.line(extended, (min(ext_w - 1, x1 + off), y1), (ext_w - 1, y1), color, t)
+                cv2.line(extended, (x1, min(ext_h - 1, y1 + off)), (x1, ext_h - 1), color, t)
+
+        return extended
+
+    @staticmethod
     def add_bleed_and_export_pdf(
         processed_images: List[np.ndarray],
         output_pdf_path: str,
         bleed_mm: float = 3.0,
+        bleed_mode: str = "mirror",
+        bleed_color: str = "#ffffff",
         show_crop_marks: bool = True,
         dpi: int = 300,
         jpeg_quality: int = 95,
-        per_page_bleed: Optional[List[Dict[str, Any]]] = None
+        per_page_bleed: Optional[List[Dict[str, Any]]] = None,
+        bleed_placement: str = "outside"
     ) -> bool:
         """
         Compiles cleaned pages into a print-ready PDF with:
-        - Mirrored bleed extension (default 3mm or per-page override)
+        - Mirrored or solid-color bleed extension (default 3mm or per-page override)
+        - Inside or outside placement support
         - PDF TrimBox, BleedBox, and MediaBox tags
         - Professional vector crop/cut marks in the bleed margin
         """
@@ -855,36 +949,45 @@ class BookScanEngine:
             h, w = img.shape[:2]
 
             cur_bleed_mm = bleed_mm
+            cur_bleed_mode = bleed_mode
+            cur_bleed_color = bleed_color
             cur_show_crop = show_crop_marks
+            cur_placement = bleed_placement
             if per_page_bleed and idx < len(per_page_bleed):
                 cur_bleed_mm = per_page_bleed[idx].get("bleed_mm", 0.0)
+                cur_bleed_mode = per_page_bleed[idx].get("bleed_mode", bleed_mode)
+                cur_bleed_color = per_page_bleed[idx].get("bleed_color", bleed_color)
                 cur_show_crop = per_page_bleed[idx].get("show_crop_marks", False)
+                cur_placement = per_page_bleed[idx].get("placement", bleed_placement)
 
-            # Calculate bleed in pixels
-            bleed_px = int(round(cur_bleed_mm * (dpi / 25.4)))
+            bleed_px = int(round(max(0.0, float(cur_bleed_mm)) * (dpi / 25.4)))
 
-            # Extended image with mirrored border reflection
-            if bleed_px > 0:
-                extended_img = cv2.copyMakeBorder(
-                    img, bleed_px, bleed_px, bleed_px, bleed_px, cv2.BORDER_REFLECT_101
-                )
-            else:
-                extended_img = img
+            extended_img = BookScanEngine.apply_bleed_to_image(
+                img,
+                bleed_px=bleed_px,
+                bleed_mode=cur_bleed_mode,
+                bleed_color=cur_bleed_color,
+                draw_crop_marks=False,
+                placement=cur_placement,
+            )
 
-            ext_h, ext_w = extended_img.shape[:2]
-
-            # Dimensions in points
             trim_w_pt = (w / dpi) * 72.0
             trim_h_pt = (h / dpi) * 72.0
-            bleed_pt = cur_bleed_mm * MM_TO_PTS
+            bleed_pt = max(0.0, float(cur_bleed_mm)) * MM_TO_PTS
 
-            # Total page dimension in PDF points
-            page_w_pt = trim_w_pt + (2.0 * bleed_pt)
-            page_h_pt = trim_h_pt + (2.0 * bleed_pt)
+            if (cur_placement or "outside").lower() == "inside":
+                page_w_pt = trim_w_pt
+                page_h_pt = trim_h_pt
+                page = doc.new_page(width=page_w_pt, height=page_h_pt)
+                if bleed_pt > 0:
+                    page.set_trimbox(fitz.Rect(bleed_pt, bleed_pt, max(bleed_pt + 1, trim_w_pt - bleed_pt), max(bleed_pt + 1, trim_h_pt - bleed_pt)))
+            else:
+                page_w_pt = trim_w_pt + (2.0 * bleed_pt)
+                page_h_pt = trim_h_pt + (2.0 * bleed_pt)
+                page = doc.new_page(width=page_w_pt, height=page_h_pt)
+                if bleed_pt > 0:
+                    page.set_trimbox(fitz.Rect(bleed_pt, bleed_pt, bleed_pt + trim_w_pt, bleed_pt + trim_h_pt))
 
-            page = doc.new_page(width=page_w_pt, height=page_h_pt)
-            if bleed_pt > 0:
-                page.set_trimbox(fitz.Rect(bleed_pt, bleed_pt, bleed_pt + trim_w_pt, bleed_pt + trim_h_pt))
 
             # Encode image to JPEG
             success, enc = cv2.imencode(".jpg", extended_img, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
@@ -894,7 +997,7 @@ class BookScanEngine:
             page.insert_image(page.rect, stream=enc.tobytes())
 
             # Draw Crop Marks if enabled and bleed > 0
-            if show_crop_marks and bleed_pt > 0:
+            if cur_show_crop and bleed_pt > 0:
                 shape = page.new_shape()
                 off = 1.0 * MM_TO_PTS
                 mlen = max(1.5 * MM_TO_PTS, bleed_pt - off)
@@ -1313,9 +1416,13 @@ class BookScanEngine:
             if req.restoration_module_enabled:
                 do_clean_borders = apply_restoration and req.clean_borders
                 do_enhance_colors = apply_restoration and req.enhance_colors
+                do_color_mode = req.color_mode if apply_restoration else "color"
+                do_whiten_bg = apply_restoration and req.whiten_bg
             else:
                 do_clean_borders = req.clean_borders
                 do_enhance_colors = req.enhance_colors
+                do_color_mode = req.color_mode
+                do_whiten_bg = req.whiten_bg
 
             cleaned = BookScanEngine.process_single_page(
                 raw_img,
@@ -1325,6 +1432,9 @@ class BookScanEngine:
                 enhance_colors=do_enhance_colors,
                 saturation=req.saturation,
                 contrast=req.contrast,
+                color_mode=do_color_mode,
+                bw_threshold=req.bw_threshold,
+                whiten_bg=do_whiten_bg,
                 deskew=req.deskew if not req.deskew_module_enabled else False,
                 sharpen=req.sharpen,
                 deskew_module_enabled=apply_deskew,
@@ -1345,7 +1455,10 @@ class BookScanEngine:
 
             per_page_bleed_list.append({
                 "bleed_mm": p_bleed,
-                "show_crop_marks": p_marks
+                "bleed_mode": req.bleed_mode,
+                "bleed_color": req.bleed_color,
+                "show_crop_marks": p_marks,
+                "placement": getattr(req, "bleed_placement", "outside"),
             })
         return processed_images, per_page_bleed_list
 

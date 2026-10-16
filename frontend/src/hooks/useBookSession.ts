@@ -178,6 +178,7 @@ export function useBookSession() {
     // Check scope applicability for this specific page
     const applyDeskew = opts.deskewEnabled && isPageInScope(pageNum, opts.deskewScope);
     const applyRestoration = opts.restorationEnabled && isPageInScope(pageNum, opts.restorationScope);
+    const applyBleed = isClean && opts.bleedEnabled && isPageInScope(pageNum, opts.bleedScope);
 
     const params = new URLSearchParams({
       preview_clean: String(isClean),
@@ -187,6 +188,9 @@ export function useBookSession() {
       enhance_colors: String(applyRestoration ? opts.enhanceColors : false),
       saturation: String(applyRestoration ? opts.saturation : 1.0),
       contrast: String(applyRestoration ? opts.contrast : 1.0),
+      color_mode: applyRestoration ? opts.colorMode : "color",
+      bw_threshold: String(opts.bwThreshold),
+      whiten_bg: String(applyRestoration ? opts.whitenBg : false),
       deskew: "false",
       dpi: String(dpi),
       rev: String(page?.rev ?? 0),
@@ -195,7 +199,13 @@ export function useBookSession() {
       deskew_angle: String(opts.deskewAngle),
       deskew_max_angle: String(opts.deskewMaxAngle),
       deskew_ignore_borders: String(opts.deskewIgnoreBorders),
+      bleed_mm: String(applyBleed ? opts.bleedMm : 0),
+      bleed_mode: opts.bleedMode,
+      bleed_color: opts.bleedColor,
+      bleed_placement: opts.bleedPlacement,
+      show_crop_marks: String(applyBleed ? opts.showCropMarks : false),
     });
+
     return getApiUrl(`/api/book-scan/page-thumbnail/${sessionId}/${pageId}?${params.toString()}`);
   }, [sessionId, pages]);
 

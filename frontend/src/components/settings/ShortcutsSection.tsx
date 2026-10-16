@@ -24,7 +24,11 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { key: "prev_page", label: "Previous Page", description: "Select the previous card in the page deck", defaultKey: "[" },
   { key: "next_page", label: "Next Page", description: "Select the next card in the page deck", defaultKey: "]" },
   { key: "toggle_original", label: "Toggle Original", description: "Inspect raw scanned page vs. processed page", defaultKey: "o" },
-  { key: "rotate", label: "Rotate 90° CW", description: "Rotate the currently selected page clockwise", defaultKey: "r" },
+  { key: "rotate", label: "Rotate 90° CW", description: "Rotate the currently selected page 90° clockwise", defaultKey: "r" },
+  { key: "zoom_in", label: "Zoom In", description: "Zoom in on the active page preview canvas", defaultKey: "=" },
+  { key: "zoom_out", label: "Zoom Out", description: "Zoom out on the active page preview canvas", defaultKey: "-" },
+  { key: "zoom_reset", label: "Reset Zoom (100%)", description: "Reset canvas zoom and pan back to centered 100%", defaultKey: "ctrl+0" },
+  { key: "pan", label: "Pan / Hand Tool", description: "Toggle or hold to pan freely across the preview canvas", defaultKey: "h" },
 ];
 
 export default function ShortcutsSection({ settings, onSettingsChange }: ShortcutsSectionProps) {
@@ -40,6 +44,10 @@ export default function ShortcutsSection({ settings, onSettingsChange }: Shortcu
       next_page: "]",
       toggle_original: "o",
       rotate: "r",
+      zoom_in: "=",
+      zoom_out: "-",
+      zoom_reset: "ctrl+0",
+      pan: "h",
     },
   }, [settings.book_studio]);
 

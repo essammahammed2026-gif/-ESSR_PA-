@@ -6,13 +6,14 @@ export interface UnitOption {
   value: LengthUnit;
   label: string;
   suffix: string;
+  short: string;
 }
 
 export const UNIT_OPTIONS: UnitOption[] = [
-  { value: "mm", label: "mm", suffix: "mm" },
-  { value: "cm", label: "cm", suffix: "cm" },
-  { value: "pixels", label: "pixels", suffix: "px" },
-  { value: "inches", label: "inches", suffix: "in" },
+  { value: "mm", label: "mm", suffix: "mm", short: "mm" },
+  { value: "cm", label: "cm", suffix: "cm", short: "cm" },
+  { value: "pixels", label: "pixels", suffix: "px", short: "px" },
+  { value: "inches", label: "inches", suffix: "in", short: "in" },
 ];
 
 const MM_PER_INCH = 25.4;
@@ -69,8 +70,8 @@ export function formatMmInUnit(valMm: number, unit: LengthUnit | string): string
 
 const STORAGE_KEY = "essr_selected_unit";
 
-export function getStoredUnit(): LengthUnit {
-  if (typeof window === "undefined") return "mm";
+export function getStoredUnit(defaultUnit: LengthUnit = "mm"): LengthUnit {
+  if (typeof window === "undefined") return defaultUnit;
   try {
     const stored = localStorage.getItem(STORAGE_KEY) as LengthUnit | null;
     if (stored && ["mm", "cm", "pixels", "inches"].includes(stored)) {
@@ -79,7 +80,7 @@ export function getStoredUnit(): LengthUnit {
   } catch {
     // ignore
   }
-  return "mm";
+  return defaultUnit;
 }
 
 export function setStoredUnit(unit: LengthUnit): void {

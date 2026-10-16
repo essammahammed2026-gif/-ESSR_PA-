@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Book Studio Multi-Selection, Live Bleed & Production Polish**:
+  - **Eyedropper Sampling & Magnifier Loupe**: Fixed canvas pixel sampling in `PageCanvas.tsx` (`ctx.drawImage` prior to `ctx.getImageData`) and introduced a floating circular color loupe with a live RGB swatch and hex badge tracking the cursor on hover.
+  - **Applied Bleed Management & Inside/Outside Placement**: Added an "Apply Bleed" commit workflow in `BleedPanel.tsx` storing configured bleeds in an `appliedBleeds` entry list with inline edit and delete actions; introduced Outside Bleed (expands sheet outward past trim marks) and Inside Bleed (insets safety border inside page perimeter); updated dimension notch dynamically (`+3mm bleed` / `-3mm bleed`).
+  - **Responsive Live Slider Dragging**: Reduced debounce delays from 350ms to 50ms across Color Restoration (saturation, contrast, B&W threshold, border margin) and Bleed width/color, delivering fluid ~20fps preview updates while dragging sliders.
+  - **Input Spacing & Spinner Arrows**: Fixed number inputs in `BleedPanel` to eliminate overlap with native up/down stepper arrows.
+  - **Global Length Units**: Added header unit dropdown (`mm`, `cm`, `inches`, `pixels`) dynamically formatting dimensions, crop readouts, cut line sizing, bleed inputs, and page properties modal.
+  - **Multi-Select & Batch Actions**: Implemented `Ctrl+Click` multi-select, `Shift+Click` contiguous range selection, "Select ▾" quick filters (All, Odds, Evens, Custom Range), and batch page operations (rotate, delete, duplicate) in the Deck panel.
+  - **Live Bleed Engine**: Added dual-mode bleed in `book_scan_engine.py` (mirrored edge synthesis via OpenCV `BORDER_REFLECT_101` and solid-color borders via `BORDER_CONSTANT`) with Japanese corner crop marks, live preview thumbnails, unbounded inputs, and color picker + canvas eyedropper sampling.
+  - **Scan Color Restoration**: Added Color Mode selector (`Color`, `Grayscale`, adaptive Otsu `B & W`), threshold slider, and background paper whitening.
+  - **UI / UX Polish**: Lowered notch z-index under toolbars and modals; fixed Apply dropdown downward positioning; compacted `Auto-Detect` and cut-line editor rows; thickened Deskew grid lines with custom color picker; simplified Page Properties modal and context menu.
+
 - **Architectural Optimization, De-Fragmentation & Engine Deduplication**:
   - **Repository Navigation Map**: Added fast-lookup router-to-engine and route-to-component mapping table at the top of `docs/architecture.md` to eliminate blind directory searches.
   - **Phase 1 — Book Studio De-Fragmentation**:

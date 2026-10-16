@@ -18,7 +18,7 @@ const TARGET_ITEMS: { id: string; label: string; base: CropTargetBase; parity: C
 
 export function CropTargetPopover({ target, onSelectTarget }: CropTargetPopoverProps) {
   return (
-    <div className="absolute left-0 right-0 bottom-full mb-1.5 bg-[#131720] border border-[#2E3648] rounded-xl shadow-2xl p-1.5 z-30 space-y-1 text-xs">
+    <div className="absolute left-0 right-0 top-full mt-1.5 bg-[#131720] border border-[#2E3648] rounded-xl shadow-2xl p-1.5 z-40 space-y-1 text-xs">
       <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-1">
         Select Target Pages
       </div>

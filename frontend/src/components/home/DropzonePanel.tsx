@@ -8,12 +8,14 @@ import {
   FolderOpen,
   ArrowRight,
   Compass,
-  Layers,
-  Scissors,
-  BookOpen,
-  FileCheck,
-  Sparkles,
 } from "lucide-react";
+import {
+  IconImposingStudio,
+  IconContourStudio,
+  IconBookStudio,
+  IconPreflightStudio,
+  IconFlipbookStudio,
+} from "@/components/shared/StudioIcons";
 import type { UniversalAnalysis } from "./types";
 
 export interface DropzonePanelProps {
@@ -156,7 +158,7 @@ export function DropzonePanel({
             className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-emerald-500/50 rounded-lg transition-all flex flex-col justify-between group"
           >
             <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 w-fit mb-2">
-              <Layers size={16} />
+              <IconImposingStudio size={16} />
             </div>
             <div className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors">
               Imposing Studio
@@ -168,7 +170,7 @@ export function DropzonePanel({
             className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-pink-500/50 rounded-lg transition-all flex flex-col justify-between group"
           >
             <div className="p-2 rounded-lg bg-pink-500/10 text-pink-400 w-fit mb-2">
-              <Scissors size={16} />
+              <IconContourStudio size={16} />
             </div>
             <div className="text-xs font-bold text-white group-hover:text-pink-300 transition-colors">
               Contour Studio
@@ -180,7 +182,7 @@ export function DropzonePanel({
             className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-amber-500/50 rounded-lg transition-all flex flex-col justify-between group"
           >
             <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 w-fit mb-2">
-              <BookOpen size={16} />
+              <IconBookStudio size={16} />
             </div>
             <div className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
               Book Studio
@@ -192,7 +194,7 @@ export function DropzonePanel({
             className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-blue-500/50 rounded-lg transition-all flex flex-col justify-between group"
           >
             <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 w-fit mb-2">
-              <FileCheck size={16} />
+              <IconPreflightStudio size={16} />
             </div>
             <div className="text-xs font-bold text-white group-hover:text-blue-300 transition-colors">
               Preflight Studio
@@ -204,7 +206,7 @@ export function DropzonePanel({
             className="p-3 bg-[#161A24] hover:bg-[#1B202D] border border-[#242A38] hover:border-indigo-500/50 rounded-lg transition-all flex flex-col justify-between group"
           >
             <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 w-fit mb-2">
-              <Sparkles size={16} />
+              <IconFlipbookStudio size={16} />
             </div>
             <div className="text-xs font-bold text-white group-hover:text-indigo-300 transition-colors">
               Flipbook Studio

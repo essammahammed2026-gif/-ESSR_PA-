@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
 import { apiFetch } from "@/lib/api";
+import { type LengthUnit, getStoredUnit, setStoredUnit } from "@/lib/units";
 import { useBookSession } from "./useBookSession";
 import { useBookModules } from "./useBookModules";
 import { useBookPageOps } from "./useBookPageOps";
@@ -11,9 +12,18 @@ import type { CropBox, DetectCropResult } from "@/types/book_studio";
  * Composer for Book Studio state.
  * Combines useBookSession (session lifecycle + page CRUD) with
  * useBookModules (module configs + processing & export ops), preserving the exact
- * return API consumed by book-studio/page.tsx (zero consumer changes).
+ * return API consumed by book-studio/page.tsx.
  */
 export function useBookStudioState() {
+  const [unit, setUnitState] = useState<LengthUnit>(() => getStoredUnit("mm"));
+  const setUnit = useCallback((next: LengthUnit) => {
+    setUnitState(next);
+    setStoredUnit(next);
+  }, []);
+
+  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  const [eyedropperActive, setEyedropperActive] = useState<boolean>(false);
+
   const [shortcuts, setShortcuts] = useState<Record<string, string>>({
     undo: "ctrl+z",
     redo: "ctrl+y",
@@ -22,6 +32,10 @@ export function useBookStudioState() {
     next_page: "]",
     toggle_original: "o",
     rotate: "r",
+    zoom_in: "=",
+    zoom_out: "-",
+    zoom_reset: "ctrl+0",
+    pan: "h",
   });
   const [historyLimit, setHistoryLimit] = useState<number>(50);
 
@@ -31,13 +45,27 @@ export function useBookStudioState() {
       .then((data) => {
         if (data?.book_studio) {
           if (data.book_studio.history_limit) setHistoryLimit(data.book_studio.history_limit);
-          if (data.book_studio.shortcuts) setShortcuts(data.book_studio.shortcuts);
+          if (data.book_studio.shortcuts) {
+            setShortcuts((prev) => ({ ...prev, ...data.book_studio.shortcuts }));
+          }
         }
       })
       .catch(() => {});
   }, []);
 
   const session = useBookSession();
+
+  // Keep selectedPageIds valid when pages list changes or selectedPageId initializes
+  useEffect(() => {
+    const validIds = new Set(session.pages.map((p) => p.id));
+    setSelectedPageIds((prev) => {
+      const filtered = prev.filter((id) => validIds.has(id));
+      if (filtered.length > 0) return filtered;
+      return session.selectedPageId && validIds.has(session.selectedPageId)
+        ? [session.selectedPageId]
+        : [];
+    });
+  }, [session.pages, session.selectedPageId]);
 
   const history = useBookHistory({
     sessionId: session.sessionId,
@@ -91,6 +119,7 @@ export function useBookStudioState() {
     const data = await session.initSession(arg);
     if (data?.pages && data.pages.length > 0) {
       history.initHistory(data.pages, data.pages[0]?.id ?? null);
+      setSelectedPageIds([data.pages[0].id]);
     }
     return data;
   }, [session, history]);
@@ -107,7 +136,11 @@ export function useBookStudioState() {
       redo,
       restoreOriginal: revertToOriginal,
       rotateCW: () => {
-        if (session.selectedPageId) pageOps.rotatePage(session.selectedPageId, 90);
+        if (selectedPageIds.length > 1) {
+          pageOps.rotatePages(selectedPageIds, 90);
+        } else if (session.selectedPageId) {
+          pageOps.rotatePage(session.selectedPageId, 90);
+        }
       },
     },
     shortcuts,
@@ -122,6 +155,10 @@ export function useBookStudioState() {
     next_page: formatCombo("next_page"),
     toggle_original: formatCombo("toggle_original"),
     rotate: formatCombo("rotate"),
+    zoom_in: formatCombo("zoom_in"),
+    zoom_out: formatCombo("zoom_out"),
+    zoom_reset: formatCombo("zoom_reset"),
+    pan: formatCombo("pan"),
   }), [formatCombo]);
 
   // Merged error state (session init errors + export errors)
@@ -177,7 +214,18 @@ export function useBookStudioState() {
       enhanceColors: modules.restorationModule.enhanceColors,
       saturation: modules.debouncedSaturation,
       contrast: modules.debouncedContrast,
+      colorMode: modules.restorationModule.colorMode,
+      bwThreshold: modules.debouncedBwThreshold,
+      whitenBg: modules.restorationModule.whitenBg,
+      bleedEnabled: modules.bleedModule.enabled,
+      bleedScope: modules.bleedModule.scope,
+      bleedMm: modules.debouncedBleed,
+      bleedMode: modules.bleedModule.mode,
+      bleedColor: modules.debouncedBleedColor,
+      bleedPlacement: modules.bleedModule.placement,
+      showCropMarks: modules.bleedModule.showCropMarks,
     });
+
   }, [session, modules]);
 
   // Export wired with the live intake mode for the download filename
@@ -190,9 +238,14 @@ export function useBookStudioState() {
     session.resetSession();
     modules.resetModules();
     history.resetHistory();
+    setSelectedPageIds([]);
+    setEyedropperActive(false);
   }, [session, modules, history]);
 
   return {
+    unit, setUnit,
+    selectedPageIds, setSelectedPageIds,
+    eyedropperActive, setEyedropperActive,
     intakeMode: session.intakeMode, setIntakeMode: session.setIntakeMode,
     fileSingle: session.fileSingle, setFileSingle: session.setFileSingle,
     fileOdds: session.fileOdds, setFileOdds: session.setFileOdds,
@@ -227,9 +280,12 @@ export function useBookStudioState() {
     resetJob,
     initSession,
     rotatePage: pageOps.rotatePage,
+    rotatePages: pageOps.rotatePages,
     deletePage: pageOps.deletePage,
+    deletePages: pageOps.deletePages,
     reorderPages: pageOps.reorderPages,
     duplicatePage: pageOps.duplicatePage,
+    duplicatePages: pageOps.duplicatePages,
     insertBlankPage: pageOps.insertBlankPage,
     copyPage: pageOps.copyPage,
     pastePage: pageOps.pastePage,
@@ -246,6 +302,7 @@ export function useBookStudioState() {
     redo,
     jumpToStep,
     revertToOriginal,
+    shortcuts,
     shortcutLabels,
   };
 }

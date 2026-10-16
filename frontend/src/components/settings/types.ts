@@ -111,6 +111,10 @@ export const DEFAULT_SETTINGS: AppSettingsData = {
       next_page: "]",
       toggle_original: "o",
       rotate: "r",
+      zoom_in: "=",
+      zoom_out: "-",
+      zoom_reset: "ctrl+0",
+      pan: "h",
     },
   },
 };

@@ -7,7 +7,8 @@ import { BookStudioPage } from "@/types/book_studio";
 export interface DeckListViewProps {
   pages: BookStudioPage[];
   selectedPageId: string | null;
-  onSelect: (id: string) => void;
+  selectedPageIds?: string[];
+  onSelect: (id: string, e?: React.MouseEvent) => void;
   onReorder: (fromIdx: number, toIdx: number) => void;
   onContextMenu?: (e: React.MouseEvent, page: BookStudioPage) => void;
   emptyLabel?: string;
@@ -16,6 +17,7 @@ export interface DeckListViewProps {
 export function DeckListView({
   pages,
   selectedPageId,
+  selectedPageIds,
   onSelect,
   onReorder,
   onContextMenu,
@@ -63,7 +65,7 @@ export function DeckListView({
   return (
     <div className="flex flex-col space-y-1 select-none">
       {pages.map((p, idx) => {
-        const isSelected = p.id === selectedPageId;
+        const isSelected = selectedPageIds ? selectedPageIds.includes(p.id) : p.id === selectedPageId;
         const isSelfDragging = draggedIdx === idx;
         const isTarget = dragOverIdx === idx;
         const isSplit = Boolean(
@@ -81,7 +83,7 @@ export function DeckListView({
             onDragOver={(e) => handleDragOver(e, idx)}
             onDrop={(e) => handleDrop(e, idx)}
             onDragEnd={handleDragEnd}
-            onClick={() => onSelect(p.id)}
+            onClick={(e) => onSelect(p.id, e)}
             onContextMenu={(e) => {
               if (onContextMenu) {
                 e.preventDefault();

@@ -51,6 +51,8 @@ export interface BookStudioPage extends BasePage {
   height_mm?: number;
   orig_width_mm?: number;
   orig_height_mm?: number;
+  color_space?: string;
+  dpi?: number;
   rev?: number; // mutation counter: busts cached thumbnails after in-place crop/rotate
 }
 
@@ -86,16 +88,32 @@ export interface DeskewModuleConfig {
   maxAngle: number;
   ignoreBorders: boolean;
   showGrid: boolean;
+  gridColor: string;
   scope: ModulePageScope;
+}
+
+export interface BleedEntry {
+  id: string;
+  bleedMm: number;
+  mode: "mirror" | "solid";
+  solidColor?: string;
+  placement: "outside" | "inside";
+  showCropMarks: boolean;
 }
 
 export interface BleedModuleConfig {
   enabled: boolean;
   bleedMm: number;
+  mode: "mirror" | "solid";
+  solidColor: string;
+  placement: "outside" | "inside";
   showCropMarks: boolean;
   exportDpi: number;
   scope: ModulePageScope;
+  appliedBleeds: BleedEntry[];
 }
+
+export type CleanupColorMode = "color" | "grayscale" | "bw";
 
 export interface RestorationModuleConfig {
   enabled: boolean;
@@ -105,6 +123,9 @@ export interface RestorationModuleConfig {
   enhanceColors: boolean;
   saturation: number;
   contrast: number;
+  colorMode: CleanupColorMode;
+  bwThreshold: number;
+  whitenBg: boolean;
   sharpen: boolean;
   scope: ModulePageScope;
 }
@@ -155,4 +176,15 @@ export interface ThumbnailRenderOpts {
   enhanceColors: boolean;
   saturation: number;
   contrast: number;
+  colorMode: CleanupColorMode;
+  bwThreshold: number;
+  whitenBg: boolean;
+  bleedEnabled: boolean;
+  bleedScope: ModulePageScope;
+  bleedMm: number;
+  bleedMode: "mirror" | "solid";
+  bleedColor: string;
+  bleedPlacement: "outside" | "inside";
+  showCropMarks: boolean;
 }
+
