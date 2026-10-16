@@ -43,8 +43,7 @@
    - Restrict file exploration exclusively to relevant code directories. 
    - Completely ignore build outputs, dependencies, and environment files (`node_modules/`, `.next/`, `.venv/`).
    - ABSOLUTELY ignore the contents of `backend/temp_uploads/` and `backend/public_flipbooks/` during text and code searches so the agent doesn't waste tokens reading old, cached images or heavy PDFs.
-
-
+   - 
 3. **Automated Session Hand-Off & Crash Recovery:**
    - At the beginning of a session, check if `backend/temp_uploads/` contains leftover files from a previous crash. If it does, run the `backend/engines/storage_cleaner.py` routine to safely purge them before writing code.
    - Before ending a coding session, the agent MUST summarize workspace changes into `SESSION_LOG.md` and ensure `temp_uploads/` is completely empty.
@@ -53,6 +52,12 @@
    - The AI agent is ABSOLUTELY FORBIDDEN from running `git commit`, `git push`, or `git pull` commands autonomously.
    - All code version check-ins, remote synchronization, and branch merges are the exclusive responsibility of the human user.
    - The agent may use presentational commands like `git status` or `git diff` for workspace diagnostics during crash recoveries or logs, but it must never modify the Git ledger history independently.
+
+
+5. **Zero-Lag Navigation Mapping Protocol:**
+   - The agent is strictly forbidden from running slow, global repository text searches to locate core features or routing code.
+   - Before attempting to find or open a file, the agent MUST immediately read the "Repository Navigation Map" at the top of `docs/architecture.md` to instantly locate the target file's path.
+   - If editing a route endpoint in `backend/*_api.py`, the agent must immediately open its verified twin engine in `backend/engines/*_engine.py` without searching.
 
 
 ---

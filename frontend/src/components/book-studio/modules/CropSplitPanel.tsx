@@ -12,7 +12,7 @@ import { CropModuleConfig, CropBox, BookStudioPage, SplitLine, CropTargetBase, C
 import { DimensionsBox } from "./DimensionsBox";
 import { SplitLinesEditor } from "./SplitLinesEditor";
 import { CropTargetPopover } from "./CropTargetPopover";
-import { clampCut, buildSegments } from "@/lib/splitLines";
+import { buildSegments, getNextCutLine } from "@/lib/splitLines";
 
 export interface CropSplitPanelProps {
   cropModule: CropModuleConfig;
@@ -77,11 +77,7 @@ export function CropSplitPanel({
   };
 
   const handleAddCutLine = () => {
-    const lastDir = splitLines.length > 0 ? splitLines[splitLines.length - 1].direction : "vertical";
-    const lastPos = splitLines.length > 0 ? splitLines[splitLines.length - 1].pos : 0.5;
-    const hasCenter = splitLines.some((l) => l.direction === lastDir && Math.abs(l.pos - 0.5) < 0.08);
-    const nextPos = hasCenter ? (lastPos <= 0.5 ? 0.67 : 0.33) : 0.5;
-    setLines([...splitLines, { pos: clampCut(nextPos), direction: lastDir }]);
+    setLines([...splitLines, getNextCutLine(splitLines)]);
   };
 
   const setTarget = (base: CropTargetBase, parity: CropParity = "both", customRange = "") => {

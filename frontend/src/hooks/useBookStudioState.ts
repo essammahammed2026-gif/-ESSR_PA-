@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
 import { apiFetch } from "@/lib/api";
 import { useBookSession } from "./useBookSession";
 import { useBookModules } from "./useBookModules";
-import { useBookExport } from "./useBookExport";
 import { useBookPageOps } from "./useBookPageOps";
 import { useBookHistory } from "./useBookHistory";
 import { useBookShortcuts } from "./useBookShortcuts";
@@ -11,7 +10,7 @@ import type { CropBox, DetectCropResult } from "@/types/book_studio";
 /**
  * Composer for Book Studio state.
  * Combines useBookSession (session lifecycle + page CRUD) with
- * useBookModules (module configs + processing ops), preserving the exact
+ * useBookModules (module configs + processing & export ops), preserving the exact
  * return API consumed by book-studio/page.tsx (zero consumer changes).
  */
 export function useBookStudioState() {
@@ -39,7 +38,6 @@ export function useBookStudioState() {
   }, []);
 
   const session = useBookSession();
-  const clearCropsRef = useRef<((ids?: string[]) => void) | undefined>(undefined);
 
   const history = useBookHistory({
     sessionId: session.sessionId,
@@ -47,7 +45,6 @@ export function useBookStudioState() {
     setPages: session.setPages,
     selectedPageId: session.selectedPageId,
     setSelectedPageId: session.setSelectedPageId,
-    clearPageCrops: (ids) => clearCropsRef.current?.(ids),
     maxLimit: historyLimit,
   });
 
@@ -68,7 +65,26 @@ export function useBookStudioState() {
     setSelectedPageId: session.setSelectedPageId,
     recordStep: history.recordStep,
   });
-  clearCropsRef.current = modules.clearPageCrops;
+
+  const jumpToStep = useCallback(async (index: number) => {
+    modules.clearPageCrops();
+    await history.jumpToStep(index);
+  }, [modules, history]);
+
+  const undo = useCallback(() => {
+    modules.clearPageCrops();
+    history.undo();
+  }, [modules, history]);
+
+  const redo = useCallback(() => {
+    modules.clearPageCrops();
+    history.redo();
+  }, [modules, history]);
+
+  const revertToOriginal = useCallback(() => {
+    modules.clearPageCrops();
+    history.revertToOriginal();
+  }, [modules, history]);
 
   // Initialize history when session loads pages
   const initSession = useCallback(async (arg?: string | File[]) => {
@@ -87,9 +103,9 @@ export function useBookStudioState() {
 
   const { formatCombo } = useBookShortcuts({
     handlers: {
-      undo: history.undo,
-      redo: history.redo,
-      restoreOriginal: history.revertToOriginal,
+      undo,
+      redo,
+      restoreOriginal: revertToOriginal,
       rotateCW: () => {
         if (session.selectedPageId) pageOps.rotatePage(session.selectedPageId, 90);
       },
@@ -107,22 +123,16 @@ export function useBookStudioState() {
     toggle_original: formatCombo("toggle_original"),
     rotate: formatCombo("rotate"),
   }), [formatCombo]);
-  const exporter = useBookExport({
-    sessionId: session.sessionId,
-    bleedModule: modules.bleedModule,
-    deskewModule: modules.deskewModule,
-    restorationModule: modules.restorationModule,
-  });
 
   // Merged error state (session init errors + export errors)
-  const error: string | null = session.error ?? exporter.exportError ?? null;
+  const error: string | null = session.error ?? modules.exportError ?? null;
   const setError: Dispatch<SetStateAction<string | null>> = useCallback((value) => {
     const resolved = typeof value === "function"
-      ? (value as (prev: string | null) => string | null)(session.error ?? exporter.exportError ?? null)
+      ? (value as (prev: string | null) => string | null)(session.error ?? modules.exportError ?? null)
       : value;
     session.setError(resolved);
-    exporter.setExportError(resolved);
-  }, [session, exporter]);
+    modules.setExportError(resolved);
+  }, [session, modules]);
 
   // Detect deskew angle using the live deskew-module tolerances
   const detectPageAngle = useCallback(async (pageId?: string): Promise<number | null> => {
@@ -172,16 +182,15 @@ export function useBookStudioState() {
 
   // Export wired with the live intake mode for the download filename
   const exportPdf = useCallback(async (): Promise<void> => {
-    await exporter.exportPdf(session.intakeMode);
-  }, [session, exporter]);
+    await modules.exportPdf(session.intakeMode);
+  }, [session, modules]);
 
   // Reset session + module configs + history
   const resetJob = useCallback(() => {
     session.resetSession();
     modules.resetModules();
     history.resetHistory();
-    exporter.setExportError(null);
-  }, [session, modules, history, exporter]);
+  }, [session, modules, history]);
 
   return {
     intakeMode: session.intakeMode, setIntakeMode: session.setIntakeMode,
@@ -196,7 +205,7 @@ export function useBookStudioState() {
     selectedPageId: session.selectedPageId, setSelectedPageId: session.setSelectedPageId,
     activeTab: session.activeTab, setActiveTab: session.setActiveTab,
     isInitializing: session.isInitializing,
-    isExporting: exporter.isExporting,
+    isExporting: modules.isExporting,
     error, setError,
     previewCleaned: modules.previewCleaned, setPreviewCleaned: modules.setPreviewCleaned,
     debouncedBleed: modules.debouncedBleed,
@@ -233,10 +242,10 @@ export function useBookStudioState() {
     currentHistoryIndex: history.currentIndex,
     canUndo: history.canUndo,
     canRedo: history.canRedo,
-    undo: history.undo,
-    redo: history.redo,
-    jumpToStep: history.jumpToStep,
-    revertToOriginal: history.revertToOriginal,
+    undo,
+    redo,
+    jumpToStep,
+    revertToOriginal,
     shortcutLabels,
   };
 }

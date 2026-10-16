@@ -212,8 +212,6 @@ export function BookWorkspace({
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
     return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
   }, [activeCropDrag, setCropModule]);
-  const handleCropPointerMove = () => {};
-  const handleCropPointerUp = () => {};
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
@@ -289,7 +287,7 @@ export function BookWorkspace({
         currentCropHeightMm={currentCropHeightMm} currentCropWidthMm={currentCropWidthMm}
         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
         onImageLoad={(w, h) => setNaturalSize({ w, h })}
-        onCropPointerDown={handleCropPointerDown} onCropPointerMove={handleCropPointerMove} onCropPointerUp={handleCropPointerUp} activeDrag={activeCropDrag}
+        onCropPointerDown={handleCropPointerDown} activeDrag={activeCropDrag}
       />
     </div>
   );

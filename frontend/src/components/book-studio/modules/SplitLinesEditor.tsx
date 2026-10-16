@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import type { SplitDirection, SplitLine } from "@/types/book_studio";
-import { clampCut } from "@/lib/splitLines";
+import { clampCut, getNextCutLine } from "@/lib/splitLines";
 
 export interface SplitLinesEditorProps {
   lines: SplitLine[];
@@ -99,11 +99,7 @@ function CutLineRow({
 export function SplitLinesEditor({ lines, disabled, onLinesChange }: SplitLinesEditorProps) {
   if (disabled) return null;
   const addLine = () => {
-    const lastDir = lines.length > 0 ? lines[lines.length - 1].direction : "vertical";
-    const lastPos = lines.length > 0 ? lines[lines.length - 1].pos : 0.5;
-    const hasCenter = lines.some((l) => l.direction === lastDir && Math.abs(l.pos - 0.5) < 0.08);
-    const nextPos = hasCenter ? (lastPos <= 0.5 ? 0.67 : 0.33) : 0.5;
-    onLinesChange([...lines, { pos: clampCut(nextPos), direction: lastDir }]);
+    onLinesChange([...lines, getNextCutLine(lines)]);
   };
   return (
     <div className="space-y-1.5 p-2 rounded-lg bg-[#0F131C] border border-[#242A38]">
