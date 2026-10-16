@@ -1,7 +1,11 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
+import { apiFetch } from "@/lib/api";
 import { useBookSession } from "./useBookSession";
 import { useBookModules } from "./useBookModules";
 import { useBookExport } from "./useBookExport";
+import { useBookPageOps } from "./useBookPageOps";
+import { useBookHistory } from "./useBookHistory";
+import { useBookShortcuts } from "./useBookShortcuts";
 import type { CropBox, DetectCropResult } from "@/types/book_studio";
 
 /**
@@ -11,14 +15,98 @@ import type { CropBox, DetectCropResult } from "@/types/book_studio";
  * return API consumed by book-studio/page.tsx (zero consumer changes).
  */
 export function useBookStudioState() {
+  const [shortcuts, setShortcuts] = useState<Record<string, string>>({
+    undo: "ctrl+z",
+    redo: "ctrl+y",
+    restore_original: "ctrl+shift+r",
+    prev_page: "[",
+    next_page: "]",
+    toggle_original: "o",
+    rotate: "r",
+  });
+  const [historyLimit, setHistoryLimit] = useState<number>(50);
+
+  useEffect(() => {
+    apiFetch("/api/settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.book_studio) {
+          if (data.book_studio.history_limit) setHistoryLimit(data.book_studio.history_limit);
+          if (data.book_studio.shortcuts) setShortcuts(data.book_studio.shortcuts);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const session = useBookSession();
+  const clearCropsRef = useRef<((ids?: string[]) => void) | undefined>(undefined);
+
+  const history = useBookHistory({
+    sessionId: session.sessionId,
+    pages: session.pages,
+    setPages: session.setPages,
+    selectedPageId: session.selectedPageId,
+    setSelectedPageId: session.setSelectedPageId,
+    clearPageCrops: (ids) => clearCropsRef.current?.(ids),
+    maxLimit: historyLimit,
+  });
+
+  const pageOps = useBookPageOps({
+    sessionId: session.sessionId,
+    pages: session.pages,
+    setPages: session.setPages,
+    selectedPageId: session.selectedPageId,
+    setSelectedPageId: session.setSelectedPageId,
+    recordStep: history.recordStep,
+  });
+
   const modules = useBookModules({
     sessionId: session.sessionId,
     pages: session.pages,
     setPages: session.setPages,
     selectedPageId: session.selectedPageId,
     setSelectedPageId: session.setSelectedPageId,
+    recordStep: history.recordStep,
   });
+  clearCropsRef.current = modules.clearPageCrops;
+
+  // Initialize history when session loads pages
+  const initSession = useCallback(async (arg?: string | File[]) => {
+    const data = await session.initSession(arg);
+    if (data?.pages && data.pages.length > 0) {
+      history.initHistory(data.pages, data.pages[0]?.id ?? null);
+    }
+    return data;
+  }, [session, history]);
+
+  useEffect(() => {
+    if (session.sessionId && session.pages.length > 0 && history.history.length === 0) {
+      history.initHistory(session.pages, session.selectedPageId);
+    }
+  }, [session.sessionId, session.pages, session.selectedPageId, history]);
+
+  const { formatCombo } = useBookShortcuts({
+    handlers: {
+      undo: history.undo,
+      redo: history.redo,
+      restoreOriginal: history.revertToOriginal,
+      rotateCW: () => {
+        if (session.selectedPageId) pageOps.rotatePage(session.selectedPageId, 90);
+      },
+    },
+    shortcuts,
+    enabled: Boolean(session.sessionId),
+  });
+
+  const shortcutLabels = useMemo(() => ({
+    undo: formatCombo("undo"),
+    redo: formatCombo("redo"),
+    restore_original: formatCombo("restore_original"),
+    prev_page: formatCombo("prev_page"),
+    next_page: formatCombo("next_page"),
+    toggle_original: formatCombo("toggle_original"),
+    rotate: formatCombo("rotate"),
+  }), [formatCombo]);
   const exporter = useBookExport({
     sessionId: session.sessionId,
     bleedModule: modules.bleedModule,
@@ -87,12 +175,13 @@ export function useBookStudioState() {
     await exporter.exportPdf(session.intakeMode);
   }, [session, exporter]);
 
-  // Reset session + module configs (matches the original resetJob behavior)
+  // Reset session + module configs + history
   const resetJob = useCallback(() => {
     session.resetSession();
     modules.resetModules();
+    history.resetHistory();
     exporter.setExportError(null);
-  }, [session, modules, exporter]);
+  }, [session, modules, history, exporter]);
 
   return {
     intakeMode: session.intakeMode, setIntakeMode: session.setIntakeMode,
@@ -127,11 +216,27 @@ export function useBookStudioState() {
     detectPageAngle,
     settings: modules.settings,
     resetJob,
-    initSession: session.initSession,
-    rotatePage: session.rotatePage,
-    deletePage: session.deletePage,
-    reorderPages: session.reorderPages,
+    initSession,
+    rotatePage: pageOps.rotatePage,
+    deletePage: pageOps.deletePage,
+    reorderPages: pageOps.reorderPages,
+    duplicatePage: pageOps.duplicatePage,
+    insertBlankPage: pageOps.insertBlankPage,
+    copyPage: pageOps.copyPage,
+    pastePage: pageOps.pastePage,
+    canPaste: pageOps.canPaste,
+    extractPage: pageOps.extractPage,
     exportPdf,
     getThumbnailUrl,
+    // History & Safety Journal API
+    history: history.history,
+    currentHistoryIndex: history.currentIndex,
+    canUndo: history.canUndo,
+    canRedo: history.canRedo,
+    undo: history.undo,
+    redo: history.redo,
+    jumpToStep: history.jumpToStep,
+    revertToOriginal: history.revertToOriginal,
+    shortcutLabels,
   };
 }

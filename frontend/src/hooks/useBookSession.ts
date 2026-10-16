@@ -103,71 +103,15 @@ export function useBookSession() {
       if (data.pages && data.pages.length > 0) {
         setSelectedPageId(data.pages[0].id);
       }
+      return data;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
+      return null;
     } finally {
       setIsInitializing(false);
     }
   }, [files, fileSingle]);
-
-  // Page manipulation actions
-  const rotatePage = useCallback(async (pageId: string, delta: number = 90) => {
-    if (!sessionId) return;
-    try {
-      const res = await apiFetch(`/api/book-scan/rotate/${sessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page_id: pageId, rotation_delta: delta }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPages((prev) =>
-          prev.map((p) => (p.id === pageId ? { ...p, rotation: data.page.rotation } : p))
-        );
-      }
-    } catch (err) {
-      console.error("Rotate page failed:", err);
-    }
-  }, [sessionId]);
-
-  const deletePage = useCallback(async (pageId: string) => {
-    if (!sessionId) return;
-    try {
-      const res = await apiFetch(`/api/book-scan/page/${sessionId}/${pageId}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        setPages((prev) => {
-          const remaining = prev.filter((p) => p.id !== pageId);
-          if (selectedPageId === pageId) {
-            setSelectedPageId(remaining.length > 0 ? remaining[0].id : null);
-          }
-          return remaining;
-        });
-      }
-    } catch (err) {
-      console.error("Delete page failed:", err);
-    }
-  }, [sessionId, selectedPageId]);
-
-  const reorderPages = useCallback(async (fromIdx: number, toIdx: number) => {
-    if (!sessionId || fromIdx === toIdx) return;
-    setPages((prev) => {
-      const copy = [...prev];
-      const [moved] = copy.splice(fromIdx, 1);
-      copy.splice(toIdx, 0, moved);
-
-      // Persist to backend asynchronously
-      apiFetch(`/api/book-scan/reorder/${sessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page_ids: copy.map((p) => p.id) }),
-      }).catch((err) => console.error("Reorder backend sync error:", err));
-
-      return copy;
-    });
-  }, [sessionId]);
 
   // Detect deskew angle via backend analysis
   const detectPageAngle = useCallback(async (
@@ -276,8 +220,5 @@ export function useBookSession() {
     buildThumbnailUrl,
     resetSession,
     initSession,
-    rotatePage,
-    deletePage,
-    reorderPages,
   };
 }

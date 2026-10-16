@@ -19,6 +19,7 @@ export interface UseBookModulesArgs {
   setPages: Dispatch<SetStateAction<BookStudioPage[]>>;
   selectedPageId: string | null;
   setSelectedPageId: Dispatch<SetStateAction<string | null>>;
+  recordStep?: (label: string, nextPages: BookStudioPage[], nextSelectedId?: string | null) => void;
 }
 
 /**
@@ -31,6 +32,7 @@ export function useBookModules({
   setPages,
   selectedPageId,
   setSelectedPageId,
+  recordStep,
 }: UseBookModulesArgs) {
   // Processing settings
   const [previewCleaned, setPreviewCleaned] = useState<boolean>(true);
@@ -256,9 +258,11 @@ export function useBookModules({
     cropModule,
     setCropModule: updateCropModule,
     clearPageCrops,
+    recordStep,
   });
 
   return {
+    clearPageCrops,
     previewCleaned, setPreviewCleaned,
     cropModule, setCropModule: updateCropModule,
     deskewModule, setDeskewModule,

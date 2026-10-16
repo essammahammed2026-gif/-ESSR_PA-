@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { GripVertical, RotateCw, Trash2 } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import { BookStudioPage } from "@/types/book_studio";
 
 export interface DeckCardProps {
@@ -12,17 +12,26 @@ export interface DeckCardProps {
   isSelfDragging: boolean;
   thumbnailUrl: string;
   onSelect: (id: string) => void;
-  onRotate: (pageId: string, delta?: number) => void;
-  onDelete: (pageId: string) => void;
   onDragStart: (e: React.DragEvent<HTMLDivElement>, index: number) => void;
   onDragOver: (e: React.DragEvent<HTMLDivElement>, index: number) => void;
   onDrop: (e: React.DragEvent<HTMLDivElement>, index: number) => void;
   onDragEnd: () => void;
+  onContextMenu?: (e: React.MouseEvent, page: BookStudioPage) => void;
 }
 
 export function DeckCard({
-  page, index, isSelected, isDragTarget, isSelfDragging, thumbnailUrl,
-  onSelect, onRotate, onDelete, onDragStart, onDragOver, onDrop, onDragEnd,
+  page,
+  index,
+  isSelected,
+  isDragTarget,
+  isSelfDragging,
+  thumbnailUrl,
+  onSelect,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onContextMenu,
 }: DeckCardProps) {
   return (
     <div
@@ -32,6 +41,12 @@ export function DeckCard({
       onDrop={(e) => onDrop(e, index)}
       onDragEnd={onDragEnd}
       onClick={() => onSelect(page.id)}
+      onContextMenu={(e) => {
+        if (onContextMenu) {
+          e.preventDefault();
+          onContextMenu(e, page);
+        }
+      }}
       className={`group relative flex flex-col rounded-lg border cursor-pointer transition-all ${
         isSelfDragging
           ? "opacity-30 border-dashed border-cyan-500 scale-95"
@@ -52,34 +67,13 @@ export function DeckCard({
           className="object-contain max-h-full max-w-full pointer-events-none transition-transform duration-150"
           style={{ transform: `rotate(${page.rotation}deg)` }}
         />
-        <span className="absolute top-1 left-1 bg-black/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded font-mono">
-          #{index + 1}
-        </span>
         {page.rotation !== 0 && (
-          <span className="absolute top-1 right-1 bg-cyan-950/80 text-cyan-300 border border-cyan-700/50 text-[8px] font-mono px-1 rounded">
+          <span className="absolute top-1 right-1 bg-cyan-950/80 text-cyan-300 border border-cyan-700/50 text-[8px] font-mono px-1 rounded shadow-sm">
             {page.rotation}°
           </span>
         )}
         <div className="absolute bottom-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded px-1 py-0.5 text-white/80 flex items-center pointer-events-none">
           <GripVertical size={10} />
-        </div>
-        <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-0.5 bg-slate-900/90 rounded p-0.5 border border-slate-700/60 backdrop-blur-sm">
-          <button
-            type="button"
-            title="Rotate 90° CW"
-            onClick={(e) => { e.stopPropagation(); onRotate(page.id, 90); }}
-            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
-          >
-            <RotateCw size={10} />
-          </button>
-          <button
-            type="button"
-            title="Delete Page"
-            onClick={(e) => { e.stopPropagation(); onDelete(page.id); }}
-            className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/50 rounded transition-colors"
-          >
-            <Trash2 size={10} />
-          </button>
         </div>
       </div>
       <div className="px-1.5 py-1 text-[10px] text-slate-300 truncate font-medium bg-[#131720]/80 rounded-b-lg border-t border-[#242A38]">

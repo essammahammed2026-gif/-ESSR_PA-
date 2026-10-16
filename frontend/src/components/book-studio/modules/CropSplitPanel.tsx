@@ -1,13 +1,18 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { ChevronDown, Crop, Sparkles, RefreshCw, Scissors, Columns, Undo2 } from "lucide-react";
-import { CropModuleConfig, CropBox, BookStudioPage, SplitLine } from "@/types/book_studio";
+import React, { useState, useMemo, useRef, useEffect } from "react";
+import {
+  ChevronDown,
+  Sparkles,
+  RefreshCw,
+  Scissors,
+  Plus,
+} from "lucide-react";
+import { CropModuleConfig, CropBox, BookStudioPage, SplitLine, CropTargetBase, CropParity } from "@/types/book_studio";
 import { DimensionsBox } from "./DimensionsBox";
 import { SplitLinesEditor } from "./SplitLinesEditor";
-import { CropTargetSelector } from "./CropTargetSelector";
-import { cutPageCount, type AxisSegments } from "@/lib/splitLines";
-import { resolveCropTarget } from "@/lib/cropTarget";
+import { CropTargetPopover } from "./CropTargetPopover";
+import { clampCut, buildSegments } from "@/lib/splitLines";
 
 export interface CropSplitPanelProps {
   cropModule: CropModuleConfig;
@@ -23,7 +28,8 @@ export interface CropSplitPanelProps {
   hasSplitPages: boolean;
   currentCropWidthMm: number;
   currentCropHeightMm: number;
-  segments: AxisSegments;
+  pageBaseWidthMm?: number;
+  pageBaseHeightMm?: number;
   sessionId: string | null;
   open: boolean;
   onToggle: () => void;
@@ -35,121 +41,167 @@ export function CropSplitPanel({
   isDetectingCrop,
   detectCrop,
   splitSpread,
-  revertSpread,
   applyCrop,
   selectedPage,
   selectedPageId,
   isSelectedPageSplit,
-  hasSplitPages,
   currentCropWidthMm,
   currentCropHeightMm,
-  segments,
   sessionId,
   open,
   onToggle,
 }: CropSplitPanelProps) {
+  const [targetMenuOpen, setTargetMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const splitLines = cropModule.splitLines;
   const hasCutLines = splitLines.length > 0;
-  const pageCount = cutPageCount(splitLines);
-  const targetLabel = useMemo(
-    () => resolveCropTarget([], selectedPageId, cropModule.target).label,
-    [selectedPageId, cropModule.target]
+
+  const segments = useMemo(
+    () => buildSegments(splitLines, currentCropWidthMm, currentCropHeightMm),
+    [splitLines, currentCropWidthMm, currentCropHeightMm]
   );
+
+  // Close target dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setTargetMenuOpen(false);
+      }
+    };
+    if (targetMenuOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [targetMenuOpen]);
 
   const setLines = (lines: SplitLine[]) => {
     setCropModule((prev) => ({ ...prev, splitLines: lines }));
   };
+
+  const handleAddCutLine = () => {
+    const lastDir = splitLines.length > 0 ? splitLines[splitLines.length - 1].direction : "vertical";
+    const lastPos = splitLines.length > 0 ? splitLines[splitLines.length - 1].pos : 0.5;
+    const hasCenter = splitLines.some((l) => l.direction === lastDir && Math.abs(l.pos - 0.5) < 0.08);
+    const nextPos = hasCenter ? (lastPos <= 0.5 ? 0.67 : 0.33) : 0.5;
+    setLines([...splitLines, { pos: clampCut(nextPos), direction: lastDir }]);
+  };
+
+  const setTarget = (base: CropTargetBase, parity: CropParity = "both", customRange = "") => {
+    setCropModule((prev) => ({
+      ...prev,
+      target: { base, parity, customRange: customRange || prev.target.customRange },
+    }));
+    if (base !== "range") setTargetMenuOpen(false);
+  };
+
+  const targetLabel = useMemo(() => {
+    const t = cropModule.target;
+    if (t.base === "current") return "Current Page";
+    if (t.base === "range") return `Range (${t.customRange || "..."})`;
+    if (t.parity === "odds") return "Odd Pages";
+    if (t.parity === "evens") return "Even Pages";
+    return "All Pages";
+  }, [cropModule.target]);
+
+  const handleApplyAction = () => {
+    if (hasCutLines) {
+      if (splitSpread) splitSpread();
+    } else {
+      if (applyCrop) applyCrop();
+    }
+  };
+
   return (
     <div className={`rounded-xl border transition-all ${
       cropModule.enabled
         ? "bg-[#181D27] border-amber-500/40 shadow-sm shadow-amber-950/20"
         : "bg-[#181D27] border-[#242A38]"
-    } p-3 shadow-sm space-y-2.5`}>
-      {/* Dropdown Header with Caret & Master Toggle */}
+    } p-3 space-y-3 select-none`}>
+      {/* Header: Caret, Scissors Badge, Title, Styled Toggle Switch */}
       <div className="flex items-center justify-between">
         <button
           type="button"
           onClick={onToggle}
           className="flex items-center space-x-2 text-left hover:opacity-90 transition-opacity cursor-pointer"
-          title={open ? "Collapse Crop & Split options" : "Expand Crop & Split options"}
         >
           <div className={`transition-transform duration-150 text-slate-400 ${open ? "rotate-0" : "-rotate-90"}`}>
-            <ChevronDown size={14} />
+            <ChevronDown size={15} />
           </div>
-          <div className={`w-5 h-5 rounded flex items-center justify-center ${
-            cropModule.enabled ? "bg-amber-500/20 text-amber-400" : "bg-slate-800 text-slate-400"
-          }`}>
-            <Scissors size={13} />
+          <div className="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+            <Scissors size={14} />
           </div>
-          <span className="text-xs font-bold text-slate-200">Crop & Split</span>
+          <span className="text-sm font-bold text-slate-100">Crop & Split</span>
         </button>
 
-        {/* Master Enable Toggle */}
-        <div className="flex items-center space-x-2">
-          <span className={`text-[10px] font-mono uppercase font-semibold ${
-            cropModule.enabled ? "text-amber-400" : "text-slate-500"
-          }`}>
-            {cropModule.enabled ? "Active" : "Off"}
-          </span>
-          <label className="relative inline-flex items-center cursor-pointer" title="Toggle Crop & Split Module">
-            <input
-              type="checkbox"
-              checked={cropModule.enabled}
-              onChange={(e) => setCropModule((prev) => ({ ...prev, enabled: e.target.checked }))}
-              className="sr-only peer"
-            />
-            <div className="w-8 h-4 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-amber-500"></div>
-          </label>
-        </div>
+        {/* Master ON/OFF Switch matching concept.png */}
+        <button
+          type="button"
+          onClick={() => setCropModule((prev) => ({ ...prev, enabled: !prev.enabled }))}
+          className={`flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold font-mono transition-all ${
+            cropModule.enabled
+              ? "bg-cyan-600/90 text-white shadow-sm ring-1 ring-cyan-400/50"
+              : "bg-slate-800 text-slate-400 hover:text-slate-200"
+          }`}
+          title="Toggle Crop & Split"
+        >
+          {cropModule.enabled ? "ON" : "OFF"}
+        </button>
       </div>
 
-      {/* Dropdown Body */}
+      {/* Accordion Content */}
       {open && (
-        <div className={`pt-2 border-t border-[#242A38] space-y-2.5 ${
-          !cropModule.enabled ? "opacity-75" : ""
-        }`}>
-          {/* Cut lines: empty = plain crop; add lines to cut into pages */}
-          <SplitLinesEditor lines={splitLines}
-            disabled={isSelectedPageSplit} onLinesChange={setLines} />
+        <div className={`space-y-3 pt-1 border-t border-[#242A38] ${!cropModule.enabled ? "opacity-75" : ""}`}>
+          {/* Live Resulting Dimensions Box (presentational) */}
+          <DimensionsBox
+            currentCropWidthMm={currentCropWidthMm}
+            currentCropHeightMm={currentCropHeightMm}
+            segments={segments}
+            hasCutLines={hasCutLines}
+            isSelectedPageSplit={isSelectedPageSplit}
+            splitPageWidthMm={selectedPage?.width_mm}
+            splitPageHeightMm={selectedPage?.height_mm}
+          />
 
-          {/* Split Page Status & Revert Banner */}
-          {isSelectedPageSplit && selectedPage && (
-            <div className="p-2 bg-amber-950/30 border border-amber-800/40 rounded-lg flex items-center justify-between text-[11px]">
-              <div className="flex items-center space-x-1.5 text-amber-300">
-                <Scissors size={12} className="text-amber-400" />
-                <span className="font-semibold">Split Page ({selectedPage.label || selectedPage.half})</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => revertSpread && revertSpread("current", selectedPageId || undefined)}
-                className="flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[10px] font-medium border border-amber-500/40 transition-colors cursor-pointer"
-                title="Recombine into original 2-page spread to reposition crop or seam"
-              >
-                <Undo2 size={10} />
-                <span>Revert to Spread</span>
-              </button>
-            </div>
+          {/* Split Sheet (N Cuts) Row with + Add Cut Line */}
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-xs font-semibold text-slate-300">
+              Split Sheet <span className="text-slate-500 font-mono text-[11px]">({splitLines.length} Cuts)</span>
+            </span>
+            <button
+              type="button"
+              onClick={handleAddCutLine}
+              disabled={!cropModule.enabled}
+              className="flex items-center space-x-1 px-2.5 py-1 rounded-md text-[11px] font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-colors disabled:opacity-40 cursor-pointer"
+            >
+              <Plus size={12} />
+              <span>Add Cut Line</span>
+            </button>
+          </div>
+
+          {/* Cut Line sliders when cuts exist */}
+          {hasCutLines && (
+            <SplitLinesEditor
+              lines={splitLines}
+              disabled={!cropModule.enabled}
+              onLinesChange={setLines}
+            />
           )}
 
-          {/* Live Resulting Dimensions Box (presentational) */}
-          <DimensionsBox currentCropWidthMm={currentCropWidthMm} currentCropHeightMm={currentCropHeightMm} segments={segments} hasCutLines={hasCutLines} isSelectedPageSplit={isSelectedPageSplit} splitPageWidthMm={selectedPage?.width_mm} splitPageHeightMm={selectedPage?.height_mm} />
-          {/* Auto-Detect Book Bounds & Reset Buttons */}
-          <div className="flex items-center space-x-1.5">
+
+          {/* Action Buttons: Auto-Detect Bounds + Reset */}
+          <div className="grid grid-cols-[1fr_auto] gap-2 pt-0.5">
             <button
               type="button"
               onClick={() => detectCrop && detectCrop(selectedPageId || undefined)}
-              disabled={isDetectingCrop || !sessionId}
-              className="flex-1 flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-amber-950/60 hover:bg-amber-900/60 border border-amber-800/40 text-amber-300 rounded text-[11px] font-medium transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
-              title="Scan image contrast to automatically detect the book perimeter and central spine crease"
+              disabled={isDetectingCrop || !sessionId || !cropModule.enabled}
+              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-[#131720] hover:bg-slate-800 border border-[#2E3648] hover:border-amber-500/40 text-slate-200 hover:text-amber-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 cursor-pointer"
             >
               {isDetectingCrop ? (
                 <>
-                  <RefreshCw size={11} className="animate-spin text-amber-400" />
+                  <RefreshCw size={13} className="animate-spin text-amber-400" />
                   <span>Analyzing...</span>
                 </>
               ) : (
                 <>
-                  <Sparkles size={11} className="text-amber-400" />
+                  <Sparkles size={13} className="text-amber-400" />
                   <span>Auto-Detect Bounds</span>
                 </>
               )}
@@ -163,69 +215,45 @@ export function CropSplitPanel({
                   cropBox: { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0 },
                 }))
               }
-              className="px-2.5 py-1.5 text-[11px] text-slate-400 hover:text-slate-200 bg-[#131720] hover:bg-slate-800 border border-[#2E3648] rounded transition-colors cursor-pointer whitespace-nowrap"
-              title="Reset crop box to full sheet boundaries"
+              disabled={!cropModule.enabled}
+              className="px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-[#131720] hover:bg-slate-800 border border-[#2E3648] rounded-lg transition-colors cursor-pointer disabled:opacity-40"
+              title="Reset crop to full sheet"
             >
-              Reset Full Bed
+              Reset
             </button>
           </div>
 
-          {/* Target pages: All (default) / Current / Custom + Odds-Evens refinements */}
-          <CropTargetSelector
-            target={cropModule.target}
-            onChange={(t) => setCropModule((prev) => ({ ...prev, target: t }))}
-          />
-
-          {/* Single action across the target: cut when lines exist, otherwise crop */}
-          <div className="space-y-1.5 pt-0.5">
-            {hasCutLines && !isSelectedPageSplit ? (
+          {/* Unified Action Dropdown Button: [ Apply to All Pages ˅ ] */}
+          <div className="relative pt-1" ref={menuRef}>
+            <div className="flex rounded-xl overflow-hidden shadow-lg shadow-amber-950/30">
               <button
                 type="button"
-                onClick={() => splitSpread && splitSpread()}
-                disabled={!sessionId}
-                className="w-full flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-lg text-xs font-semibold shadow transition-all cursor-pointer disabled:cursor-not-allowed"
-                title="Crops scanner bed space and cuts along the cut lines across the target pages"
+                onClick={handleApplyAction}
+                disabled={!sessionId || !cropModule.enabled}
+                className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5"
+                style={{ backgroundColor: "var(--app-accent, #f59e0b)" }}
               >
-                <Columns size={12} />
-                <span>Split ({pageCount} Page{pageCount > 1 ? "s" : ""} × {targetLabel})</span>
+                <span>
+                  {hasCutLines
+                    ? `Split Sheet: Apply to ${targetLabel}`
+                    : `Apply to ${targetLabel}`}
+                </span>
               </button>
-            ) : (
               <button
                 type="button"
-                onClick={() => applyCrop && applyCrop()}
-                disabled={!sessionId}
-                className="w-full flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-lg text-xs font-semibold shadow transition-all cursor-pointer disabled:cursor-not-allowed"
-                title="Commits the crop box across the target pages — repeat crops refine the visible region"
+                onClick={() => setTargetMenuOpen((p) => !p)}
+                disabled={!sessionId || !cropModule.enabled}
+                className="px-2.5 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 border-l border-amber-600/60 transition-colors cursor-pointer flex items-center justify-center"
+                style={{ backgroundColor: "var(--app-accent, #d97706)" }}
+                title="Change Target Pages"
               >
-                <Crop size={12} />
-                <span>Apply Crop ({targetLabel})</span>
+                <ChevronDown size={14} className={`transition-transform ${targetMenuOpen ? "rotate-180" : ""}`} />
               </button>
-            )}
+            </div>
 
-            {/* Revert Options (Revert Current Page, Revert All) */}
-            {hasSplitPages && (
-              <div className="pt-1.5 border-t border-[#242A38] grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => revertSpread && revertSpread("current", selectedPageId || undefined)}
-                  disabled={!isSelectedPageSplit}
-                  className="flex items-center justify-center space-x-1 py-1 px-1.5 text-[10px] text-slate-300 hover:text-white bg-[#131720] hover:bg-slate-800 border border-[#2E3648] rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="Recombines this selected page and its sibling back into the original spread"
-                >
-                  <Undo2 size={10} />
-                  <span>Revert Current</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => revertSpread && revertSpread("all")}
-                  className="flex items-center justify-center space-x-1 py-1 px-1.5 text-[10px] text-amber-400/90 hover:text-amber-300 bg-[#131720] hover:bg-amber-950/30 border border-amber-900/40 rounded transition-colors cursor-pointer"
-                  title="Recombines ALL split spreads in the entire document back into uncut sheets"
-                >
-                  <Undo2 size={10} />
-                  <span>Revert All</span>
-                </button>
-              </div>
+            {/* Target Options Popover Menu */}
+            {targetMenuOpen && (
+              <CropTargetPopover target={cropModule.target} onSelectTarget={setTarget} />
             )}
           </div>
         </div>

@@ -8,6 +8,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **History Journal, Multi-Step Iterative Page Splitting & Shortcut Settings**:
+  - Implemented Adobe-style 50-step bounded History Journal with instant non-destructive browsing, timeline jumps, Undo (`Ctrl+Z`), Redo (`Ctrl+Y` / `Ctrl+Shift+Z`), and confirmation-guarded "Restore Original" (`Ctrl+Shift+R`).
+  - Added backend atomic state restoration via `POST /restore-pages/{session_id}` in `book_scan_api.py` and `BookScanEngine.restore_pages`.
+  - Unlocked multi-step iterative splitting: removed single-split guards and implemented coordinate composition (`vis_x1 + s_start * vis_w`) so sub-slices retain accurate absolute root coordinates without drifting or snapping.
+  - Replaced fragmented revert buttons in `CropSplitPanel.tsx` with unified Undo/Redo/History controls in `WorkspaceToolbar.tsx`.
+  - Added dedicated "Shortcuts & History" tab in System Settings (`ShortcutsSection.tsx`) with History Limit adjustment (10–100) and keyboard shortcut rebinding with browser conflict prevention.
+  - Extracted `RotateDropdown.tsx`, `HistoryPopover.tsx`, `RestoreOriginalModal.tsx`, `useBookHistory.ts`, and `useBookShortcuts.ts`, maintaining strict sub-300 line file caps across all modules.
+- **Split Revert Streamlining, Rotate Dropdown & Laptop Display Density**:
+  - Removed redundant "Split Page" banner box from `CropSplitPanel.tsx`; replaced "Split Pages active" label with an action button for "Revert Current Page" alongside "Revert All Spreads".
+  - Cleaned "Show Original" / "Show Edited" toggle in `WorkspaceToolbar.tsx`, removing the "Space / O" key badge for a cleaner presentation.
+  - Combined rotation buttons into a unified "R°" dropdown with 90° Clockwise, 90° Counter-Clockwise, and 180° rotation actions.
+  - Implemented responsive laptop scaling and configurable Display Density (`Compact`, `Balanced`, `Relaxed`) in `AppearanceContext` and Settings, optimizing 14"–15" laptop screens with ~15–20% more usable workspace and canvas area.
+- **Draggable Cut Lines, Roboto Typography & Book Studio Polish**:
+  - Cut lines are now draggable along their full length on the preview (new `SplitLineOverlay.tsx`), not only via the pill/slider; active line highlights while dragging.
+  - Roboto / Roboto Mono wired into Tailwind `font-sans`/`font-mono` via `next/font` CSS variables so the whole app uses them.
+  - Book Studio: unified cyan/amber into the user accent color, softer weights, refined crop handles, dotted canvas backdrop, thin scrollbars, accent focus rings and range sliders.
+- **Crop Box Controls & Studio Header Refinements**:
+  - Removed manual typing input fields for crop box values, returning entirely to interactive canvas preview adjustment via handles and box dragging.
+  - Restored clean, presentational `DimensionsBox` displaying real-time sheet and page segment dimensions.
+  - Removed the "Deck" and "Controls" panel toggle buttons situated above the tools panel in `StudioLayout`.
+  - Relocated the Grid and List deck view buttons to the left side of the top header bar directly above the deck panel.
+- **Manual Canvas Crop Box Resizing & Window-Backed Pointer Interactions**:
+  - Implemented direct edge resize bars (`n`, `s`, `w`, `e`) and corner handles (`nw`, `ne`, `sw`, `se`) on the preview crop box in `PageCanvas.tsx`, separating interior box dragging from edge scaling.
+  - Replaced element-level pointer capture with window-backed `pointermove` and `pointerup` event listeners in `BookWorkspace.tsx`, eliminating dropped frames and cursor escapes during rapid drag resizing.
+- **Dimension Field Steppers & Accurate Aspect Ratio Lock**:
+  - Added increment and decrement step buttons (up/down arrows) next to dimension inputs in `DimensionInputField.tsx` with unit-aware step scaling (1mm, 0.1cm, 0.05in, 5px).
+  - Wired aspect ratio lock toggle with truthful state and iconography (`Lock` with active accent outline vs `Unlock`), maintaining exact width/height proportionality when locked.
+- **Global Accent Color Theming Across Settings & App**:
+  - Updated Settings panel tabs, active highlights, header icons, and action buttons (`/settings`) to dynamically inherit the user's selected accent color (`var(--app-accent)`).
+- **Appearance & Theming System (`/settings`)**:
+  - Added dedicated "Appearance" tab in System Settings (`AppearanceSection.tsx`).
+  - Added Theme mode selector with "Dark" (active default) and "Light" (placeholder for future implementation).
+  - Added Global Accent Color Picker supporting native color picker, hex input, preset swatches (Amber Gold, Cyan Teal, Emerald Print, Purple Studio, Rose Crimson, Industrial Orange, Electric Blue), and live UI component preview.
+  - Implemented `AppearanceProvider` and `useAppearance` hook with global CSS custom properties (`--app-accent`, `--app-accent-rgb`, `--app-accent-15`, `--app-accent-30`, `--app-accent-glow`) dynamically skinning studio buttons, cut lines, handles, active tabs, and navigation highlights.
+  - Full client-side persistence in `localStorage` (`essr_theme`, `essr_accent_color`, `essr_selected_unit`) surviving page reloads.
+- **Crop Box Free Movement & Aspect Ratio Unlock**:
+  - Implemented free translation and movement of the entire crop box across the page bed via interior dragging (`cursor-move`).
+  - Unlocked aspect ratio by default; ensured button presses (resets, unit toggles, steppers, presets) never lock proportions or constrain resizing.
+  - Reduced minimum boundary constraints to 2% to ensure fluid, unconstrained positioning.
+- **Unit Selectors & Consolidated Page Properties**:
+  - Created centralized unit conversion utility in `lib/units.ts` for `mm`, `cm`, `pixels` (96 DPI), and `inches`.
+  - Added dropdown unit selector (`cm`, `mm`, `pixels`, `inches`) right next to the crop dimension input fields in `InteractiveDimensions.tsx`.
+  - Consolidated Page Properties modal into a single unified "Page Dimension" input with the matching unit selector.
+- **Book Studio Concept UI Overhaul & Top-Bar Controls (`concept.png`)**:
+  - Promoted high-contrast Amber `[ Export PDF ]` button to the top header bar alongside a segmented `[ ☰ ] [ ⊞ ]` View Toggle for switching between List and Grid deck views.
+  - Redesigned `CropSplitPanel`: master ON/OFF switch, scissors icon badge, `+ Add Cut Line`, `Auto-Detect Bounds`, `Reset`, and unified `[ Apply to All Pages ˅ ]` split action button with `CropTargetPopover`.
+  - Integrated `InteractiveDimensions` with direct millimeter width/height numeric inputs, 350ms debouncing, and interactive padlock (`🔒`/`🔓`) aspect ratio lock.
+  - Deprecated and cleanly removed obsolete `DimensionsBox.tsx` and `CropTargetSelector.tsx`.
+- **Deck Views (Clean DeckCard & Minimalist DeckListView)**:
+  - Cleaned `DeckCard` by removing `#n` badge and hover corner buttons to maximize thumbnail clarity and delegate actions to the context menu.
+  - Implemented `DeckListView` providing a minimalist list view with drag-and-drop reorder, active highlights, split indicators, and dimensions.
+- **Page Context Menu & Advanced Operations**:
+  - Added `PageContextMenu` on right-click across Grid and List views with Copy, Paste (Before/After), Duplicate, Insert Blank (Before/After), Rotate (90° CW, -90° CCW, 180°), Delete, and Extract (PDF, PNG, JPEG, WebP).
+  - Added `PagePropertiesModal` displaying page dimensions (mm/pt), aspect ratio, rotation angle, split status, and source origin.
+  - Backend pure engine methods `duplicate_page`, `insert_blank_page`, and `extract_single_page` in `BookScanEngine` with thin router endpoints in `book_scan_api.py`.
+  - Extracted `useBookPageOps` hook, preserving strict sub-300-line caps across all frontend files.
 - **CI / GitHub Actions**:
   - Added `actions/setup-node@v4` with Node 20 and npm caching, along with `npm ci` before running frontend lint and build in `.github/workflows/ci.yml`.
 - **Book Studio Crop Module: unified single interface with per-line cut axes**:

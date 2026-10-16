@@ -43,9 +43,13 @@ export interface AppSettingsData {
     sound_enabled: boolean;
     eco_mode: boolean;
   };
+  book_studio: {
+    history_limit: number;
+    shortcuts: Record<string, string>;
+  };
 }
 
-export type SettingsTab = "general" | "sheets" | "imposing" | "contour" | "flipbook" | "storage";
+export type SettingsTab = "general" | "sheets" | "imposing" | "contour" | "flipbook" | "shortcuts" | "storage" | "appearance";
 
 export interface StorageItem {
   key: string;
@@ -96,5 +100,17 @@ export const DEFAULT_SETTINGS: AppSettingsData = {
     default_texture: "Dark Mode",
     sound_enabled: false,
     eco_mode: false,
+  },
+  book_studio: {
+    history_limit: 50,
+    shortcuts: {
+      undo: "ctrl+z",
+      redo: "ctrl+y",
+      restore_original: "ctrl+shift+r",
+      prev_page: "[",
+      next_page: "]",
+      toggle_original: "o",
+      rotate: "r",
+    },
   },
 };

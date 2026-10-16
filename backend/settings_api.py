@@ -45,12 +45,25 @@ class FlipbookSettings(BaseModel):
     sound_enabled: bool = False
     eco_mode: bool = False
 
+class BookStudioSettings(BaseModel):
+    history_limit: int = Field(50, ge=10, le=100)
+    shortcuts: dict = Field(default_factory=lambda: {
+        "undo": "ctrl+z",
+        "redo": "ctrl+y",
+        "restore_original": "ctrl+shift+r",
+        "prev_page": "[",
+        "next_page": "]",
+        "toggle_original": "o",
+        "rotate": "r"
+    })
+
 class AppSettings(BaseModel):
     sheets: List[SheetPreset] = []
     rolls: List[RollPreset] = []
     imposing: ImposingSettings = Field(default_factory=ImposingSettings)
     contour: ContourSettings = Field(default_factory=ContourSettings)
     flipbook: FlipbookSettings = Field(default_factory=FlipbookSettings)
+    book_studio: BookStudioSettings = Field(default_factory=BookStudioSettings)
 
 DEFAULT_SETTINGS: dict = {
     "sheets": [
@@ -91,6 +104,18 @@ DEFAULT_SETTINGS: dict = {
         "sound_enabled": False,
         "eco_mode": False,
     },
+    "book_studio": {
+        "history_limit": 50,
+        "shortcuts": {
+            "undo": "ctrl+z",
+            "redo": "ctrl+y",
+            "restore_original": "ctrl+shift+r",
+            "prev_page": "[",
+            "next_page": "]",
+            "toggle_original": "o",
+            "rotate": "r"
+        }
+    },
 }
 
 def load_settings() -> dict:
@@ -102,7 +127,7 @@ def load_settings() -> dict:
             data = json.load(f)
             # Merge with defaults for missing keys
             merged = {**DEFAULT_SETTINGS, **data}
-            for k in ["imposing", "contour", "flipbook"]:
+            for k in ["imposing", "contour", "flipbook", "book_studio"]:
                 if k in data and isinstance(data[k], dict):
                     merged[k] = {**DEFAULT_SETTINGS[k], **data[k]}
             if "rolls" not in merged:

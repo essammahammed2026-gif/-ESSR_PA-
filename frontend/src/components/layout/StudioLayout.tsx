@@ -5,15 +5,15 @@ import Link from "next/link";
 import { 
   AlertCircle, 
   ChevronLeft, 
-  ChevronRight, 
-  FolderOpen, 
-  SlidersHorizontal 
+  ChevronRight,
 } from "lucide-react";
 
 export interface StudioLayoutProps {
   title: string;
+  className?: string;
   homeHref?: string;
   statusBadge?: React.ReactNode;
+  headerLeftActions?: React.ReactNode;
   headerActions?: React.ReactNode;
   error?: string | null;
 
@@ -41,14 +41,15 @@ export interface StudioLayoutProps {
 
 export function StudioLayout({
   title,
+  className = "",
   homeHref = "/",
   statusBadge,
+  headerLeftActions,
   headerActions,
   error,
 
   leftPanel,
   leftLabel = "Deck",
-  leftIcon = <FolderOpen size={13} />,
   leftWidthClass = "w-full lg:w-[280px] xl:w-[300px]",
   defaultLeftCollapsed = false,
   isLeftCollapsed: controlledLeftCollapsed,
@@ -58,7 +59,6 @@ export function StudioLayout({
 
   rightPanel,
   rightLabel = "Controls",
-  rightIcon = <SlidersHorizontal size={13} />,
   rightWidthClass = "w-full lg:w-[320px] xl:w-[340px]",
   defaultRightCollapsed = false,
   isRightCollapsed: controlledRightCollapsed,
@@ -117,52 +117,23 @@ export function StudioLayout({
   }, [leftPanel, rightPanel, toggleLeft, toggleRight]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-2rem)] space-y-2 select-none">
+    <div className={`flex flex-col h-full min-h-0 space-y-2 select-none ${className}`}>
       {/* Top Header Bar */}
       <div className="flex items-center justify-between pb-2 border-b border-[#242A38]">
-        {/* Breadcrumb Links */}
-        <div className="flex items-center space-x-2 text-sm text-slate-300">
-          <Link href={homeHref} className="text-cyan-400 hover:text-cyan-300 transition-colors font-medium">
-            Home
-          </Link>
-          <span className="text-slate-500">/</span>
-          <span className="font-semibold text-white">{title}</span>
+        {/* Breadcrumb Links & Left Header Actions */}
+        <div className="flex items-center space-x-3 text-sm text-slate-300">
+          <div className="flex items-center space-x-2">
+            <Link href={homeHref} className="text-cyan-400 hover:text-cyan-300 transition-colors font-medium">
+              Home
+            </Link>
+            <span className="text-slate-500">/</span>
+            <span className="font-semibold text-white">{title}</span>
+          </div>
+          {headerLeftActions}
         </div>
 
-        {/* Header Center/Right Actions & Panel Toggles */}
+        {/* Header Center/Right Actions */}
         <div className="flex items-center space-x-2">
-          {/* Left Panel Toggle (if present) */}
-          {leftPanel && (
-            <button
-              onClick={toggleLeft}
-              className={`p-1.5 rounded-lg border text-xs flex items-center space-x-1 transition-colors ${
-                leftCollapsed
-                  ? "bg-[#181D27] text-slate-400 border-[#242A38] hover:text-white hover:bg-slate-800"
-                  : "bg-blue-950/40 text-blue-300 border-blue-600/40"
-              }`}
-              title={leftCollapsed ? `Show ${leftLabel} Panel ([)` : `Collapse ${leftLabel} Panel ([)`}
-            >
-              {leftIcon}
-              <span className="text-[11px] font-medium hidden sm:inline">{leftLabel}</span>
-            </button>
-          )}
-
-          {/* Right Panel Toggle (if present) */}
-          {rightPanel && (
-            <button
-              onClick={toggleRight}
-              className={`p-1.5 rounded-lg border text-xs flex items-center space-x-1 transition-colors ${
-                rightCollapsed
-                  ? "bg-[#181D27] text-slate-400 border-[#242A38] hover:text-white hover:bg-slate-800"
-                  : "bg-cyan-950/40 text-cyan-300 border-cyan-600/40"
-              }`}
-              title={rightCollapsed ? `Show ${rightLabel} Panel (])` : `Collapse ${rightLabel} Panel (])`}
-            >
-              {rightIcon}
-              <span className="text-[11px] font-medium hidden sm:inline">{rightLabel}</span>
-            </button>
-          )}
-
           {/* Custom Studio Status Badge */}
           {statusBadge}
 

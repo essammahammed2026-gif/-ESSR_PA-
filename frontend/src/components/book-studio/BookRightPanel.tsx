@@ -3,7 +3,6 @@ import React, { useState, useMemo } from "react";
 import Link from "next/link";
 import { Download, RefreshCw, Layers, BookOpen, ChevronRight } from "lucide-react";
 import { DeskewModuleConfig, BleedModuleConfig, RestorationModuleConfig, CropModuleConfig, CropBox, BookStudioPage } from "@/types/book_studio";
-import { buildSegments } from "@/lib/splitLines";
 import { CropSplitPanel } from "./modules/CropSplitPanel";
 import { DeskewPanel } from "./modules/DeskewPanel";
 import { BleedPanel } from "./modules/BleedPanel";
@@ -29,7 +28,6 @@ export function BookRightPanel({ cropModule, setCropModule, isDetectingCrop, det
   const isSelectedPageSplit = Boolean(selectedPage && (selectedPage.half === "left" || selectedPage.half === "right" ||
     selectedPage.slice_box != null || selectedPage.parent_page_id != null ||
     (selectedPage.half && (selectedPage.half.startsWith("col_") || selectedPage.half.startsWith("row_")))));
-  const splitLines = cropModule.splitLines;
   const hasSplitPages = pages.some((p) => p.half === "left" || p.half === "right" || p.slice_box != null || p.parent_page_id != null);
   const pageBaseWidthMm = useMemo(() => {
     if (selectedPage?.width_mm) return selectedPage.width_mm;
@@ -45,14 +43,13 @@ export function BookRightPanel({ cropModule, setCropModule, isDetectingCrop, det
   const boxH = Math.max(0.01, cropModule.cropBox.y2 - cropModule.cropBox.y1);
   const currentCropWidthMm = Math.round(pageBaseWidthMm * boxW * 10) / 10;
   const currentCropHeightMm = Math.round(pageBaseHeightMm * boxH * 10) / 10;
-  const segments = buildSegments(splitLines, currentCropWidthMm, currentCropHeightMm);
   return (
     <div className="flex flex-col space-y-3 pb-2 select-none">
       <div className="flex items-center justify-between pb-0.5 px-1">
         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Controls & Export</span>
         {onCollapse && (<button onClick={onCollapse} className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors" title="Collapse Right Panel"><ChevronRight size={15} /></button>)}
       </div>
-      <CropSplitPanel cropModule={cropModule} setCropModule={setCropModule} isDetectingCrop={isDetectingCrop} detectCrop={detectCrop} splitSpread={splitSpread} revertSpread={revertSpread} applyCrop={applyCrop} selectedPage={selectedPage} selectedPageId={selectedPageId} isSelectedPageSplit={isSelectedPageSplit} hasSplitPages={hasSplitPages} currentCropWidthMm={currentCropWidthMm} currentCropHeightMm={currentCropHeightMm} segments={segments} sessionId={sessionId} open={isCropOpen} onToggle={() => setIsCropOpen((p) => !p)} />
+      <CropSplitPanel cropModule={cropModule} setCropModule={setCropModule} isDetectingCrop={isDetectingCrop} detectCrop={detectCrop} splitSpread={splitSpread} revertSpread={revertSpread} applyCrop={applyCrop} selectedPage={selectedPage} selectedPageId={selectedPageId} isSelectedPageSplit={isSelectedPageSplit} hasSplitPages={hasSplitPages} currentCropWidthMm={currentCropWidthMm} currentCropHeightMm={currentCropHeightMm} pageBaseWidthMm={pageBaseWidthMm} pageBaseHeightMm={pageBaseHeightMm} sessionId={sessionId} open={isCropOpen} onToggle={() => setIsCropOpen((p) => !p)} />
       <DeskewPanel deskewModule={deskewModule} setDeskewModule={setDeskewModule} isDetectingAngle={isDetectingAngle} detectedAngle={detectedAngle} detectPageAngle={detectPageAngle} selectedPageId={selectedPageId} sessionId={sessionId} open={isDeskewOpen} onToggle={() => setIsDeskewOpen((p) => !p)} />
       <BleedPanel bleedModule={bleedModule} setBleedModule={setBleedModule} open={isBleedOpen} onToggle={() => setIsBleedOpen((p) => !p)} />
       <RestorePanel restorationModule={restorationModule} setRestorationModule={setRestorationModule} open={isRestorationOpen} onToggle={() => setIsRestorationOpen((p) => !p)} />

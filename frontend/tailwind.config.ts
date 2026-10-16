@@ -8,6 +8,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-roboto)", "Roboto", "system-ui", "sans-serif"],
+        mono: ["var(--font-roboto-mono)", "Roboto Mono", "ui-monospace", "monospace"],
+      },
       colors: {
         border: "var(--border)",
         input: "var(--input)",

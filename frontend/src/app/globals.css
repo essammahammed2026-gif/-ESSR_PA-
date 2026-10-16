@@ -11,10 +11,6 @@
 }
 
 @layer base {
-  .theme {
-    --font-heading: var(--font-sans);
-    --font-sans: var(--font-sans);
-  }
   :root {
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
@@ -87,9 +83,101 @@
   }
   body {
     @apply bg-background text-foreground;
-    letter-spacing: -0.012em;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "tnum" 1;
   }
   html {
     @apply font-sans;
+    font-size: 14.5px;
+  }
+
+  /* Automatic compact scaling for 14"-15" laptops */
+  @media screen and (max-height: 900px), screen and (max-width: 1536px) {
+    html:not([data-ui-scale="relaxed"]) {
+      font-size: 13.5px;
+    }
+  }
+
+  /* User-configured scale preferences */
+  html[data-ui-scale="compact"] {
+    font-size: 13px !important;
+  }
+  html[data-ui-scale="default"] {
+    font-size: 14.5px !important;
+  }
+  html[data-ui-scale="relaxed"] {
+    font-size: 16px !important;
   }
 }
+
+/* Dynamic App-Wide Accent Color System */
+:root {
+  --app-accent: #f59e0b;
+  --app-accent-rgb: 245, 158, 11;
+  --app-accent-hover: #d97706;
+  --app-accent-15: rgba(245, 158, 11, 0.15);
+  --app-accent-30: rgba(245, 158, 11, 0.3);
+  --app-accent-50: rgba(245, 158, 11, 0.5);
+  --app-accent-glow: rgba(245, 158, 11, 0.35);
+}
+
+.bg-purple-600,
+.bg-purple-500 {
+  background-color: var(--app-accent, #8b5cf6) !important;
+}
+
+.hover\:bg-purple-700:hover,
+.hover\:bg-purple-600:hover {
+  filter: brightness(0.9);
+}
+
+.text-purple-600,
+.text-purple-500,
+.text-purple-400 {
+  color: var(--app-accent, #8b5cf6) !important;
+}
+
+.border-purple-600,
+.border-purple-500 {
+  border-color: var(--app-accent, #8b5cf6) !important;
+}
+
+.focus\:ring-purple-500:focus,
+.focus\:ring-purple-600:focus {
+  --tw-ring-color: var(--app-accent, #8b5cf6) !important;
+}
+/* ───────── Global UI polish ───────── */
+::selection { background: var(--app-accent-30); color: #fff; }
+
+* { scrollbar-width: thin; scrollbar-color: #2E3648 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #2E3648; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: #3B4560; background-clip: padding-box; }
+
+button, a, [role="button"] { transition-property: color, background-color, border-color, box-shadow, opacity, transform; transition-duration: 150ms; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--app-accent); outline-offset: 2px; border-radius: 6px;
+}
+button:not(:disabled):active { transform: translateY(0.5px); }
+
+input[type="range"] { accent-color: var(--app-accent); cursor: pointer; }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--app-accent); }
+
+/* ───────── Book Studio: unify cyan/amber into the user accent ───────── */
+.book-studio .text-cyan-300, .book-studio .text-cyan-400,
+.book-studio .text-amber-300, .book-studio .text-amber-400 { color: var(--app-accent) !important; }
+.book-studio .bg-cyan-600, .book-studio .bg-amber-500, .book-studio .bg-amber-600 {
+  background-color: var(--app-accent) !important; color: #0B0E14 !important;
+}
+.book-studio .hover\:bg-cyan-500:hover, .book-studio .hover\:bg-amber-400:hover { filter: brightness(1.08); }
+.book-studio .bg-cyan-950\/40, .book-studio .bg-cyan-950\/70, .book-studio .bg-cyan-950\/80,
+.book-studio .bg-amber-500\/10, .book-studio .bg-amber-500\/20, .book-studio .bg-amber-950\/30 {
+  background-color: var(--app-accent-15) !important;
+}
+.book-studio .border-cyan-500, .book-studio .border-cyan-600\/60, .book-studio .border-cyan-700\/50,
+.book-studio .border-amber-500\/30, .book-studio .border-amber-500\/40, .book-studio .border-amber-800\/40 {
+  border-color: var(--app-accent-30) !important;
+}
+.book-studio .ring-cyan-500\/30, .book-studio .ring-amber-500\/40 { --tw-ring-color: var(--app-accent-30) !important; }
+.book-studio .font-black, .book-studio .font-extrabold { font-weight: 600 !important; }

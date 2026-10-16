@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { BookOpen, FolderOpen, SlidersHorizontal } from "lucide-react";
+import { BookOpen, FolderOpen, SlidersHorizontal, Download, List, LayoutGrid, RefreshCw } from "lucide-react";
 import { useBookStudioState } from "@/hooks/useBookStudioState";
 import { StudioLayout } from "@/components/layout/StudioLayout";
 import { BookLeftPanel } from "@/components/book-studio/BookLeftPanel";
@@ -40,12 +40,28 @@ function BookStudioContent() {
     rotatePage,
     deletePage,
     reorderPages,
+    duplicatePage,
+    insertBlankPage,
+    copyPage,
+    pastePage,
+    canPaste,
+    extractPage,
     exportPdf,
     getThumbnailUrl,
+    history,
+    currentHistoryIndex,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    jumpToStep,
+    revertToOriginal,
+    shortcutLabels,
   } = useBookStudioState();
 
   const [isLeftCollapsed, setIsLeftCollapsed] = useState<boolean>(false);
   const [isRightCollapsed, setIsRightCollapsed] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const searchParams = useSearchParams();
 
@@ -60,6 +76,7 @@ function BookStudioContent() {
 
   return (
     <StudioLayout
+      className="book-studio"
       title="Book Studio"
       statusBadge={
         <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#181D27] border border-[#242A38] text-xs">
@@ -67,6 +84,58 @@ function BookStudioContent() {
           <span className="text-slate-300 font-medium">
             {sessionId ? `${pages.length} Pages Loaded` : "Intake Ready"}
           </span>
+        </div>
+      }
+      headerLeftActions={
+        <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded-lg p-0.5 ml-1">
+          <button
+            type="button"
+            onClick={() => setViewMode("grid")}
+            className={`p-1 rounded transition-colors ${
+              viewMode === "grid"
+                ? "bg-cyan-950/80 text-cyan-300 border border-cyan-700/50"
+                : "text-slate-400 hover:text-white"
+            }`}
+            title="Grid View"
+          >
+            <LayoutGrid size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("list")}
+            className={`p-1 rounded transition-colors ${
+              viewMode === "list"
+                ? "bg-cyan-950/80 text-cyan-300 border border-cyan-700/50"
+                : "text-slate-400 hover:text-white"
+            }`}
+            title="List View"
+          >
+            <List size={14} />
+          </button>
+        </div>
+      }
+      headerActions={
+        <div className="flex items-center space-x-2">
+          {/* Export PDF Button (Amber styled per concept.png) */}
+          <button
+            type="button"
+            onClick={exportPdf}
+            disabled={!sessionId || isExporting}
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer disabled:cursor-not-allowed"
+            title="Export Cleaned PDF Document"
+          >
+            {isExporting ? (
+              <>
+                <RefreshCw size={13} className="animate-spin text-slate-950" />
+                <span>Exporting...</span>
+              </>
+            ) : (
+              <>
+                <Download size={13} />
+                <span>Export PDF</span>
+              </>
+            )}
+          </button>
         </div>
       }
       error={error}
@@ -102,7 +171,14 @@ function BookStudioContent() {
           rotatePage={rotatePage}
           deletePage={deletePage}
           reorderPages={reorderPages}
+          duplicatePage={duplicatePage}
+          insertBlankPage={insertBlankPage}
+          copyPage={copyPage}
+          pastePage={pastePage}
+          canPaste={canPaste}
+          extractPage={extractPage}
           getThumbnailUrl={getThumbnailUrl}
+          viewMode={viewMode}
           onCollapse={() => setIsLeftCollapsed(true)}
         />
       }
@@ -120,6 +196,15 @@ function BookStudioContent() {
           showGrid={deskewModule.enabled && deskewModule.showGrid}
           cropModule={cropModule}
           setCropModule={setCropModule}
+          onUndo={undo}
+          canUndo={canUndo}
+          onRedo={redo}
+          canRedo={canRedo}
+          onRestoreOriginal={revertToOriginal}
+          history={history}
+          currentHistoryIndex={currentHistoryIndex}
+          onSelectHistoryStep={jumpToStep}
+          shortcutLabels={shortcutLabels}
         />
       }
 

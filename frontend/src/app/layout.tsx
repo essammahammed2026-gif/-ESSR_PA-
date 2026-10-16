@@ -1,6 +1,6 @@
 "use client";
 
-import { Roboto } from "next/font/google";
+import { Roboto, Roboto_Mono } from "next/font/google";
 import "./globals.css";
 import React, { useState } from "react";
 import Link from "next/link";
@@ -16,11 +16,19 @@ import {
   Layers,
   Power
 } from "lucide-react";
+import { AppearanceProvider } from "@/context/AppearanceContext";
 
-const font = Roboto({ 
-  weight: ["300", "400", "500", "700"], 
+const font = Roboto({
+  weight: ["300", "400", "500", "700"],
   subsets: ["latin"],
   display: "swap",
+  variable: "--font-roboto",
+});
+const fontMono = Roboto_Mono({
+  weight: ["400", "500", "700"],
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-roboto-mono",
 });
 
 interface NavItemProps {
@@ -41,12 +49,21 @@ const NavItem = ({ href, icon, label, isCollapsed, pathname }: NavItemProps) => 
           isCollapsed ? "justify-center w-10 h-10" : "px-2.5 py-2 w-full space-x-2.5"
         } rounded-lg transition-all text-xs ${
           isActive 
-            ? "bg-cyan-500/15 text-cyan-400 font-medium border border-cyan-500/30 shadow-sm shadow-cyan-950/40" 
+            ? "font-medium shadow-sm shadow-black/40" 
             : "text-slate-400 hover:bg-[#1E2330] hover:text-slate-200 border border-transparent"
         }`}
+        style={isActive ? {
+          backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
+          borderColor: "var(--app-accent-30, rgba(6, 182, 212, 0.3))",
+          borderWidth: "1px",
+          color: "var(--app-accent, #06b6d4)",
+        } : undefined}
         title={label}
       >
-        <div className={`shrink-0 transition-colors ${isActive ? "text-cyan-400" : "text-slate-400 group-hover:text-slate-200"}`}>
+        <div 
+          className={`shrink-0 transition-colors ${isActive ? "" : "text-slate-400 group-hover:text-slate-200"}`}
+          style={isActive ? { color: "var(--app-accent, #06b6d4)" } : undefined}
+        >
           {icon}
         </div>
         {!isCollapsed && <span className="truncate">{label}</span>}
@@ -88,9 +105,10 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en" className="dark">
-      <body className={`${font.className} flex h-screen bg-[#12151B] text-slate-200 overflow-hidden antialiased`}>
-        {/* Left Sidebar */}
+    <html lang="en" className={`dark ${font.variable} ${fontMono.variable}`}>
+      <body className={`font-sans flex h-screen bg-[#12151B] text-slate-200 overflow-hidden antialiased`}>
+        <AppearanceProvider>
+          {/* Left Sidebar */}
         <aside 
           className={`flex flex-col border-r border-[#242A38] transition-all duration-300 ${
             isSidebarCollapsed ? "w-14" : "w-56"
@@ -169,7 +187,7 @@ export default function RootLayout({
         </aside>
         
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto min-h-0 h-full p-3 md:p-4 lg:p-4 relative bg-[#12151B]">
+        <main className="flex-1 overflow-y-auto min-h-0 h-full p-2 sm:p-2.5 md:p-3 relative bg-[#12151B]">
           {children}
 
           {/* Shutdown Confirmation Modal */}
@@ -213,6 +231,7 @@ export default function RootLayout({
             </div>
           )}
         </main>
+        </AppearanceProvider>
       </body>
     </html>
   );

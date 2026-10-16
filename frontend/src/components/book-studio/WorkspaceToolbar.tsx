@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -7,12 +8,18 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
-  RotateCw,
   Sparkles,
   Trash2,
+  Undo2,
+  Redo2,
+  History,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import { HistoryPopover } from "./HistoryPopover";
+import { RestoreOriginalModal } from "./RestoreOriginalModal";
+import { RotateDropdown } from "./RotateDropdown";
+import type { HistoryEntry } from "@/hooks/useBookHistory";
 
 export interface WorkspaceToolbarProps {
   selectedIdx: number;
@@ -29,6 +36,16 @@ export interface WorkspaceToolbarProps {
   onZoomReset: () => void;
   onToggleFullscreen: () => void;
   onDelete: () => void;
+  // History & Safety controls
+  onUndo?: () => void;
+  canUndo?: boolean;
+  onRedo?: () => void;
+  canRedo?: boolean;
+  onRestoreOriginal?: () => void;
+  history?: HistoryEntry[];
+  currentHistoryIndex?: number;
+  onSelectHistoryStep?: (index: number) => void;
+  shortcutLabels?: Record<string, string>;
 }
 
 export function WorkspaceToolbar({
@@ -46,39 +63,122 @@ export function WorkspaceToolbar({
   onZoomReset,
   onToggleFullscreen,
   onDelete,
+  onUndo,
+  canUndo = false,
+  onRedo,
+  canRedo = false,
+  onRestoreOriginal,
+  history = [],
+  currentHistoryIndex = 0,
+  onSelectHistoryStep,
+  shortcutLabels = {},
 }: WorkspaceToolbarProps) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [restoreModalOpen, setRestoreModalOpen] = useState(false);
+
   return (
-    <div className="p-2.5 border-b border-[#242A38] bg-[#131720] flex items-center justify-between">
-      {/* Left: Prev / Next Navigation with Clean Count */}
-      <div className="flex items-center space-x-2">
-        <div className="flex items-center space-x-1 bg-[#181D27] p-1 rounded-lg border border-[#2E3648]">
-          <button
-            onClick={onPrev}
-            disabled={selectedIdx === 0}
-            className="p-1 rounded hover:bg-slate-700 disabled:opacity-30 text-slate-300 transition-colors"
-            title="Previous Page (Shortcut: [ or Left Arrow)"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <span className="text-xs font-mono font-bold text-cyan-400 px-2 min-w-[56px] text-center">
-            {selectedIdx + 1} / {totalPages}
-          </span>
-          <button
-            onClick={onNext}
-            disabled={selectedIdx === totalPages - 1}
-            className="p-1 rounded hover:bg-slate-700 disabled:opacity-30 text-slate-300 transition-colors"
-            title="Next Page (Shortcut: ] or Right Arrow)"
-          >
-            <ChevronRight size={16} />
-          </button>
+    <>
+      <div className="p-2.5 border-b border-[#242A38] bg-[#131720] flex items-center justify-between">
+        {/* Left: Prev / Next Navigation + History Journal Controls */}
+        <div className="flex items-center space-x-2">
+          {/* Deck Navigation */}
+          <div className="flex items-center space-x-1 bg-[#181D27] p-1 rounded-lg border border-[#2E3648]">
+            <button
+              onClick={onPrev}
+              disabled={selectedIdx === 0}
+              className="p-1 rounded hover:bg-slate-700 disabled:opacity-30 text-slate-300 transition-colors cursor-pointer"
+              title={`Previous Page (${shortcutLabels.prev_page || "["})`}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-xs font-mono font-bold text-cyan-400 px-2 min-w-[56px] text-center">
+              {selectedIdx + 1} / {totalPages}
+            </span>
+            <button
+              onClick={onNext}
+              disabled={selectedIdx === totalPages - 1}
+              className="p-1 rounded hover:bg-slate-700 disabled:opacity-30 text-slate-300 transition-colors cursor-pointer"
+              title={`Next Page (${shortcutLabels.next_page || "]"})`}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+
+          <div className="h-5 w-px bg-[#242A38]" />
+
+          {/* Unified Undo / Redo / History Journal */}
+          <div className="flex items-center space-x-1 bg-[#181D27] p-1 rounded-lg border border-[#2E3648]">
+            <button
+              type="button"
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="p-1 rounded hover:bg-slate-700 disabled:opacity-30 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title={`Undo (${shortcutLabels.undo || "Ctrl+Z"})`}
+            >
+              <Undo2 size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={onRedo}
+              disabled={!canRedo}
+              className="p-1 rounded hover:bg-slate-700 disabled:opacity-30 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title={`Redo (${shortcutLabels.redo || "Ctrl+Y"})`}
+            >
+              <Redo2 size={15} />
+            </button>
+
+            {/* History Popover Trigger */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen((p) => !p)}
+                className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
+                  historyOpen
+                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                    : "text-slate-300 hover:text-white hover:bg-slate-700"
+                }`}
+                title="Open History Journal"
+              >
+                <History size={14} className="text-amber-400" />
+                <span className="text-[11px] font-mono font-bold text-amber-400">
+                  {history.length > 0 ? history.length : 1}
+                </span>
+              </button>
+
+              <HistoryPopover
+                history={history}
+                currentIndex={currentHistoryIndex}
+                onSelectStep={(idx) => {
+                  if (onSelectHistoryStep) onSelectHistoryStep(idx);
+                  setHistoryOpen(false);
+                }}
+                open={historyOpen}
+                onClose={() => setHistoryOpen(false)}
+              />
+            </div>
+
+            {/* Restore Original Button */}
+            {onRestoreOriginal && (
+              <button
+                type="button"
+                onClick={() => setRestoreModalOpen(true)}
+                disabled={currentHistoryIndex === 0 && history.length <= 1}
+                className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-semibold text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-30 cursor-pointer"
+                title={`Restore Original Document (${shortcutLabels.restore_original || "Ctrl+Shift+R"})`}
+              >
+                <RotateCcw size={12} className="text-amber-400" />
+                <span>Original</span>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      {/* Center: Clean Show Original / Show Edited Toggle Button */}
-      <div className="flex items-center space-x-2">
+
+        {/* Center: Clean Show Original / Show Edited Toggle Button */}
+        <div className="flex items-center space-x-2">
         <button
           type="button"
           onClick={onToggleOriginal}
-          className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-all shadow-sm ${
+          className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-all shadow-sm cursor-pointer ${
             isViewingOriginal
               ? "bg-[#181D27] text-slate-200 border-[#2E3648] hover:bg-slate-800"
               : "bg-cyan-950/70 text-cyan-300 border-cyan-600/60 ring-1 ring-cyan-500/30"
@@ -96,27 +196,13 @@ export function WorkspaceToolbar({
               <span>Show Original</span>
             </>
           )}
-          <span className="text-[10px] font-mono opacity-60 bg-black/40 px-1.5 py-0.5 rounded border border-white/10 ml-1">
-            Space / O
-          </span>
         </button>
       </div>
-      {/* Right: Rotate CW / CCW, Zoom Controls, Fullscreen */}
+      {/* Right: Rotate CW / CCW / 180 Dropdown, Zoom Controls, Fullscreen */}
       <div className="flex items-center space-x-1.5">
-        <button
-          onClick={() => onRotate(-90)}
-          className="p-1.5 text-slate-300 hover:text-white bg-[#181D27] hover:bg-slate-700 rounded-lg border border-[#2E3648] transition-colors"
-          title="Rotate 90° CCW (Shortcut: Shift+R)"
-        >
-          <RotateCcw size={14} />
-        </button>
-        <button
-          onClick={() => onRotate(90)}
-          className="p-1.5 text-slate-300 hover:text-white bg-[#181D27] hover:bg-slate-700 rounded-lg border border-[#2E3648] transition-colors"
-          title="Rotate 90° CW (Shortcut: R)"
-        >
-          <RotateCw size={14} />
-        </button>
+        {/* Unified Rotate Dropdown */}
+        <RotateDropdown onRotate={onRotate} shortcutLabel={shortcutLabels.rotate} />
+
         <div className="flex items-center space-x-1 bg-[#181D27] p-1 rounded-lg border border-[#2E3648]">
           <button
             onClick={onZoomOut}
@@ -160,5 +246,16 @@ export function WorkspaceToolbar({
         </button>
       </div>
     </div>
+
+    {/* Restore Original Confirmation Modal */}
+    <RestoreOriginalModal
+      open={restoreModalOpen}
+      onConfirm={() => {
+        if (onRestoreOriginal) onRestoreOriginal();
+        setRestoreModalOpen(false);
+      }}
+      onCancel={() => setRestoreModalOpen(false)}
+    />
+  </>
   );
 }

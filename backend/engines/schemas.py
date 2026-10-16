@@ -143,3 +143,20 @@ class ExportRequest(BaseModel):
     restoration_module_enabled: bool = False
     restoration_scope_mode: str = "all"
     restoration_custom_range: str = ""
+
+
+class DuplicatePageRequest(BaseModel):
+    page_id: str
+    position: str = "after"  # "before" | "after"
+
+
+class InsertBlankPageRequest(BaseModel):
+    page_id: str
+    position: str = "after"  # "before" | "after"
+    width_mm: Optional[float] = None
+    height_mm: Optional[float] = None
+
+
+class RestorePagesRequest(BaseModel):
+    pages: List[Dict[str, Any]]
+

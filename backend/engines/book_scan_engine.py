@@ -340,6 +340,13 @@ class BookScanEngine:
         """
         Renders and extracts the page image with optional crop_box and split_pos.
         """
+        if page_info.get("is_blank") or page_info.get("source") == "blank":
+            w_mm = float(page_info.get("width_mm") or 210.0)
+            h_mm = float(page_info.get("height_mm") or 297.0)
+            px_w = max(10, int(round(w_mm * dpi / 25.4)))
+            px_h = max(10, int(round(h_mm * dpi / 25.4)))
+            return np.full((px_h, px_w, 3), 255, dtype=np.uint8)
+
         source = page_info["source"]
         doc = doc_map.get(source)
         if doc is None or page_info["doc_idx"] >= len(doc):
@@ -958,89 +965,199 @@ class BookScanEngine:
 
             is_already_split = p.get("half") in ["left", "right"] or p.get("slice_box") is not None or bool(p.get("parent_page_id"))
 
-            if is_target and not is_already_split:
+            if is_target:
                 split_occurred = True
                 base_label = p.get("label", "Sheet").replace(" (Spread)", "")
-                # Incoming box is relative to the rendered (already cropped) view:
-                # compose it onto the stored box so repeat split-after-crop cuts
-                # the region the operator actually sees.
-                cb = BookScanEngine.compose_crop_boxes(p.get("crop_box"), crop_box)
-                sp = lines[0] if lines else 0.5
 
-                p_orig_w = p.get("orig_width_mm") or p.get("width_mm", 297.0)
-                p_orig_h = p.get("orig_height_mm") or p.get("height_mm", 210.0)
-                cb_w = BookScanEngine.box_frac_w(cb)
-                cb_h = BookScanEngine.box_frac_h(cb)
-                cropped_w = p_orig_w * cb_w
-                cropped_h = p_orig_h * cb_h
+                if not is_already_split:
+                    # First split of root spread
+                    cb = BookScanEngine.compose_crop_boxes(p.get("crop_box"), crop_box)
+                    sp = lines[0] if lines else 0.5
 
-                common = {
-                    "source": p["source"],
-                    "doc_idx": p["doc_idx"],
-                    "crop_box": cb,
-                    "spread_crop_box": cb,
-                    "split_pos": sp,
-                    "spread_split_pos": sp,
-                    "split_lines": lines,
-                    "split_direction": direction,
-                    "page_crop_box": None,
-                    "rotation": p.get("rotation", 0),
-                    "parent_page_id": p["id"],
-                    "is_spread": False,
-                    "parent_spread_width_mm": round(cropped_w, 1),
-                    "parent_spread_height_mm": round(cropped_h, 1),
-                }
+                    p_orig_w = p.get("orig_width_mm") or p.get("width_mm", 297.0)
+                    p_orig_h = p.get("orig_height_mm") or p.get("height_mm", 210.0)
+                    cb_w = BookScanEngine.box_frac_w(cb)
+                    cb_h = BookScanEngine.box_frac_h(cb)
+                    cropped_w = p_orig_w * cb_w
+                    cropped_h = p_orig_h * cb_h
 
-                slice_ids = []
-                for i in range(num_slices):
-                    s_start = cuts[i]
-                    s_end = cuts[i + 1]
-                    s_id = str(uuid.uuid4())[:8]
-                    slice_ids.append(s_id)
-                    if p["id"] == page_id and new_selected_id is None:
-                        new_selected_id = s_id
+                    common = {
+                        "source": p["source"],
+                        "doc_idx": p["doc_idx"],
+                        "crop_box": cb,
+                        "spread_crop_box": cb,
+                        "split_pos": sp,
+                        "spread_split_pos": sp,
+                        "split_lines": lines,
+                        "split_direction": direction,
+                        "page_crop_box": None,
+                        "rotation": p.get("rotation", 0),
+                        "parent_page_id": p["id"],
+                        "is_spread": False,
+                        "parent_spread_width_mm": round(cropped_w, 1),
+                        "parent_spread_height_mm": round(cropped_h, 1),
+                    }
 
-                    if direction == "horizontal":
-                        s_box = {"x1": 0.0, "y1": s_start, "x2": 1.0, "y2": s_end}
-                        s_w = round(cropped_w, 1)
-                        s_h = round(cropped_h * (s_end - s_start), 1)
-                        if num_slices == 2:
-                            s_label = f"{base_label} (Top)" if i == 0 else f"{base_label} (Bottom)"
+                    slice_ids = []
+                    for i in range(num_slices):
+                        s_start = cuts[i]
+                        s_end = cuts[i + 1]
+                        s_id = str(uuid.uuid4())[:8]
+                        slice_ids.append(s_id)
+                        if p["id"] == page_id and new_selected_id is None:
+                            new_selected_id = s_id
+
+                        if direction == "horizontal":
+                            s_box = {"x1": 0.0, "y1": s_start, "x2": 1.0, "y2": s_end}
+                            s_w = round(cropped_w, 1)
+                            s_h = round(cropped_h * (s_end - s_start), 1)
+                            if num_slices == 2:
+                                s_label = f"{base_label} (Top)" if i == 0 else f"{base_label} (Bottom)"
+                            else:
+                                s_label = f"{base_label} (Row {i+1})"
+                            half_name = f"row_{i}"
                         else:
-                            s_label = f"{base_label} (Row {i+1})"
-                        half_name = f"row_{i}"
-                    else:
-                        s_box = {"x1": s_start, "y1": 0.0, "x2": s_end, "y2": 1.0}
-                        s_w = round(cropped_w * (s_end - s_start), 1)
-                        s_h = round(cropped_h, 1)
-                        if num_slices == 2:
-                            s_label = f"{base_label} (Left)" if i == 0 else f"{base_label} (Right)"
-                            half_name = "left" if i == 0 else "right"
+                            s_box = {"x1": s_start, "y1": 0.0, "x2": s_end, "y2": 1.0}
+                            s_w = round(cropped_w * (s_end - s_start), 1)
+                            s_h = round(cropped_h, 1)
+                            if num_slices == 2:
+                                s_label = f"{base_label} (Left)" if i == 0 else f"{base_label} (Right)"
+                                half_name = "left" if i == 0 else "right"
+                            else:
+                                s_label = f"{base_label} (Col {i+1})"
+                                half_name = f"col_{i}"
+
+                        new_pages.append({
+                            **common,
+                            "id": s_id,
+                            "half": half_name,
+                            "slice_box": s_box,
+                            "label": s_label,
+                            "width_mm": s_w,
+                            "orig_width_mm": s_w,
+                            "height_mm": s_h,
+                            "orig_height_mm": s_h,
+                            "rev": 0,
+                        })
+
+                    if new_selected_id is None and slice_ids:
+                        new_selected_id = slice_ids[0]
+                else:
+                    # Slicing an already-split page (iterative multi-step split)
+                    # Compose any page_crop_box and incoming crop_box
+                    effective_pcb = BookScanEngine.compose_crop_boxes(p.get("page_crop_box"), crop_box)
+                    parent_sb = p.get("slice_box") or {"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0}
+
+                    psb_x1 = float(parent_sb.get("x1", 0.0))
+                    psb_y1 = float(parent_sb.get("y1", 0.0))
+                    psb_x2 = float(parent_sb.get("x2", 1.0))
+                    psb_y2 = float(parent_sb.get("y2", 1.0))
+                    psb_w = max(0.001, psb_x2 - psb_x1)
+                    psb_h = max(0.001, psb_y2 - psb_y1)
+
+                    vis_x1 = psb_x1 + float(effective_pcb.get("x1", 0.0)) * psb_w
+                    vis_y1 = psb_y1 + float(effective_pcb.get("y1", 0.0)) * psb_h
+                    vis_x2 = psb_x1 + float(effective_pcb.get("x2", 1.0)) * psb_w
+                    vis_y2 = psb_y1 + float(effective_pcb.get("y2", 1.0)) * psb_h
+                    vis_w = max(0.001, vis_x2 - vis_x1)
+                    vis_h = max(0.001, vis_y2 - vis_y1)
+
+                    p_w = float(p.get("width_mm") or p.get("orig_width_mm") or 210.0)
+                    p_h = float(p.get("height_mm") or p.get("orig_height_mm") or 297.0)
+                    pcb_frac_w = BookScanEngine.box_frac_w(effective_pcb)
+                    pcb_frac_h = BookScanEngine.box_frac_h(effective_pcb)
+                    base_active_w = p_w * pcb_frac_w
+                    base_active_h = p_h * pcb_frac_h
+
+                    sp = lines[0] if lines else 0.5
+                    common = {
+                        "source": p["source"],
+                        "doc_idx": p["doc_idx"],
+                        "crop_box": {"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0},
+                        "spread_crop_box": p.get("spread_crop_box") or p.get("crop_box"),
+                        "split_pos": sp,
+                        "spread_split_pos": p.get("spread_split_pos", sp),
+                        "split_lines": lines,
+                        "split_direction": direction,
+                        "page_crop_box": None,
+                        "rotation": p.get("rotation", 0),
+                        "parent_page_id": p.get("parent_page_id") or p["id"],
+                        "is_spread": False,
+                        "parent_spread_width_mm": p.get("parent_spread_width_mm", round(base_active_w, 1)),
+                        "parent_spread_height_mm": p.get("parent_spread_height_mm", round(base_active_h, 1)),
+                    }
+
+                    slice_ids = []
+                    for i in range(num_slices):
+                        s_start = cuts[i]
+                        s_end = cuts[i + 1]
+                        s_id = str(uuid.uuid4())[:8]
+                        slice_ids.append(s_id)
+                        if p["id"] == page_id and new_selected_id is None:
+                            new_selected_id = s_id
+
+                        if direction == "horizontal":
+                            s_box = {
+                                "x1": round(vis_x1, 5),
+                                "y1": round(vis_y1 + s_start * vis_h, 5),
+                                "x2": round(vis_x2, 5),
+                                "y2": round(vis_y1 + s_end * vis_h, 5),
+                            }
+                            s_w = round(base_active_w, 1)
+                            s_h = round(base_active_h * (s_end - s_start), 1)
+                            if num_slices == 2:
+                                s_label = f"{base_label} (Top)" if i == 0 else f"{base_label} (Bottom)"
+                            else:
+                                s_label = f"{base_label} (Row {i+1})"
+                            half_name = f"row_{i}"
                         else:
-                            s_label = f"{base_label} (Col {i+1})"
+                            s_box = {
+                                "x1": round(vis_x1 + s_start * vis_w, 5),
+                                "y1": round(vis_y1, 5),
+                                "x2": round(vis_x1 + s_end * vis_w, 5),
+                                "y2": round(vis_y2, 5),
+                            }
+                            s_w = round(base_active_w * (s_end - s_start), 1)
+                            s_h = round(base_active_h, 1)
+                            if num_slices == 2:
+                                s_label = f"{base_label} (Left)" if i == 0 else f"{base_label} (Right)"
+                            else:
+                                s_label = f"{base_label} (Col {i+1})"
                             half_name = f"col_{i}"
 
-                    new_pages.append({
-                        **common,
-                        "id": s_id,
-                        "half": half_name,
-                        "slice_box": s_box,
-                        "label": s_label,
-                        "width_mm": s_w,
-                        "orig_width_mm": s_w,
-                        "height_mm": s_h,
-                        "orig_height_mm": s_h,
-                        "rev": 0,
-                    })
+                        new_pages.append({
+                            **common,
+                            "id": s_id,
+                            "half": half_name,
+                            "slice_box": s_box,
+                            "label": s_label,
+                            "width_mm": s_w,
+                            "orig_width_mm": s_w,
+                            "height_mm": s_h,
+                            "orig_height_mm": s_h,
+                            "rev": 0,
+                        })
 
-                if new_selected_id is None and slice_ids:
-                    new_selected_id = slice_ids[0]
+                    if new_selected_id is None and slice_ids:
+                        new_selected_id = slice_ids[0]
             else:
                 new_pages.append(p)
 
         if not split_occurred:
-            raise PageOpError(400, "Target page is already split or not found.")
+            raise PageOpError(400, "Target page not found.")
         return new_pages, new_selected_id
+
+    @staticmethod
+    def restore_pages(current_pages: List[Dict[str, Any]], new_pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Atomically restores session pages from a history snapshot.
+        Validates page format and returns validated pages.
+        """
+        if not isinstance(new_pages, list):
+            raise PageOpError(400, "Snapshot pages must be a list")
+        for p in new_pages:
+            if not isinstance(p, dict) or "id" not in p or "source" not in p or "doc_idx" not in p:
+                raise PageOpError(400, "Invalid page item structure in restore snapshot")
+        return new_pages
 
     @staticmethod
     def revert_pages(pages, page_id=None, revert_all=False, target_page_ids=None):
@@ -1230,6 +1347,91 @@ class BookScanEngine:
                 "show_crop_marks": p_marks
             })
         return processed_images, per_page_bleed_list
+
+    @staticmethod
+    def duplicate_page(pages: List[Dict[str, Any]], target_page_id: str, position: str = "after") -> tuple[List[Dict[str, Any]], str]:
+        target_idx = next((i for i, p in enumerate(pages) if p["id"] == target_page_id), -1)
+        if target_idx == -1:
+            raise PageOpError(404, "Target page not found.")
+
+        target = pages[target_idx]
+        new_id = str(uuid.uuid4())[:8]
+        new_page = dict(target)
+        new_page["id"] = new_id
+        new_page["label"] = f"{target.get('label', 'Page')} (Copy)"
+        try:
+            new_page["rev"] = int(target.get("rev", 0)) + 1
+        except (TypeError, ValueError):
+            new_page["rev"] = 1
+
+        insert_at = target_idx + 1 if position == "after" else target_idx
+        new_pages = list(pages)
+        new_pages.insert(insert_at, new_page)
+        return new_pages, new_id
+
+    @staticmethod
+    def insert_blank_page(
+        pages: List[Dict[str, Any]],
+        target_page_id: str,
+        position: str = "after",
+        width_mm: Optional[float] = None,
+        height_mm: Optional[float] = None,
+    ) -> tuple[List[Dict[str, Any]], str]:
+        target_idx = next((i for i, p in enumerate(pages) if p["id"] == target_page_id), -1)
+
+        ref_w = 210.0
+        ref_h = 297.0
+        if 0 <= target_idx < len(pages):
+            ref_w = pages[target_idx].get("width_mm", 210.0)
+            ref_h = pages[target_idx].get("height_mm", 297.0)
+
+        w = float(width_mm or ref_w)
+        h = float(height_mm or ref_h)
+
+        new_id = str(uuid.uuid4())[:8]
+        new_page = {
+            "id": new_id,
+            "source": "blank",
+            "doc_idx": 0,
+            "half": "full",
+            "is_spread": False,
+            "is_blank": True,
+            "rotation": 0,
+            "label": "Blank Page",
+            "width_mm": w,
+            "height_mm": h,
+            "orig_width_mm": w,
+            "orig_height_mm": h,
+            "rev": 1,
+        }
+
+        insert_at = (target_idx + 1 if position == "after" else target_idx) if target_idx >= 0 else len(pages)
+        new_pages = list(pages)
+        new_pages.insert(insert_at, new_page)
+        return new_pages, new_id
+
+    @staticmethod
+    def extract_single_page(
+        doc_map: Dict[str, Any],
+        page_info: Dict[str, Any],
+        output_path: str,
+        format: str = "pdf",
+        dpi: int = 300
+    ) -> bool:
+        fmt = format.lower()
+        raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=dpi)
+        if fmt == "pdf":
+            return BookScanEngine.add_bleed_and_export_pdf(
+                processed_images=[raw_img],
+                output_pdf_path=output_path,
+                bleed_mm=0.0,
+                show_crop_marks=False,
+                dpi=dpi,
+                jpeg_quality=95,
+            )
+        elif fmt in ["png", "jpeg", "jpg", "webp"]:
+            return cv2.imwrite(output_path, raw_img)
+        return False
 
 
 class PageOpError(Exception):

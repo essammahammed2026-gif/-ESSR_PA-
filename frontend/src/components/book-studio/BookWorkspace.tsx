@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { BookOpen } from "lucide-react";
-import { BookStudioPage, CropModuleConfig } from "@/types/book_studio";
+import { BookStudioPage, CropModuleConfig, CropBox } from "@/types/book_studio";
 import { WorkspaceToolbar } from "./WorkspaceToolbar";
 import { PageCanvas } from "./PageCanvas";
+import type { HistoryEntry } from "@/hooks/useBookHistory";
 
 interface BookWorkspaceProps {
   pages: BookStudioPage[];
@@ -17,11 +18,22 @@ interface BookWorkspaceProps {
   showGrid?: boolean;
   cropModule?: CropModuleConfig;
   setCropModule?: React.Dispatch<React.SetStateAction<CropModuleConfig>>;
+  onUndo?: () => void;
+  canUndo?: boolean;
+  onRedo?: () => void;
+  canRedo?: boolean;
+  onRestoreOriginal?: () => void;
+  history?: HistoryEntry[];
+  currentHistoryIndex?: number;
+  onSelectHistoryStep?: (index: number) => void;
+  shortcutLabels?: Record<string, string>;
 }
 
 export function BookWorkspace({
   pages, selectedPageId, setSelectedPageId, getThumbnailUrl, rotatePage,
   deletePage, sessionId, showGrid = false, cropModule, setCropModule,
+  onUndo, canUndo, onRedo, canRedo, onRestoreOriginal,
+  history, currentHistoryIndex, onSelectHistoryStep, shortcutLabels,
 }: BookWorkspaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -31,6 +43,7 @@ export function BookWorkspace({
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const startPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [activeCropDrag, setActiveCropDrag] = useState<string | null>(null);
+  const cropDragStartRef = useRef<{ relX: number; relY: number; box: CropBox } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isLockedOriginal, setIsLockedOriginal] = useState<boolean>(false);
   const [isHoldingSpace, setIsHoldingSpace] = useState<boolean>(false);
@@ -38,11 +51,6 @@ export function BookWorkspace({
   const selectedIdx = pages.findIndex((p) => p.id === selectedPageId);
   const selectedPage = selectedIdx >= 0 ? pages[selectedIdx] : null;
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
-  const isSelectedPageSplit = Boolean(
-    selectedPage && (selectedPage.half === "left" || selectedPage.half === "right" ||
-      selectedPage.slice_box != null || selectedPage.parent_page_id != null ||
-      (selectedPage.half && (selectedPage.half.startsWith("col_") || selectedPage.half.startsWith("row_"))))
-  );
   const splitLines = cropModule?.splitLines ?? [];
   const pageBaseWidthMm = useMemo(() => {
     if (selectedPage?.width_mm) return selectedPage.width_mm;
@@ -122,75 +130,90 @@ export function BookWorkspace({
   const handleCropPointerDown = (handle: string, e: React.PointerEvent) => {
     e.stopPropagation(); e.preventDefault();
     setActiveCropDrag(handle);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
-  const handleCropPointerMove = (e: React.PointerEvent) => {
-    if (!activeCropDrag || !overlayRef.current || !cropModule || !setCropModule) return;
-    const rect = overlayRef.current.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const relX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const relY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-    setCropModule((prev) => {
-      const box = { ...prev.cropBox };
-      const prevLines = prev.splitLines.map((l) => ({ ...l }));
-      let lines = prevLines;
-      let sPos = prev.splitPos;
-
-      const spineIdx = activeCropDrag === "spine" ? 0
-        : activeCropDrag.startsWith("spine-") ? Number(activeCropDrag.slice(6)) : -1;
-      if (spineIdx >= 0 && spineIdx < prevLines.length) {
-        // Dragging a cut line along its own axis, relative to the crop box
-        const target = prevLines[spineIdx];
-        const isHorizontal = target.direction === "horizontal";
-        const boxX = Math.max(0.05, box.x2 - box.x1);
-        const boxY = Math.max(0.05, box.y2 - box.y1);
-        const relInBox = isHorizontal ? (relY - box.y1) / boxY : (relX - box.x1) / boxX;
-        const v = Math.round(Math.max(0.01, Math.min(0.99, relInBox)) * 1000) / 1000;
-        lines = prevLines.map((ln, j) => (j === spineIdx ? { ...ln, pos: v } : ln));
-        sPos = lines[0]?.pos ?? prev.splitPos;
-      } else {
-        // Outer margin drag: each cut line stays anchored to the physical page content
-        const prevBoxW = Math.max(0.05, prev.cropBox.x2 - prev.cropBox.x1);
-        const prevBoxH = Math.max(0.05, prev.cropBox.y2 - prev.cropBox.y1);
-        const prevAbs = prevLines.map((ln) => ln.direction === "horizontal"
-          ? prev.cropBox.y1 + ln.pos * prevBoxH
-          : prev.cropBox.x1 + ln.pos * prevBoxW);
-
-        if (activeCropDrag === "w") box.x1 = Math.min(relX, box.x2 - 0.05);
-        else if (activeCropDrag === "e") box.x2 = Math.max(relX, box.x1 + 0.05);
-        else if (activeCropDrag === "n") box.y1 = Math.min(relY, box.y2 - 0.05);
-        else if (activeCropDrag === "s") box.y2 = Math.max(relY, box.y1 + 0.05);
-        else if (activeCropDrag === "nw") { box.x1 = Math.min(relX, box.x2 - 0.05); box.y1 = Math.min(relY, box.y2 - 0.05); }
-        else if (activeCropDrag === "ne") { box.x2 = Math.max(relX, box.x1 + 0.05); box.y1 = Math.min(relY, box.y2 - 0.05); }
-        else if (activeCropDrag === "sw") { box.x1 = Math.min(relX, box.x2 - 0.05); box.y2 = Math.max(relY, box.y1 + 0.05); }
-        else if (activeCropDrag === "se") { box.x2 = Math.max(relX, box.x1 + 0.05); box.y2 = Math.max(relY, box.y1 + 0.05); }
-        // Anchor preservation: cut lines stay at the physical page content!
-        const newBoxW = Math.max(0.05, box.x2 - box.x1);
-        const newBoxH = Math.max(0.05, box.y2 - box.y1);
-        lines = prevLines.map((ln, j) => {
-          const abs = prevAbs[j];
-          const rel = ln.direction === "horizontal" ? (abs - box.y1) / newBoxH : (abs - box.x1) / newBoxW;
-          return { ...ln, pos: Math.round(Math.max(0.01, Math.min(0.99, rel)) * 1000) / 1000 };
-        });
-        sPos = lines[0]?.pos ?? prev.splitPos;
+    if (overlayRef.current && cropModule) {
+      const rect = overlayRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        cropDragStartRef.current = {
+          relX: (e.clientX - rect.left) / rect.width,
+          relY: (e.clientY - rect.top) / rect.height,
+          box: { ...cropModule.cropBox },
+        };
       }
-      return {
-        ...prev,
-        cropBox: {
-          x1: Math.round(box.x1 * 1000) / 1000, y1: Math.round(box.y1 * 1000) / 1000,
-          x2: Math.round(box.x2 * 1000) / 1000, y2: Math.round(box.y2 * 1000) / 1000,
-        },
-        splitPos: Math.round(sPos * 1000) / 1000,
-        splitLines: lines,
-      };
-    });
-  };
-  const handleCropPointerUp = (e: React.PointerEvent) => {
-    if (activeCropDrag) {
-      try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
-      setActiveCropDrag(null);
     }
   };
+
+  useEffect(() => {
+    if (!activeCropDrag) return;
+    const onMove = (e: PointerEvent) => {
+      if (!overlayRef.current || !setCropModule) return;
+      const rect = overlayRef.current.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const relX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const relY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+      if (activeCropDrag === "move") {
+        if (!cropDragStartRef.current) return;
+        const { relX: sx, relY: sy, box: b } = cropDragStartRef.current;
+        const w = b.x2 - b.x1, h = b.y2 - b.y1;
+        const nx1 = Math.max(0, Math.min(1 - w, b.x1 + relX - sx));
+        const ny1 = Math.max(0, Math.min(1 - h, b.y1 + relY - sy));
+        setCropModule((prev) => ({
+          ...prev,
+          cropBox: {
+            x1: Math.round(nx1 * 1000) / 1000, y1: Math.round(ny1 * 1000) / 1000,
+            x2: Math.round((nx1 + w) * 1000) / 1000, y2: Math.round((ny1 + h) * 1000) / 1000,
+          },
+        }));
+        return;
+      }
+
+      setCropModule((prev) => {
+        const box = { ...prev.cropBox };
+        const prevLines = prev.splitLines.map((l) => ({ ...l }));
+        let lines = prevLines;
+        let sPos = prev.splitPos;
+
+        const spineIdx = activeCropDrag === "spine" ? 0
+          : activeCropDrag.startsWith("spine-") ? Number(activeCropDrag.slice(6)) : -1;
+        if (spineIdx >= 0 && spineIdx < prevLines.length) {
+          const target = prevLines[spineIdx];
+          const isH = target.direction === "horizontal";
+          const bx = Math.max(0.02, box.x2 - box.x1);
+          const by = Math.max(0.02, box.y2 - box.y1);
+          const relInBox = isH ? (relY - box.y1) / by : (relX - box.x1) / bx;
+          const v = Math.round(Math.max(0.01, Math.min(0.99, relInBox)) * 1000) / 1000;
+          lines = prevLines.map((ln, j) => (j === spineIdx ? { ...ln, pos: v } : ln));
+          sPos = lines[0]?.pos ?? prev.splitPos;
+        } else {
+          const pbW = Math.max(0.02, prev.cropBox.x2 - prev.cropBox.x1), pbH = Math.max(0.02, prev.cropBox.y2 - prev.cropBox.y1);
+          const prevAbs = prevLines.map((ln) => ln.direction === "horizontal" ? prev.cropBox.y1 + ln.pos * pbH : prev.cropBox.x1 + ln.pos * pbW);
+          if (activeCropDrag === "w" || activeCropDrag === "nw" || activeCropDrag === "sw") box.x1 = Math.min(relX, box.x2 - 0.02);
+          if (activeCropDrag === "e" || activeCropDrag === "ne" || activeCropDrag === "se") box.x2 = Math.max(relX, box.x1 + 0.02);
+          if (activeCropDrag === "n" || activeCropDrag === "nw" || activeCropDrag === "ne") box.y1 = Math.min(relY, box.y2 - 0.02);
+          if (activeCropDrag === "s" || activeCropDrag === "sw" || activeCropDrag === "se") box.y2 = Math.max(relY, box.y1 + 0.02);
+          const nbW = Math.max(0.02, box.x2 - box.x1), nbH = Math.max(0.02, box.y2 - box.y1);
+          lines = prevLines.map((ln, j) => ({
+            ...ln,
+            pos: Math.round(Math.max(0.01, Math.min(0.99, ln.direction === "horizontal" ? (prevAbs[j] - box.y1) / nbH : (prevAbs[j] - box.x1) / nbW)) * 1000) / 1000,
+          }));
+          sPos = lines[0]?.pos ?? prev.splitPos;
+        }
+        return {
+          ...prev,
+          cropBox: {
+            x1: Math.round(box.x1 * 1000) / 1000, y1: Math.round(box.y1 * 1000) / 1000,
+            x2: Math.round(box.x2 * 1000) / 1000, y2: Math.round(box.y2 * 1000) / 1000,
+          },
+          splitPos: Math.round(sPos * 1000) / 1000, splitLines: lines,
+        };
+      });
+    };
+    const onUp = () => { setActiveCropDrag(null); cropDragStartRef.current = null; };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+    return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+  }, [activeCropDrag, setCropModule]);
+  const handleCropPointerMove = () => {};
+  const handleCropPointerUp = () => {};
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
@@ -255,15 +278,18 @@ export function BookWorkspace({
         onRotate={(d) => rotatePage(selectedPage.id, d)} onZoomOut={() => setZoom((z) => Math.max(0.4, z - 0.2))}
         onZoomIn={() => setZoom((z) => Math.min(4.0, z + 0.2))} onZoomReset={() => { setZoom(1.0); setPan({ x: 0, y: 0 }); }}
         onToggleFullscreen={toggleFullscreen} onDelete={() => deletePage(selectedPage.id)}
+        onUndo={onUndo} canUndo={canUndo} onRedo={onRedo} canRedo={canRedo}
+        onRestoreOriginal={onRestoreOriginal} history={history} currentHistoryIndex={currentHistoryIndex}
+        onSelectHistoryStep={onSelectHistoryStep} shortcutLabels={shortcutLabels}
       />
       <PageCanvas
         containerRef={containerRef} overlayRef={overlayRef} imageSrc={getThumbnailUrl(selectedPage.id, !isViewingOriginal, 150)}
         imageAlt={`Page ${selectedIdx + 1}`} zoom={zoom} pan={pan} isPanning={isPanning} showGrid={showGrid}
-        cropModule={cropModule} splitLines={splitLines} hideCutLines={isSelectedPageSplit}
+        cropModule={cropModule} splitLines={splitLines} hideCutLines={false}
         currentCropHeightMm={currentCropHeightMm} currentCropWidthMm={currentCropWidthMm}
         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
         onImageLoad={(w, h) => setNaturalSize({ w, h })}
-        onCropPointerDown={handleCropPointerDown} onCropPointerMove={handleCropPointerMove} onCropPointerUp={handleCropPointerUp}
+        onCropPointerDown={handleCropPointerDown} onCropPointerMove={handleCropPointerMove} onCropPointerUp={handleCropPointerUp} activeDrag={activeCropDrag}
       />
     </div>
   );

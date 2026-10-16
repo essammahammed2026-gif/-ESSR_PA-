@@ -8,7 +8,7 @@ from engines.book_scan_engine import BookScanEngine, PageOpError
 from engines.schemas import (
     SessionInitResponse, ReorderRequest, PageRotateRequest, ProcessPageRequest,
     CropBoxModel, SplitSpreadRequest, RevertSpreadRequest, CropPageRequest,
-    ExportRequest,
+    ExportRequest, DuplicatePageRequest, InsertBlankPageRequest, RestorePagesRequest,
 )
 
 import time
@@ -409,6 +409,23 @@ async def crop_page(session_id: str, req: CropPageRequest):
         "pages": session["pages"]
     }
 
+@router.post("/restore-pages/{session_id}")
+async def restore_pages(session_id: str, req: RestorePagesRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    try:
+        session["pages"] = BookScanEngine.restore_pages(session["pages"], req.pages)
+    except PageOpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+    return {
+        "status": "ok",
+        "total_pages": len(session["pages"]),
+        "pages": session["pages"]
+    }
+
 @router.post("/export/{session_id}")
 async def export_book_pdf(
     session_id: str,
@@ -453,3 +470,96 @@ async def export_book_pdf(
         )
     finally:
         BookScanEngine.close_session_docs(doc_map)
+
+@router.post("/duplicate-page/{session_id}")
+async def duplicate_page(session_id: str, req: DuplicatePageRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    try:
+        new_pages, new_id = BookScanEngine.duplicate_page(
+            session["pages"],
+            target_page_id=req.page_id,
+            position=req.position,
+        )
+    except PageOpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+    session["pages"] = new_pages
+    return {
+        "status": "ok",
+        "total_pages": len(session["pages"]),
+        "pages": session["pages"],
+        "new_page_id": new_id,
+    }
+
+@router.post("/insert-blank/{session_id}")
+async def insert_blank_page(session_id: str, req: InsertBlankPageRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    try:
+        new_pages, new_id = BookScanEngine.insert_blank_page(
+            session["pages"],
+            target_page_id=req.page_id,
+            position=req.position,
+            width_mm=req.width_mm,
+            height_mm=req.height_mm,
+        )
+    except PageOpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+    session["pages"] = new_pages
+    return {
+        "status": "ok",
+        "total_pages": len(session["pages"]),
+        "pages": session["pages"],
+        "new_page_id": new_id,
+    }
+
+@router.get("/extract-page/{session_id}/{page_id}")
+async def extract_single_page(
+    session_id: str,
+    page_id: str,
+    format: str = "pdf",
+    dpi: int = 300,
+):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    page_info = next((p for p in session["pages"] if p["id"] == page_id), None)
+    if not page_info:
+        raise HTTPException(status_code=404, detail="Page not found.")
+
+    fmt = format.lower()
+    if fmt not in ["pdf", "png", "jpeg", "jpg", "webp"]:
+        raise HTTPException(status_code=400, detail="Unsupported format. Choose pdf, png, jpeg, or webp.")
+
+    ext = "pdf" if fmt == "pdf" else ("jpg" if fmt in ["jpeg", "jpg"] else fmt)
+    media_type = "application/pdf" if fmt == "pdf" else f"image/{fmt}"
+    export_filename = f"page_{page_id[:8]}.{ext}"
+    output_path = os.path.join(session["session_dir"], export_filename)
+
+    doc_map = BookScanEngine.open_session_docs(session)
+    try:
+        success = BookScanEngine.extract_single_page(
+            doc_map=doc_map,
+            page_info=page_info,
+            output_path=output_path,
+            format=fmt,
+            dpi=dpi,
+        )
+        if not success or not os.path.exists(output_path):
+            raise HTTPException(status_code=500, detail="Failed to extract page.")
+
+        return FileResponse(
+            output_path,
+            media_type=media_type,
+            filename=export_filename,
+        )
+    finally:
+        BookScanEngine.close_session_docs(doc_map)
+

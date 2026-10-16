@@ -13,6 +13,7 @@ export interface UseBookSplitOpsArgs {
   cropModule: CropModuleConfig;
   setCropModule: Dispatch<SetStateAction<CropModuleConfig>>;
   clearPageCrops?: (ids?: string[]) => void;
+  recordStep?: (label: string, nextPages: BookStudioPage[], nextSelectedId?: string | null) => void;
 }
 
 interface PhaseResult {
@@ -39,6 +40,7 @@ export function useBookSplitOps({
   cropModule,
   setCropModule,
   clearPageCrops,
+  recordStep,
 }: UseBookSplitOpsArgs) {
   // One backend split pass along a single axis. Returns fresh pages + new slice ids.
   const runSplitPhase = useCallback(async (
@@ -118,10 +120,11 @@ export function useBookSplitOps({
       // Committed: overlay back to full bed over the new slices
       clearPageCrops?.();
       setCropModule((prev) => ({ ...prev, cropBox: { ...FULL_BED } }));
+      recordStep?.("Split Sheet", current, newSelectedId ?? selectedPageId);
     } catch (err) {
       console.error("Split spread failed:", err);
     }
-  }, [sessionId, selectedPageId, cropModule, pages, setPages, setSelectedPageId, setCropModule, runSplitPhase, clearPageCrops]);
+  }, [sessionId, selectedPageId, cropModule, pages, setPages, setSelectedPageId, setCropModule, runSplitPhase, clearPageCrops, recordStep]);
 
   // Recombine split slices back into the uncut spread
   const revertSpread = useCallback(async (mode: "current" | "all" = "current", pageId?: string) => {
@@ -179,11 +182,12 @@ export function useBookSplitOps({
         // resets to full bed — repeat crops refine the visible region.
         // Cut lines transfer unchanged (relative to the committed region).
         setCropModule((prev) => ({ ...prev, cropBox: { ...FULL_BED } }));
+        recordStep?.("Crop Page", data.pages, selectedPageId);
       }
     } catch (err) {
       console.error("Apply crop failed:", err);
     }
-  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.target, pages, setPages, setCropModule, clearPageCrops]);
+  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.target, pages, setPages, setCropModule, clearPageCrops, recordStep]);
 
   return { splitSpread, revertSpread, applyCrop };
 }

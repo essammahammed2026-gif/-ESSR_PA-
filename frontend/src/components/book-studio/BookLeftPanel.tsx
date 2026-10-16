@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { FileText, Layers, FileCheck, Upload, Sparkles, RefreshCw, FolderOpen, ChevronLeft } from "lucide-react";
 import { BookIntakeMode, BookStudioPage } from "@/types/book_studio";
 import { DeckCard } from "./DeckCard";
+import { DeckListView } from "./DeckListView";
+import { PageContextMenu } from "./PageContextMenu";
+import { PagePropertiesModal } from "./PagePropertiesModal";
 import { DeckGrid } from "@/components/shared/DeckGrid";
 
 interface BookLeftPanelProps {
@@ -31,18 +34,40 @@ interface BookLeftPanelProps {
   rotatePage: (pageId: string, delta?: number) => void;
   deletePage: (pageId: string) => void;
   reorderPages: (fromIdx: number, toIdx: number) => void;
+  duplicatePage?: (targetPageId: string, position?: "before" | "after") => void;
+  insertBlankPage?: (targetPageId: string, position?: "before" | "after", widthMm?: number, heightMm?: number) => void;
+  copyPage?: (page: BookStudioPage) => void;
+  pastePage?: (targetPageId: string, position?: "before" | "after") => void;
+  canPaste?: boolean;
+  extractPage?: (pageId: string, format?: "pdf" | "png" | "jpeg" | "webp") => void;
   getThumbnailUrl: (pageId: string, isClean: boolean, dpi?: number) => string;
+  viewMode?: "grid" | "list";
   onCollapse?: () => void;
 }
 
 export function BookLeftPanel({
   intakeMode, setIntakeMode, fileSingle, setFileSingle, fileOdds, setFileOdds, fileEvens, setFileEvens,
   oddsOrder, setOddsOrder, evensOrder, setEvensOrder, sessionId, pages, selectedPageId, setSelectedPageId,
-  isInitializing, initSession, resetJob, rotatePage, deletePage, reorderPages, getThumbnailUrl, onCollapse,
+  isInitializing, initSession, resetJob, rotatePage, deletePage, reorderPages,
+  duplicatePage, insertBlankPage, copyPage, pastePage, canPaste = false, extractPage,
+  getThumbnailUrl, viewMode = "grid", onCollapse,
 }: BookLeftPanelProps) {
   const singleInputRef = useRef<HTMLInputElement>(null);
   const oddsInputRef = useRef<HTMLInputElement>(null);
   const evensInputRef = useRef<HTMLInputElement>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    page: BookStudioPage;
+    position: { x: number; y: number };
+  } | null>(null);
+  const [propertiesPage, setPropertiesPage] = useState<BookStudioPage | null>(null);
+
+  const handleContextMenu = (e: React.MouseEvent, page: BookStudioPage) => {
+    e.preventDefault();
+    setContextMenu({
+      page,
+      position: { x: e.clientX, y: e.clientY },
+    });
+  };
   const intakeModes: { id: BookIntakeMode; title: string; subtitle: string; icon: React.ReactNode }[] = [
     { id: "single_page", title: "Standard Book PDF", subtitle: "Single pages or 2-up spreads to split in studio", icon: <FileText size={16} className="text-cyan-400" /> },
     { id: "dual_pass", title: "Dual Pass (Odds/Evens)", subtitle: "Duplex scan batches collated", icon: <Layers size={16} className="text-cyan-400" /> },
@@ -146,20 +171,66 @@ export function BookLeftPanel({
             <span className="text-[10px] text-slate-500">Drag to reorder</span>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            <DeckGrid
-              pages={pages}
-              columns={2}
-              emptyLabel="No pages in deck"
-              onReorder={reorderPages}
-              renderCard={(p, idx, drag, handlers) => (
-                <DeckCard key={p.id} page={p} index={idx} isSelected={p.id === selectedPageId}
-                  isDragTarget={drag.dragOverIdx === idx} isSelfDragging={drag.draggedIdx === idx}
-                  thumbnailUrl={getThumbnailUrl(p.id, false, 80)} onSelect={setSelectedPageId}
-                  onRotate={rotatePage} onDelete={deletePage}
-                  onDragStart={handlers.onDragStart} onDragOver={handlers.onDragOver} onDrop={handlers.onDrop} onDragEnd={handlers.onDragEnd} />
-              )}
-            />
+            {viewMode === "list" ? (
+              <DeckListView
+                pages={pages}
+                selectedPageId={selectedPageId}
+                onSelect={setSelectedPageId}
+                onReorder={reorderPages}
+                onContextMenu={handleContextMenu}
+              />
+            ) : (
+              <DeckGrid
+                pages={pages}
+                columns={2}
+                emptyLabel="No pages in deck"
+                onReorder={reorderPages}
+                renderCard={(p, idx, drag, handlers) => (
+                  <DeckCard
+                    key={p.id}
+                    page={p}
+                    index={idx}
+                    isSelected={p.id === selectedPageId}
+                    isDragTarget={drag.dragOverIdx === idx}
+                    isSelfDragging={drag.draggedIdx === idx}
+                    thumbnailUrl={getThumbnailUrl(p.id, false, 80)}
+                    onSelect={setSelectedPageId}
+                    onDragStart={handlers.onDragStart}
+                    onDragOver={handlers.onDragOver}
+                    onDrop={handlers.onDrop}
+                    onDragEnd={handlers.onDragEnd}
+                    onContextMenu={handleContextMenu}
+                  />
+                )}
+              />
+            )}
           </div>
+
+          {contextMenu && (
+            <PageContextMenu
+              page={contextMenu.page}
+              position={contextMenu.position}
+              onClose={() => setContextMenu(null)}
+              onRotate={(id, delta) => rotatePage(id, delta)}
+              onDelete={(id) => deletePage(id)}
+              onCopy={(p) => copyPage && copyPage(p)}
+              onDuplicate={(id) => duplicatePage && duplicatePage(id)}
+              onPaste={(targetId, pos) => pastePage && pastePage(targetId, pos)}
+              canPaste={canPaste}
+              onInsertBlank={(targetId, pos) => insertBlankPage && insertBlankPage(targetId, pos)}
+              onExtract={(id, fmt) => extractPage && extractPage(id, fmt)}
+              onShowProperties={(p) => setPropertiesPage(p)}
+            />
+          )}
+
+          {propertiesPage && (
+            <PagePropertiesModal
+              page={propertiesPage}
+              pageIndex={pages.findIndex((p) => p.id === propertiesPage.id)}
+              isOpen={Boolean(propertiesPage)}
+              onClose={() => setPropertiesPage(null)}
+            />
+          )}
         </div>
       )}
     </div>
