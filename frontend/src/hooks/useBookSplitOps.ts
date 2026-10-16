@@ -52,7 +52,7 @@ export function useBookSplitOps({
     targetPageIds: string[] | undefined,
   ): Promise<PhaseResult | null> => {
     if (!sessionId) return null;
-    const anchorId = targetPageIds?.[0] ?? parentIds[0];
+    const anchorId = targetPageIds?.[0] ?? parentIds[0] ?? currentPages[0]?.id ?? selectedPageId ?? "";
     if (!anchorId && !applyToAll) return null;
     const res = await apiFetch(`/api/book-scan/split-spread/${sessionId}`, {
       method: "POST",
@@ -73,10 +73,16 @@ export function useBookSplitOps({
     const beforeIds = new Set(currentPages.map((p) => p.id));
     const parentSet = new Set(parentIds);
     const newIds = nextPages
-      .filter((p) => !beforeIds.has(p.id) && p.parent_page_id && parentSet.has(p.parent_page_id))
+      .filter((p) => {
+        if (beforeIds.has(p.id)) return false;
+        if (applyToAll || parentIds.length === 0) return true;
+        const parentMatch = p.parent_page_id && parentSet.has(p.parent_page_id);
+        const immMatch = p.immediate_parent_id && parentSet.has(p.immediate_parent_id);
+        return Boolean(parentMatch || immMatch);
+      })
       .map((p) => p.id);
     return { pages: nextPages, newIds, newSelectedId: data.new_selected_id ?? null };
-  }, [sessionId, cropModule.cropBox]);
+  }, [sessionId, cropModule.cropBox, selectedPageId]);
 
   // Cut along the configured cut lines across the crop target (empty = plain crop)
   const splitSpread = useCallback(async () => {
@@ -87,7 +93,7 @@ export function useBookSplitOps({
       const resolved = resolveCropTarget(pages, selectedPageId, cropModule.target);
       let applyToAll = resolved.applyToAll;
       let targetPageIds = resolved.ids;
-      let parentIds = targetPageIds ?? pages.filter((p) => !p.parent_page_id).map((p) => p.id);
+      let parentIds = targetPageIds ?? pages.map((p) => p.id);
 
       let current = pages;
       let newSelectedId: string | null = null;
@@ -98,8 +104,14 @@ export function useBookSplitOps({
         current = phase.pages;
         newSelectedId = phase.newSelectedId;
         // Phase 2 targets the slices just created (y-range is unchanged by vertical cuts)
+        const newIdSet = new Set(phase.newIds);
         parentIds = phase.newIds.length > 0
-          ? Array.from(new Set(phase.pages.filter((p) => phase.newIds.includes(p.id)).map((p) => p.parent_page_id).filter((id): id is string => Boolean(id))))
+          ? Array.from(new Set(
+              phase.pages
+                .filter((p) => newIdSet.has(p.id))
+                .map((p) => p.immediate_parent_id || p.parent_page_id)
+                .filter((id): id is string => Boolean(id))
+            ))
           : parentIds;
         targetPageIds = phase.newIds.length > 0 ? phase.newIds : targetPageIds;
         applyToAll = false;
@@ -117,9 +129,13 @@ export function useBookSplitOps({
       } else if (!current.some((p) => p.id === selectedPageId) && current[0]) {
         setSelectedPageId(current[0].id);
       }
-      // Committed: overlay back to full bed over the new slices
+      // Committed: overlay back to full bed over the new slices and clear cut lines
       clearPageCrops?.();
-      setCropModule((prev) => ({ ...prev, cropBox: { ...FULL_BED } }));
+      setCropModule((prev) => ({
+        ...prev,
+        cropBox: { ...FULL_BED },
+        splitLines: [],
+      }));
       recordStep?.("Split Sheet", current, newSelectedId ?? selectedPageId);
     } catch (err) {
       console.error("Split spread failed:", err);
@@ -144,6 +160,11 @@ export function useBookSplitOps({
         const data = await res.json();
         setPages(data.pages);
         clearPageCrops?.();
+        setCropModule((prev) => ({
+          ...prev,
+          cropBox: { ...FULL_BED },
+          splitLines: [],
+        }));
         if (data.new_selected_id) {
           setSelectedPageId(data.new_selected_id);
         }
@@ -151,7 +172,7 @@ export function useBookSplitOps({
     } catch (err) {
       console.error("Revert spread failed:", err);
     }
-  }, [sessionId, selectedPageId, setPages, setSelectedPageId, clearPageCrops]);
+  }, [sessionId, selectedPageId, setPages, setSelectedPageId, setCropModule, clearPageCrops]);
 
   // Commit the crop box across the crop target (final: overlay resets to full bed)
   const applyCrop = useCallback(async () => {
@@ -180,8 +201,11 @@ export function useBookSplitOps({
         }
         // Committed: the view now shows the cropped region, so the overlay
         // resets to full bed — repeat crops refine the visible region.
-        // Cut lines transfer unchanged (relative to the committed region).
-        setCropModule((prev) => ({ ...prev, cropBox: { ...FULL_BED } }));
+        setCropModule((prev) => ({
+          ...prev,
+          cropBox: { ...FULL_BED },
+          splitLines: [],
+        }));
         recordStep?.("Crop Page", data.pages, selectedPageId);
       }
     } catch (err) {

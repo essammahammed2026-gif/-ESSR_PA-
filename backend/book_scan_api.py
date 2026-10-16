@@ -343,11 +343,15 @@ async def split_spread(session_id: str, req: SplitSpreadRequest):
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
+    if not session.get("pages"):
+        raise HTTPException(status_code=400, detail="No pages available in session.")
+
+    target_id = req.page_id or (req.target_page_ids[0] if req.target_page_ids else session["pages"][0]["id"])
 
     try:
         new_pages, new_selected_id = BookScanEngine.split_pages(
             session["pages"],
-            req.page_id,
+            target_id,
             crop_box=req.crop_box.dict() if req.crop_box else None,
             split_pos=req.split_pos,
             split_lines=req.split_lines,
@@ -395,10 +399,14 @@ async def crop_page(session_id: str, req: CropPageRequest):
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
+    if not session.get("pages"):
+        raise HTTPException(status_code=400, detail="No pages available in session.")
+
+    target_id = req.page_id or (req.target_page_ids[0] if req.target_page_ids else session["pages"][0]["id"])
 
     BookScanEngine.apply_crop_to_pages(
         session["pages"],
-        req.page_id,
+        target_id,
         req.crop_box.dict(),
         apply_to_all=req.apply_to_all,
         target_page_ids=req.target_page_ids,

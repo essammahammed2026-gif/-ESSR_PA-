@@ -1062,8 +1062,8 @@ class BookScanEngine:
                     vis_w = max(0.001, vis_x2 - vis_x1)
                     vis_h = max(0.001, vis_y2 - vis_y1)
 
-                    p_w = float(p.get("width_mm") or p.get("orig_width_mm") or 210.0)
-                    p_h = float(p.get("height_mm") or p.get("orig_height_mm") or 297.0)
+                    p_w = float(p.get("orig_width_mm") or p.get("width_mm") or 210.0)
+                    p_h = float(p.get("orig_height_mm") or p.get("height_mm") or 297.0)
                     pcb_frac_w = BookScanEngine.box_frac_w(effective_pcb)
                     pcb_frac_h = BookScanEngine.box_frac_h(effective_pcb)
                     base_active_w = p_w * pcb_frac_w
@@ -1082,6 +1082,7 @@ class BookScanEngine:
                         "page_crop_box": None,
                         "rotation": p.get("rotation", 0),
                         "parent_page_id": p.get("parent_page_id") or p["id"],
+                        "immediate_parent_id": p["id"],
                         "is_spread": False,
                         "parent_spread_width_mm": p.get("parent_spread_width_mm", round(base_active_w, 1)),
                         "parent_spread_height_mm": p.get("parent_spread_height_mm", round(base_active_h, 1)),

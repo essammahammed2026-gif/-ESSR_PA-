@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Document Pipeline State Persistence & Sub-Slice Lineage Fix**:
+  - Resolved silent failure when attempting crop or split operations after a cut-line split in Book Studio.
+  - Cleared `cropModule.splitLines` upon split commit and revert in `useBookSplitOps.ts` so `CropSplitPanel` correctly transitions between split and crop modes without retaining stale cut lines.
+  - Fixed candidate page resolution in `useBookSplitOps.ts` when applying splits across documents where pages have already been split into slices, preventing `parentIds` from collapsing into an empty set.
+  - Added `immediate_parent_id` tracking in `book_scan_engine.py` and `BookStudioPage` to maintain parent-child hierarchy during chained multi-phase cuts, preventing phase 2 and sub-splits from targeting stale page IDs.
+  - Unified base dimension resolution in `BookScanEngine.split_pages` to prioritize `orig_width_mm` over scaled `width_mm`, preventing crop fraction compounding on iterative sub-splits.
+  - Made `page_id` optional in `SplitSpreadRequest` and `CropPageRequest` schemas with robust router fallback, preventing HTTP 422 errors when batch-targeting all pages.
 - **History Journal, Multi-Step Iterative Page Splitting & Shortcut Settings**:
   - Implemented Adobe-style 50-step bounded History Journal with instant non-destructive browsing, timeline jumps, Undo (`Ctrl+Z`), Redo (`Ctrl+Y` / `Ctrl+Shift+Z`), and confirmation-guarded "Restore Original" (`Ctrl+Shift+R`).
   - Added backend atomic state restoration via `POST /restore-pages/{session_id}` in `book_scan_api.py` and `BookScanEngine.restore_pages`.

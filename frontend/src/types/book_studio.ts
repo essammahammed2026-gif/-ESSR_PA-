@@ -44,6 +44,7 @@ export interface BookStudioPage extends BasePage {
   page_crop_box?: CropBox;
   is_spread?: boolean;
   parent_page_id?: string;
+  immediate_parent_id?: string;
   parent_spread_width_mm?: number;
   parent_spread_height_mm?: number;
   width_mm?: number;
