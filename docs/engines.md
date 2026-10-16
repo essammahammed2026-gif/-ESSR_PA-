@@ -72,7 +72,7 @@ All core printing, geometry, computer vision, and document-transformation logic 
 * **Features:**
   * Supports softcover (paperback) and hardcover simulations.
   * Configurable binding direction: Left-to-Right (LTR) and Right-to-Left (RTL, for Arabic/Hebrew publications).
-  * Applies realistic binding gutters and spine creep adjustments via `helpers.apply_print_binding_padding`.
+  * Applies realistic binding gutters and spine creep adjustments via `apply_print_binding_padding`.
   * Outputs standalone HTML5 bundles using `templates/flipbook.html`.
 
 ### 6. Universal Asset Inspector (`asset_inspector.py`)

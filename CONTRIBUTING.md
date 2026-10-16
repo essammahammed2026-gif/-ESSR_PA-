@@ -49,9 +49,10 @@ curl -s http://localhost:8000/api/settings
 
 ---
 
-## 3. Documentation Policy
+## 3. Documentation & Anti-Fragmentation Policy
 
-Documentation follows the **Docs-as-Code** standard with a single source of truth:
-* **Feature additions or bug fixes:** Record human-readable entries in [`CHANGELOG.md`](./CHANGELOG.md) under the `[Unreleased]` section.
-* **Architecture or engine updates:** Update the relevant files in [`docs/`](./docs/).
-* **Do not duplicate:** Do not create ad-hoc summary files or copy route tables into subfolders.
+Documentation and file structure follow the **Docs-as-Code** and **Consolidation Over Fragmentation** standards defined in [`AGENTS.md`](./AGENTS.md):
+* **Zero-Lag Navigation Map:** Always consult and maintain the **Repository Navigation Map** at the top of [`docs/architecture.md`](./docs/architecture.md) before searching for files or when adding/consolidating modules.
+* **Single Responsibility, Zero Micro-File Sprawl:** Do not split cohesive hooks, canvas components, or engines into arbitrary sub-files to meet a line-count cap. Reuse the canonical utilities in `frontend/src/lib/` and `backend/engines/` listed in [`AGENTS.md`](./AGENTS.md).
+* **Feature additions or bug fixes:** Record human-readable entries in [`CHANGELOG.md`](./CHANGELOG.md) under the `[Unreleased]` section and summarize session changes in [`SESSION_LOG.md`](./SESSION_LOG.md).
+* **Architecture or engine updates:** Update the relevant files in [`docs/`](./docs/). Do not create ad-hoc summary files outside `docs/`.

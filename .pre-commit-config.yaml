@@ -8,7 +8,7 @@ repos:
         pass_filenames: false
       - id: frontend-changed-checks
         name: ESLint (changed) + tsc --noEmit (frontend)
-        entry: bash -c 'cd frontend && git diff --cached --name-only --diff-filter=ACM | grep -E "\.(ts|tsx)$" | grep -v node_modules | xargs -r npx eslint && npx tsc --noEmit'
+        entry: bash -c 'cd frontend && git diff --cached --name-only --diff-filter=ACM | grep -E "^frontend/.*\.(ts|tsx)$" | sed "s|^frontend/||" | grep -v node_modules | xargs -r npx eslint && npx tsc --noEmit'
         language: system
         pass_filenames: false
       - id: backend-compile

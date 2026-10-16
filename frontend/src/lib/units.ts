@@ -21,13 +21,15 @@ const PX_PER_INCH = 96; // Standard CSS screen pixels (96 DPI)
 /**
  * Converts a value in millimeters to the target unit.
  */
-export function mmToUnit(valMm: number, unit: LengthUnit): number {
+export function mmToUnit(valMm: number, unit: LengthUnit | string): number {
   if (!Number.isFinite(valMm)) return 0;
   switch (unit) {
     case "cm":
       return Math.round((valMm / 10) * 100) / 100;
+    case "in":
     case "inches":
       return Math.round((valMm / MM_PER_INCH) * 1000) / 1000;
+    case "px":
     case "pixels":
       return Math.round((valMm / MM_PER_INCH) * PX_PER_INCH * 10) / 10;
     case "mm":
@@ -39,13 +41,15 @@ export function mmToUnit(valMm: number, unit: LengthUnit): number {
 /**
  * Converts a value in the target unit back to millimeters.
  */
-export function unitToMm(valInUnit: number, unit: LengthUnit): number {
+export function unitToMm(valInUnit: number, unit: LengthUnit | string): number {
   if (!Number.isFinite(valInUnit)) return 0;
   switch (unit) {
     case "cm":
       return valInUnit * 10;
+    case "in":
     case "inches":
       return valInUnit * MM_PER_INCH;
+    case "px":
     case "pixels":
       return (valInUnit / PX_PER_INCH) * MM_PER_INCH;
     case "mm":
@@ -57,7 +61,7 @@ export function unitToMm(valInUnit: number, unit: LengthUnit): number {
 /**
  * Formats a value in millimeters into a readable string with unit suffix.
  */
-export function formatMmInUnit(valMm: number, unit: LengthUnit): string {
+export function formatMmInUnit(valMm: number, unit: LengthUnit | string): string {
   const converted = mmToUnit(valMm, unit);
   const opt = UNIT_OPTIONS.find((o) => o.value === unit);
   return `${converted} ${opt?.label ?? unit}`;

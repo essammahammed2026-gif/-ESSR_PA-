@@ -3,7 +3,7 @@
 import React from "react";
 import { ChevronDown, RotateCw, Crop, Copy, RefreshCw, Trash2 } from "lucide-react";
 import { ImposingItem } from "@/types/prepress";
-import { toUnit, toMm } from "@/components/imposing/controls";
+import { mmToUnit, unitToMm } from "@/lib/units";
 
 interface RightControlPanelProps {
   jobMode: string;
@@ -59,9 +59,6 @@ export function RightControlPanel({
   handlePreview
 }: RightControlPanelProps) {
 
-  // For the manual rows/cols vs auto, we'll mock the rows/cols for now as read-only or auto
-  
-
   return (
     <div className="flex flex-col space-y-3 pb-2">
       {/* Imposition Mode */}
@@ -90,8 +87,8 @@ export function RightControlPanel({
             <div className="flex-1 bg-[#131720] border border-[#2E3648] rounded px-2 py-1 flex items-center">
               <input 
                 type="number"
-                value={toUnit(sheetW, unit)}
-                onChange={(e) => { setSheetPreset("custom"); setSheetW(toMm(parseFloat(e.target.value) || 1, unit)); }}
+                value={mmToUnit(sheetW, unit)}
+                onChange={(e) => { setSheetPreset("custom"); setSheetW(unitToMm(parseFloat(e.target.value) || 1, unit)); }}
                 className="w-full bg-transparent text-white text-xs outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <span className="text-[10px] text-slate-500">{unit}</span>
@@ -100,8 +97,8 @@ export function RightControlPanel({
             <div className="flex-1 bg-[#131720] border border-[#2E3648] rounded px-2 py-1 flex items-center">
               <input 
                 type="number"
-                value={toUnit(sheetH, unit)}
-                onChange={(e) => { setSheetPreset("custom"); setSheetH(toMm(parseFloat(e.target.value) || 1, unit)); }}
+                value={mmToUnit(sheetH, unit)}
+                onChange={(e) => { setSheetPreset("custom"); setSheetH(unitToMm(parseFloat(e.target.value) || 1, unit)); }}
                 className="w-full bg-transparent text-white text-xs outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <span className="text-[10px] text-slate-500">{unit}</span>
@@ -122,8 +119,8 @@ export function RightControlPanel({
           <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded px-2 py-1 w-24">
             <input 
               type="number"
-              value={toUnit(margin, unit)}
-              onChange={(e) => setMargin(toMm(parseFloat(e.target.value) || 0, unit))}
+              value={mmToUnit(margin, unit)}
+              onChange={(e) => setMargin(unitToMm(parseFloat(e.target.value) || 0, unit))}
               className="w-full bg-transparent text-white text-xs text-right outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
             <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
@@ -197,8 +194,8 @@ export function RightControlPanel({
           <div className="flex items-center bg-[#131720] border border-[#2E3648] rounded px-2 py-1 w-24">
             <input 
               type="number"
-              value={toUnit(gap, unit)}
-              onChange={(e) => setGap(toMm(parseFloat(e.target.value) || 0, unit))}
+              value={mmToUnit(gap, unit)}
+              onChange={(e) => setGap(unitToMm(parseFloat(e.target.value) || 0, unit))}
               className="w-full bg-transparent text-white text-xs text-right outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
             <span className="text-[10px] text-slate-500 ml-1">{unit}</span>

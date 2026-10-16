@@ -8,7 +8,13 @@ from engines.sheet_packer import MaxRectsSheetPacker, SingleSheetResult, PlacedS
 from engines.roll_packer import MeterSegmentPacker
 from engines.sheet_gang_exporter import SheetGangExporter
 from engines.schemas import ImposingItem, ImposingRequest
-from engines.imposing_prep import build_sheet_specs, build_roll_specs, apply_alignment, effective_page_rotation
+from engines.imposing_prep import (
+    apply_alignment,
+    build_imposing_pages_meta,
+    build_roll_specs,
+    build_sheet_specs,
+    effective_page_rotation,
+)
 from engines.thumbnails import get_dimensions_mm
 
 
@@ -44,7 +50,8 @@ async def upload_imposing_file(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     ext = os.path.splitext(file.filename)[1].lower()
     if not ext: ext = ".pdf"
-    file_path = f"temp_uploads/{file_id}{ext}"
+    file_id_ext = f"{file_id}{ext}"
+    file_path = f"temp_uploads/{file_id_ext}"
     
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
@@ -56,32 +63,12 @@ async def upload_imposing_file(file: UploadFile = File(...)):
     
     if ext == ".pdf":
         try:
-            from engines.thumbnails import list_pdf_pages_mm
-            dims = list_pdf_pages_mm(file_path)
-            page_count = len(dims)
+            w, h, page_count, pages_meta = build_imposing_pages_meta(file_path, file_id_ext)
             if page_count > 0:
-                w, h = dims[0]
-                # Render page 0 thumbnail synchronously at 0.72 scale (~150 DPI) for crisp preview
                 from engines.thumbnails import render_pdf_thumb
                 render_pdf_thumb(file_path, thumb_path, page_num=0)
 
-                for p, (pw_raw, ph_raw) in enumerate(dims):
-                    pw = round(pw_raw, 2)
-                    ph = round(ph_raw, 2)
-                    pages_meta.append({
-                        "page_num": p,
-                        "width_mm": pw,
-                        "height_mm": ph,
-                        "aspect_ratio": round(pw / ph, 3) if ph > 0 else 1.0,
-                        "thumb_url": f"/api/imposing/thumbnail/{file_id}{ext}/{p}"
-                    })
-
-            # For multi-page PDFs (books), pre-generate ALL remaining page thumbnails
-            # in a background daemon thread. One fitz.open() → all pages rendered
-            # sequentially → disk cache populated before the first preview fires.
-            # This turns N parallel cache-miss renders into N instant cache hits.
             if page_count > 1:
-                file_id_ext = f"{file_id}{ext}"
                 t = threading.Thread(
                     target=_pregen_all_thumbnails,
                     args=(file_path, file_id_ext, page_count),
@@ -92,37 +79,30 @@ async def upload_imposing_file(file: UploadFile = File(...)):
         except Exception as e:
             print(f"PDF upload parsing error: {e}")
             w, h = get_dimensions_mm(file_path)
-            pages_meta.append({
+            pages_meta = [{
                 "page_num": 0,
                 "width_mm": round(w, 2),
                 "height_mm": round(h, 2),
                 "aspect_ratio": round(w / h, 3) if h > 0 else 1.0,
-                "thumb_url": f"/api/imposing/thumbnail/{file_id}{ext}/0"
-            })
+                "thumb_url": f"/api/imposing/thumbnail/{file_id_ext}/0"
+            }]
     else:
-        w, h = get_dimensions_mm(file_path)
+        w, h, page_count, pages_meta = build_imposing_pages_meta(file_path, file_id_ext)
         try:
             from engines.thumbnails import render_image_thumb
             render_image_thumb(file_path, thumb_path)
-        except:
+        except Exception:
             thumb_path = ""
-        pages_meta.append({
-            "page_num": 0,
-            "width_mm": round(w, 2),
-            "height_mm": round(h, 2),
-            "aspect_ratio": round(w / h, 3) if h > 0 else 1.0,
-            "thumb_url": f"/api/imposing/thumbnail/{file_id}{ext}/0"
-        })
 
     return {
         "success": True,
-        "file_id": f"{file_id}{ext}",
+        "file_id": file_id_ext,
         "name": file.filename,
         "w": round(w, 2),
         "h": round(h, 2),
         "page_count": page_count,
         "is_book": page_count > 1,
-        "thumb": f"/api/imposing/thumbnail/{file_id}{ext}/0",
+        "thumb": f"/api/imposing/thumbnail/{file_id_ext}/0",
         "pages": pages_meta
     }
 
@@ -132,47 +112,17 @@ def get_imposing_file_pages(file_id: str):
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
         
-    ext = os.path.splitext(file_path)[1].lower()
-    pages_meta = []
-    
-    if ext == ".pdf":
-        try:
-            from engines.thumbnails import list_pdf_pages_mm
-            dims = list_pdf_pages_mm(file_path)
-            page_count = len(dims)
-            for p, (pw_raw, ph_raw) in enumerate(dims):
-                pw = round(pw_raw, 2)
-                ph = round(ph_raw, 2)
-                pages_meta.append({
-                    "page_num": p,
-                    "width_mm": pw,
-                    "height_mm": ph,
-                    "aspect_ratio": round(pw / ph, 3) if ph > 0 else 1.0,
-                    "thumb_url": f"/api/imposing/thumbnail/{os.path.basename(file_path)}/{p}"
-                })
-            return {
-                "success": True,
-                "file_id": os.path.basename(file_path),
-                "page_count": page_count,
-                "pages": pages_meta
-            }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to inspect PDF: {str(e)}")
-    else:
-        w, h = get_dimensions_mm(file_path)
-        pages_meta.append({
-            "page_num": 0,
-            "width_mm": round(w, 2),
-            "height_mm": round(h, 2),
-            "aspect_ratio": round(w / h, 3) if h > 0 else 1.0,
-            "thumb_url": f"/api/imposing/thumbnail/{os.path.basename(file_path)}/0"
-        })
+    file_id_ext = os.path.basename(file_path)
+    try:
+        _w, _h, page_count, pages_meta = build_imposing_pages_meta(file_path, file_id_ext)
         return {
             "success": True,
-            "file_id": os.path.basename(file_path),
-            "page_count": 1,
+            "file_id": file_id_ext,
+            "page_count": page_count,
             "pages": pages_meta
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to inspect PDF: {str(e)}")
 
 def resolve_temp_file(file_id: str) -> Optional[str]:
     from engines.thumbnails import resolve_temp_file as _resolve

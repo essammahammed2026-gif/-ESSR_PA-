@@ -56,31 +56,10 @@ class SheetGangExporter:
         target_w: float,
         target_h: float
     ) -> int:
-        """
-        Calculates user-requested content rotation in PyMuPDF CCW degrees (0, 90, 180, 270).
-        Crucially: Only rotates pages whose aspect orientation opposes the target slot orientation!
-        - If setting is 'none', returns 0.
-        - If the page is already aligned (e.g. both are portrait, or both are landscape), returns 0.
-        - If the page opposes the target slot (e.g. landscape page inside a portrait slot, or vice versa):
-          'cw'  -> 270 CCW (90° Clockwise)
-          'ccw' -> 90 CCW (90° Counter-Clockwise)
-        """
-        if not page_rotation_setting or page_rotation_setting == "none":
-            return 0
-
-        src_is_landscape = src_w > src_h
-        target_is_landscape = target_w > target_h
-
-        # Only rotate if the page aspect orientation goes against the target orientation!
-        if src_is_landscape == target_is_landscape:
-            return 0
-
-        # Opposing orientation: apply the requested rotation
-        if page_rotation_setting == "cw":
-            return 270  # PyMuPDF CCW 270 = CW 90
-        elif page_rotation_setting == "ccw":
-            return 90   # PyMuPDF CCW 90 = CCW 90
-        return 0
+        from engines.imposing_prep import compute_opposing_rotation_deg
+        return compute_opposing_rotation_deg(
+            page_rotation_setting, src_w, src_h, target_w, target_h
+        )
 
     @staticmethod
     def export_pdf(

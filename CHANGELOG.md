@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Architectural Optimization, De-Fragmentation & Engine Deduplication**:
+  - **Repository Navigation Map**: Added fast-lookup router-to-engine and route-to-component mapping table at the top of `docs/architecture.md` to eliminate blind directory searches.
+  - **Phase 1 — Book Studio De-Fragmentation**:
+    - Merged `cropTarget.ts` into `src/lib/pageScope.ts` and extracted shared non-overlapping cut-line placement math (`getNextCutLine`) into `src/lib/splitLines.ts`.
+    - Consolidated `useBookModules.ts`, `useBookSplitOps.ts`, and `useBookExport.ts` into a single cohesive hook at `src/hooks/useBookModules.ts`, removing the mutable `clearCropsRef` workaround in `useBookStudioState.ts`.
+    - Folded `SplitLineOverlay.tsx` directly into `PageCanvas.tsx`, routed vertical segment calculation through `segmentSizes()`, and stripped dead pointer props from `BookWorkspace.tsx`.
+  - **Phase 2 & 2.5 — Imposing & Flipbook Studio Consolidation**:
+    - Unified unit conversion math in `src/lib/units.ts` (`mmToUnit`, `unitToMm`, `formatMmInUnit` supporting `"in"` and `"px"` aliases) and deleted the single-component `src/components/imposing/controls.tsx` wrapper.
+    - Consolidated `usePageDeck.ts`, `useImpositionState.ts`, and `useImposingJob.ts` into `src/hooks/useImpositionStudio.ts` with pure `buildImposingPagesFromMeta()` and `buildImposingPayload()` helpers.
+    - Un-minified `src/app/flipbook/page.tsx` and routed export blob downloads through `downloadBlob()` from `src/lib/api.ts`.
+  - **Phase 3 — Backend Geometry, Engine & Router Deduplication**:
+    - Extracted `_make_placed_item`, `_find_best_rect`, `_split_and_prune_free_rects`, `_make_sheet_result`, and `_pack_single_sheet_pass` inside `MaxRectsSheetPacker` (`backend/engines/sheet_packer.py`), removing 3x duplicated placement and rect-splitting blocks.
+    - Unified opposing-orientation rotation (`compute_opposing_rotation_deg`), page expansion (`_iter_expanded_item_pages`), and page metadata construction (`build_imposing_pages_meta`) in `backend/engines/imposing_prep.py`, shared across `sheet_gang_exporter.py` and `imposing_api.py`.
+    - Inlined `BLUEWHALE_SVG_LOGO`, `BLANK_WHITE_PAGE_URI`, and `apply_print_binding_padding` into `backend/engines/flipbook_worker.py` and removed the orphaned `helpers.py` and `resources.py` files.
+    - Unified 1-based page range parsing in `backend/engines/units.py`, replaced hardcoded `(rect.width / 72.0) * 25.4` with `PTS_TO_MM` in `backend/engines/thumbnails.py`, and routed all `main.py` temp-file extension fallback loops through `resolve_temp_file()`.
 - **Document Pipeline State Persistence & Sub-Slice Lineage Fix**:
   - Resolved silent failure when attempting crop or split operations after a cut-line split in Book Studio.
   - Cleared `cropModule.splitLines` upon split commit and revert in `useBookSplitOps.ts` so `CropSplitPanel` correctly transitions between split and crop modes without retaining stale cut lines.

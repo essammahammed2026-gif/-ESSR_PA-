@@ -57,16 +57,19 @@ Managed by `backend/book_scan_api.py`.
 * **`DELETE /api/book-scan/page/{session_id}/{page_id}`**: Removes blank or unwanted scan pages.
 * **`POST /api/book-scan/detect-angle/{session_id}/{page_id}`**: Auto-detects and returns skew angle for a page.
 * **`POST /api/book-scan/detect-crop/{session_id}/{page_id}`**: Auto-detects the physical page bounds/crop box against the scanner backing.
-* **`POST /api/book-scan/split-spread/{session_id}`**: Splits a 2-up double-page spread into two individual pages along a specified seam percentage.
-* **`POST /api/book-scan/revert-spread/{session_id}`**: Restores a previously split spread back into its original 2-up page format.
-* **`POST /api/book-scan/crop-page/{session_id}`**: Persists manual or detected crop box adjustments to a page.
+* **`POST /api/book-scan/split-spread/{session_id}`**: Splits a 2-up double-page spread (or multi-line cut grid) into individual pages along specified cut lines.
+* **`POST /api/book-scan/revert-spread/{session_id}`**: Restores a previously split spread back into its original parent sheet format.
+* **`POST /api/book-scan/restore-pages/{session_id}`**: Atomically restores session pages and module states to a historical snapshot (Undo/Redo/History Journal & Restore Original).
+* **`POST /api/book-scan/crop-page/{session_id}`**: Persists manual or detected crop box adjustments to a page or batch scope.
 * **`POST /api/book-scan/export/{session_id}`**: Compiles processed pages with 3mm synthesized mirrored bleed, PDF trim boxes, and vector crop marks into a print-ready PDF, processing according to selected page scope filters.
 
-### 6. Settings & Preset Management (`/api/settings/*`)
-Managed by `backend/settings_api.py`.
+### 6. Settings, Presets & Runtime Storage (`/api/settings/*`)
+Managed by `backend/settings_api.py` and `backend/engines/storage_cleaner.py`.
 
 * **`GET /api/settings`**: Retrieves application settings, standard sheet sizes (A4, A3, SRA3, B2), roll widths, and studio default values from `settings.json`.
 * **`PUT /api/settings`**: Persists updated machine configurations or custom substrate sizes.
 * **`POST /api/settings/sheets`** / **`PUT /api/settings/sheets/{name}`** / **`DELETE /api/settings/sheets/{name}`**: Creates, updates, or deletes sheet size presets.
 * **`POST /api/settings/rolls`** / **`PUT /api/settings/rolls/{name}`** / **`DELETE /api/settings/rolls/{name}`**: Creates, updates, or deletes continuous roll presets.
 * **`POST /api/settings/reset`**: Restores system defaults.
+* **`GET /api/settings/storage`**: Returns real-time disk usage metrics across runtime upload caches (`temp_uploads`, `book_scans`, `public_flipbooks`) and build caches.
+* **`POST /api/settings/storage/clean`**: Safely purges temporary runtime files (`tier: "runtime"` or `"all"`) via `StorageCleaner`.

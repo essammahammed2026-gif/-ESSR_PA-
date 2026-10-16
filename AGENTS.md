@@ -28,8 +28,21 @@
    - Abandon strict, blind line-count ceilings (like the legacy 300-line rule). Instead, enforce logical segregation of code based on what it does.
    - A file should execute *one* cohesive responsibility. For example, rendering interactive UI elements on a canvas must be decoupled from heavy mathematical coordinate math.
 2. **Consolidation Over Fragmentation:**
-   - Never create new, fragmented side-files (e.g., `CanvasHelpers2.tsx`) to bypass growth. 
-   - If a file expands, first analyze it for duplicate logic. Extract repeating routines into existing, centralized utilities like `src/lib/` (frontend) or `backend/engines/` (backend). This shrinks the codebase by making code reusable.
+   - Never create new, fragmented side-files (e.g., `CanvasHelpers2.tsx`, `useBookExport.ts`, `controls.tsx`) to bypass growth.
+   - If a file expands, first analyze it for duplicate logic. Extract repeating routines into existing, centralized utilities in `src/lib/` (frontend) or `backend/engines/` (backend). This shrinks the codebase by making code reusable.
+3. **Canonical Single-Source-of-Truth Registry (Zero Duplication):**
+   - Before writing any helper, math calculation, or state hook, check and reuse these canonical modules:
+     - **Frontend (`frontend/src/`)**:
+       - `src/lib/api.ts`: All backend URLs (`API_BASE_URL`, `getApiUrl`) and file downloads (`downloadBlob`). Never write manual `fetch` + `URL.createObjectURL` anchor-click boilerplate.
+       - `src/lib/units.ts`: All length unit conversions (`mmToUnit`, `unitToMm`, `formatMmInUnit`, `getStepForUnit`). Never write inline `25.4` or `96 / 25.4` unit math in components.
+       - `src/lib/pageScope.ts`: All page range parsing (`parsePageRange`), scope filtering (`isPageInScope`), and crop target resolution (`resolveCropTarget`).
+       - `src/lib/splitLines.ts`: All cut-line sorting, non-overlapping placement (`getNextCutLine`), and millimeter/percentage segment sizing (`segmentSizes`).
+       - `src/hooks/useBookModules.ts`: Unified Book Studio module state, split/crop operations, and PDF/imposing export handoff. Never split back into separate sub-hooks.
+       - `src/hooks/useImpositionStudio.ts`: Unified Imposing Studio page deck, layout state, debounced preview, and export actions (`buildImposingPagesFromMeta`, `buildImposingPayload`). Never split back into separate sub-hooks.
+     - **Backend (`backend/engines/`)**:
+       - `engines/units.py`: `MM_TO_PTS`, `PTS_TO_MM`, `hex_to_rgb`, `format_page_ranges`, `parse_page_range`, `parse_page_selection`. Never hardcode `(pt / 72.0) * 25.4`.
+       - `engines/thumbnails.py`: `resolve_temp_file`, `get_dimensions_mm`, `list_pdf_pages_mm`, `render_pdf_thumb`, `render_image_thumb`, `probe_source_dims`. Never write manual `.pdf/.png/.jpg` extension-fallback loops in routers.
+       - `engines/imposing_prep.py`: `compute_opposing_rotation_deg`, `effective_page_rotation`, `build_imposing_pages_meta`, `build_sheet_specs`, `build_roll_specs`, `apply_alignment`.
 
 ---
 
@@ -43,7 +56,7 @@
    - Restrict file exploration exclusively to relevant code directories. 
    - Completely ignore build outputs, dependencies, and environment files (`node_modules/`, `.next/`, `.venv/`).
    - ABSOLUTELY ignore the contents of `backend/temp_uploads/` and `backend/public_flipbooks/` during text and code searches so the agent doesn't waste tokens reading old, cached images or heavy PDFs.
-   - 
+
 3. **Automated Session Hand-Off & Crash Recovery:**
    - At the beginning of a session, check if `backend/temp_uploads/` contains leftover files from a previous crash. If it does, run the `backend/engines/storage_cleaner.py` routine to safely purge them before writing code.
    - Before ending a coding session, the agent MUST summarize workspace changes into `SESSION_LOG.md` and ensure `temp_uploads/` is completely empty.
@@ -53,11 +66,11 @@
    - All code version check-ins, remote synchronization, and branch merges are the exclusive responsibility of the human user.
    - The agent may use presentational commands like `git status` or `git diff` for workspace diagnostics during crash recoveries or logs, but it must never modify the Git ledger history independently.
 
-
 5. **Zero-Lag Navigation Mapping Protocol:**
    - The agent is strictly forbidden from running slow, global repository text searches to locate core features or routing code.
    - Before attempting to find or open a file, the agent MUST immediately read the "Repository Navigation Map" at the top of `docs/architecture.md` to instantly locate the target file's path.
    - If editing a route endpoint in `backend/*_api.py`, the agent must immediately open its verified twin engine in `backend/engines/*_engine.py` without searching.
+   - **Keep the Map Synchronized:** Whenever a file is added, renamed, or consolidated, the agent MUST update the "Repository Navigation Map" in `docs/architecture.md` in the same turn so future sessions never encounter stale paths.
 
 
 ---

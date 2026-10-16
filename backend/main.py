@@ -164,14 +164,12 @@ def _lookup_inspect_analysis(file_id: str):
     analysis = INSPECT_CACHE.get(file_id)
     if analysis:
         return analysis
-    for candidate in [f"temp_uploads/{file_id}"] + [
-        f"temp_uploads/{file_id}{test_ext}"
-        for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]
-    ]:
-        if os.path.exists(candidate):
-            analysis = analyze_universal_asset(candidate, os.path.basename(candidate))
-            INSPECT_CACHE[file_id] = analysis
-            return analysis
+    from engines.thumbnails import resolve_temp_file
+    candidate = resolve_temp_file(file_id)
+    if candidate and os.path.exists(candidate):
+        analysis = analyze_universal_asset(candidate, os.path.basename(candidate))
+        INSPECT_CACHE[file_id] = analysis
+        return analysis
     return None
 
 def _report_pdf_response(analysis: dict):
@@ -225,13 +223,9 @@ async def analyze_pdfs(
                 saved_paths.append(file_path)
                 to_delete.append(file_path)
         elif existing_file_id:
-            file_path = f"temp_uploads/{existing_file_id}"
-            if not os.path.exists(file_path):
-                for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]:
-                    if os.path.exists(f"temp_uploads/{existing_file_id}{test_ext}"):
-                        file_path = f"temp_uploads/{existing_file_id}{test_ext}"
-                        break
-            if os.path.exists(file_path):
+            from engines.thumbnails import resolve_temp_file
+            file_path = resolve_temp_file(existing_file_id)
+            if file_path and os.path.exists(file_path):
                 saved_paths.append(file_path)
 
         if not saved_paths:
@@ -274,13 +268,9 @@ async def create_flipbook(
                 shutil.copyfileobj(file.file, buffer)
             saved_paths.append(file_path)
     elif existing_file_id:
-        file_path = f"temp_uploads/{existing_file_id}"
-        if not os.path.exists(file_path):
-            for test_ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".webp"]:
-                if os.path.exists(f"temp_uploads/{existing_file_id}{test_ext}"):
-                    file_path = f"temp_uploads/{existing_file_id}{test_ext}"
-                    break
-        if os.path.exists(file_path):
+        from engines.thumbnails import resolve_temp_file
+        file_path = resolve_temp_file(existing_file_id)
+        if file_path and os.path.exists(file_path):
             saved_paths.append(file_path)
 
     if not saved_paths:

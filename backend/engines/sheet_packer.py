@@ -195,52 +195,24 @@ class MaxRectsSheetPacker:
 
             while curr_idx < total_items:
                 chunk = unplaced_items[curr_idx:curr_idx + capacity_per_sheet]
-                chunk_placed: List[PlacedSheetItem] = []
-
-                for idx_in_sheet, itm in enumerate(chunk):
-                    r_idx = idx_in_sheet // req_cols
-                    c_idx = idx_in_sheet % req_cols
-
-                    cell_x = usable_x + c_idx * (itm["w"] + gap_mm)
-                    cell_y = usable_y + r_idx * (itm["h"] + gap_mm)
-
-                    chunk_placed.append(PlacedSheetItem(
-                        item_id=itm["item_id"],
-                        name=itm["name"],
+                chunk_placed = [
+                    MaxRectsSheetPacker._make_placed_item(
+                        itm,
                         sheet_index=sheet_index,
-                        x_mm=cell_x,
-                        y_mm=cell_y,
+                        x_mm=usable_x + (idx_in_sheet % req_cols) * (itm["w"] + gap_mm),
+                        y_mm=usable_y + (idx_in_sheet // req_cols) * (itm["h"] + gap_mm),
                         w_mm=itm["w"],
                         h_mm=itm["h"],
                         rotated=bool(itm.get("forced_rot")),
-                        pdf_path=itm["pdf_path"],
-                        shape_type=itm["shape_type"],
-                        keep_aspect=itm["keep_aspect"],
-                        fill_color=itm["fill_color"],
-                        page_num=itm.get("page_num", 0),
-                        file_id=itm.get("file_id", ""),
-                        fit_mode=itm.get("fit_mode", "stretch"),
-                        page_rotation=itm.get("page_rotation", "none"),
-                        bleed_mode=itm.get("bleed_mode", "none"),
-                        bleed_mm=itm.get("bleed_mm", 0.0),
-                        bleed_color=itm.get("bleed_color", "#FFFFFF"),
-                        bleed_type=itm.get("bleed_type", "inside"),
-                        target_w_mm=itm.get("target_w_mm", 0.0),
-                        target_h_mm=itm.get("target_h_mm", 0.0),
-                    ))
+                    )
+                    for idx_in_sheet, itm in enumerate(chunk)
+                ]
 
-                used_area = sum((p.w_mm * p.h_mm) for p in chunk_placed) / 1000000.0
-                total_sheet_area = (sheet_w_mm * sheet_h_mm) / 1000000.0
-                eff = (used_area / total_sheet_area) * 100.0 if total_sheet_area > 0 else 0.0
-
-                sheets_results.append(SingleSheetResult(
-                    sheet_index=sheet_index,
-                    sheet_w_mm=sheet_w_mm,
-                    sheet_h_mm=sheet_h_mm,
-                    placed_items=chunk_placed,
-                    used_area_m2=used_area,
-                    efficiency_pct=eff
-                ))
+                sheets_results.append(
+                    MaxRectsSheetPacker._make_sheet_result(
+                        sheet_index, sheet_w_mm, sheet_h_mm, chunk_placed
+                    )
+                )
 
                 curr_idx += capacity_per_sheet
                 sheet_index += 1
@@ -253,117 +225,16 @@ class MaxRectsSheetPacker:
         # differing only by sequential page assignment. Instead of solving 125+ heavy MaxRects
         # geometric bin-packing passes, we calculate Sheet 1 once and replicate the template.
         if job_mode == "book" and unplaced_items:
-            # 1. Pack Sheet 1
-            free_rects: List[Rect] = [Rect(usable_x, usable_y, usable_w, usable_h)]
-            sheet1_placed: List[PlacedSheetItem] = []
-            sheet1_remaining = []
-
-            for item in unplaced_items:
-                pw, ph = item["w"], item["h"]
-                forced_rot = item.get("forced_rot")
-                best_rect_idx = -1
-                best_rotated = forced_rot if forced_rot is not None else False
-                best_short_side_fit = float('inf')
-
-                for i, r in enumerate(free_rects):
-                    if forced_rot is not None:
-                        if r.w >= pw and r.h >= ph:
-                            leftover = min(r.w - pw, r.h - ph)
-                            if leftover < best_short_side_fit:
-                                best_short_side_fit = leftover
-                                best_rect_idx = i
-                                best_rotated = forced_rot
-                    else:
-                        if r.w >= pw and r.h >= ph:
-                            leftover = min(r.w - pw, r.h - ph)
-                            if leftover < best_short_side_fit:
-                                best_short_side_fit = leftover
-                                best_rect_idx = i
-                                best_rotated = False
-
-                        if allow_rotation and r.w >= ph and r.h >= pw:
-                            leftover = min(r.w - ph, r.h - pw)
-                            if leftover < best_short_side_fit:
-                                best_short_side_fit = leftover
-                                best_rect_idx = i
-                                best_rotated = True
-
-                if best_rect_idx != -1:
-                    target_rect = free_rects[best_rect_idx]
-                    placed_w = (ph if best_rotated else pw) if forced_rot is None else pw
-                    placed_h = (pw if best_rotated else ph) if forced_rot is None else ph
-
-                    placed_item = PlacedSheetItem(
-                        item_id=item["item_id"],
-                        name=item["name"],
-                        sheet_index=1,
-                        x_mm=target_rect.x,
-                        y_mm=target_rect.y,
-                        w_mm=placed_w,
-                        h_mm=placed_h,
-                        rotated=best_rotated,
-                        pdf_path=item["pdf_path"],
-                        shape_type=item["shape_type"],
-                        keep_aspect=item["keep_aspect"],
-                        fill_color=item["fill_color"],
-                        page_num=item.get("page_num", 0),
-                        file_id=item.get("file_id", ""),
-                        fit_mode=item.get("fit_mode", "stretch"),
-                        page_rotation=item.get("page_rotation", "none"),
-                        bleed_mode=item.get("bleed_mode", "none"),
-                        bleed_mm=item.get("bleed_mm", 0.0),
-                        bleed_color=item.get("bleed_color", "#FFFFFF"),
-                        bleed_type=item.get("bleed_type", "inside"),
-                        target_w_mm=item.get("target_w_mm", 0.0),
-                        target_h_mm=item.get("target_h_mm", 0.0),
-                    )
-                    sheet1_placed.append(placed_item)
-
-                    new_free = []
-                    placed_box = Rect(target_rect.x, target_rect.y, placed_w + gap_mm, placed_h + gap_mm)
-                    for fr in free_rects:
-                        if not (placed_box.x >= fr.x + fr.w or placed_box.x + placed_box.w <= fr.x or
-                                placed_box.y >= fr.y + fr.h or placed_box.y + placed_box.h <= fr.y):
-                            if placed_box.x > fr.x and placed_box.x < fr.x + fr.w:
-                                new_free.append(Rect(fr.x, fr.y, placed_box.x - fr.x, fr.h))
-                            if placed_box.x + placed_box.w < fr.x + fr.w:
-                                new_free.append(Rect(placed_box.x + placed_box.w, fr.y, fr.x + fr.w - (placed_box.x + placed_box.w), fr.h))
-                            if placed_box.y > fr.y and placed_box.y < fr.y + fr.h:
-                                new_free.append(Rect(fr.x, fr.y, fr.w, placed_box.y - fr.y))
-                            if placed_box.y + placed_box.h < fr.y + fr.h:
-                                new_free.append(Rect(fr.x, placed_box.y + placed_box.h, fr.w, fr.y + fr.h - (placed_box.y + placed_box.h)))
-                        else:
-                            new_free.append(fr)
-
-                    pruned = []
-                    for i_f, r1 in enumerate(new_free):
-                        is_contained = False
-                        for j_f, r2 in enumerate(new_free):
-                            if i_f != j_f and r1.x >= r2.x and r1.y >= r2.y and (r1.x + r1.w) <= (r2.x + r2.w) and (r1.y + r1.h) <= (r2.y + r2.h):
-                                is_contained = True
-                                break
-                        if not is_contained:
-                            pruned.append(r1)
-                    free_rects = pruned
-                else:
-                    sheet1_remaining.append(item)
-
+            sheet1_placed, _ = MaxRectsSheetPacker._pack_single_sheet_pass(
+                unplaced_items, 1, usable_x, usable_y, usable_w, usable_h, gap_mm, allow_rotation
+            )
             if not sheet1_placed:
                 return []
 
             capacity_per_sheet = len(sheet1_placed)
-            used_area = sum((p.w_mm * p.h_mm) for p in sheet1_placed) / 1000000.0
-            total_sheet_area = (sheet_w_mm * sheet_h_mm) / 1000000.0
-            eff = (used_area / total_sheet_area) * 100.0 if total_sheet_area > 0 else 0.0
-
-            sheets_results.append(SingleSheetResult(
-                sheet_index=1,
-                sheet_w_mm=sheet_w_mm,
-                sheet_h_mm=sheet_h_mm,
-                placed_items=sheet1_placed,
-                used_area_m2=used_area,
-                efficiency_pct=eff
-            ))
+            sheets_results.append(
+                MaxRectsSheetPacker._make_sheet_result(1, sheet_w_mm, sheet_h_mm, sheet1_placed)
+            )
 
             # 2. Replicate Sheet 1 template for all remaining items in chunks of capacity_per_sheet
             curr_idx = capacity_per_sheet
@@ -372,43 +243,23 @@ class MaxRectsSheetPacker:
 
             while curr_idx < total_items:
                 chunk = unplaced_items[curr_idx:curr_idx + capacity_per_sheet]
-                chunk_placed = []
-                for slot_idx, itm in enumerate(chunk):
-                    tpl = sheet1_placed[slot_idx]
-                    chunk_placed.append(PlacedSheetItem(
-                        item_id=itm["item_id"],
-                        name=itm["name"],
+                chunk_placed = [
+                    MaxRectsSheetPacker._make_placed_item(
+                        itm,
                         sheet_index=sheet_counter,
-                        x_mm=tpl.x_mm,
-                        y_mm=tpl.y_mm,
-                        w_mm=tpl.w_mm,
-                        h_mm=tpl.h_mm,
-                        rotated=tpl.rotated,
-                        pdf_path=itm["pdf_path"],
-                        shape_type=itm["shape_type"],
-                        keep_aspect=itm["keep_aspect"],
-                        fill_color=itm["fill_color"],
-                        page_num=itm.get("page_num", 0),
-                        file_id=itm.get("file_id", ""),
-                        fit_mode=itm.get("fit_mode", "stretch"),
-                        page_rotation=itm.get("page_rotation", "none"),
-                        bleed_mode=itm.get("bleed_mode", "none"),
-                        bleed_mm=itm.get("bleed_mm", 0.0),
-                        bleed_color=itm.get("bleed_color", "#FFFFFF"),
-                        bleed_type=itm.get("bleed_type", "inside"),
-                        target_w_mm=itm.get("target_w_mm", 0.0),
-                        target_h_mm=itm.get("target_h_mm", 0.0),
-                    ))
-                curr_used = sum((p.w_mm * p.h_mm) for p in chunk_placed) / 1000000.0
-                curr_eff = (curr_used / total_sheet_area) * 100.0 if total_sheet_area > 0 else 0.0
-                sheets_results.append(SingleSheetResult(
-                    sheet_index=sheet_counter,
-                    sheet_w_mm=sheet_w_mm,
-                    sheet_h_mm=sheet_h_mm,
-                    placed_items=chunk_placed,
-                    used_area_m2=curr_used,
-                    efficiency_pct=curr_eff
-                ))
+                        x_mm=sheet1_placed[slot_idx].x_mm,
+                        y_mm=sheet1_placed[slot_idx].y_mm,
+                        w_mm=sheet1_placed[slot_idx].w_mm,
+                        h_mm=sheet1_placed[slot_idx].h_mm,
+                        rotated=sheet1_placed[slot_idx].rotated,
+                    )
+                    for slot_idx, itm in enumerate(chunk)
+                ]
+                sheets_results.append(
+                    MaxRectsSheetPacker._make_sheet_result(
+                        sheet_counter, sheet_w_mm, sheet_h_mm, chunk_placed
+                    )
+                )
                 curr_idx += capacity_per_sheet
                 sheet_counter += 1
 
@@ -416,129 +267,227 @@ class MaxRectsSheetPacker:
 
         # GENERAL GANG RUN PACKING LOOP (Heterogeneous sizes):
         while unplaced_items:
-            free_rects: List[Rect] = [Rect(usable_x, usable_y, usable_w, usable_h)]
-            placed_on_sheet: List[PlacedSheetItem] = []
-            remaining_unplaced = []
+            placed_on_sheet, remaining_unplaced = MaxRectsSheetPacker._pack_single_sheet_pass(
+                unplaced_items,
+                sheet_index,
+                usable_x,
+                usable_y,
+                usable_w,
+                usable_h,
+                gap_mm,
+                allow_rotation,
+            )
 
-            for item in unplaced_items:
-                pw, ph = item["w"], item["h"]
-                forced_rot = item.get("forced_rot")
-                best_rect_idx = -1
-                best_rotated = forced_rot if forced_rot is not None else False
-                best_short_side_fit = float('inf')
+            if not placed_on_sheet:
+                # Security break to prevent infinite loop if item larger than sheet
+                break
 
-                for i, r in enumerate(free_rects):
-                    if forced_rot is not None:
-                        # Dimension is already locked to pw x ph
-                        if r.w >= pw and r.h >= ph:
-                            leftover = min(r.w - pw, r.h - ph)
-                            if leftover < best_short_side_fit:
-                                best_short_side_fit = leftover
-                                best_rect_idx = i
-                                best_rotated = forced_rot
-                    else:
-                        # Dynamic per-piece rotation check
-                        if r.w >= pw and r.h >= ph:
-                            leftover = min(r.w - pw, r.h - ph)
-                            if leftover < best_short_side_fit:
-                                best_short_side_fit = leftover
-                                best_rect_idx = i
-                                best_rotated = False
+            sheets_results.append(
+                MaxRectsSheetPacker._make_sheet_result(
+                    sheet_index, sheet_w_mm, sheet_h_mm, placed_on_sheet
+                )
+            )
 
-                        if allow_rotation and r.w >= ph and r.h >= pw:
-                            leftover = min(r.w - ph, r.h - pw)
-                            if leftover < best_short_side_fit:
-                                best_short_side_fit = leftover
-                                best_rect_idx = i
-                                best_rotated = True
+            sheet_index += 1
+            unplaced_items = remaining_unplaced
 
-                if best_rect_idx != -1:
-                    target_rect = free_rects[best_rect_idx]
-                    if forced_rot is not None:
-                        placed_w = pw
-                        placed_h = ph
-                    else:
-                        placed_w = ph if best_rotated else pw
-                        placed_h = pw if best_rotated else ph
+        return sheets_results
 
-                    placed_item = PlacedSheetItem(
-                        item_id=item["item_id"],
-                        name=item["name"],
+    @staticmethod
+    def _make_placed_item(
+        itm: dict,
+        sheet_index: int,
+        x_mm: float,
+        y_mm: float,
+        w_mm: float,
+        h_mm: float,
+        rotated: bool,
+    ) -> PlacedSheetItem:
+        return PlacedSheetItem(
+            item_id=itm["item_id"],
+            name=itm["name"],
+            sheet_index=sheet_index,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            w_mm=w_mm,
+            h_mm=h_mm,
+            rotated=rotated,
+            pdf_path=itm["pdf_path"],
+            shape_type=itm["shape_type"],
+            keep_aspect=itm["keep_aspect"],
+            fill_color=itm["fill_color"],
+            page_num=itm.get("page_num", 0),
+            file_id=itm.get("file_id", ""),
+            fit_mode=itm.get("fit_mode", "stretch"),
+            page_rotation=itm.get("page_rotation", "none"),
+            bleed_mode=itm.get("bleed_mode", "none"),
+            bleed_mm=itm.get("bleed_mm", 0.0),
+            bleed_color=itm.get("bleed_color", "#FFFFFF"),
+            bleed_type=itm.get("bleed_type", "inside"),
+            target_w_mm=itm.get("target_w_mm", 0.0),
+            target_h_mm=itm.get("target_h_mm", 0.0),
+        )
+
+    @staticmethod
+    def _find_best_rect(
+        free_rects: List[Rect],
+        pw: float,
+        ph: float,
+        forced_rot,
+        allow_rotation: bool,
+    ) -> Tuple[int, bool]:
+        best_rect_idx = -1
+        best_rotated = forced_rot if forced_rot is not None else False
+        best_short_side_fit = float("inf")
+
+        for i, r in enumerate(free_rects):
+            if forced_rot is not None:
+                if r.w >= pw and r.h >= ph:
+                    leftover = min(r.w - pw, r.h - ph)
+                    if leftover < best_short_side_fit:
+                        best_short_side_fit = leftover
+                        best_rect_idx = i
+                        best_rotated = forced_rot
+            else:
+                if r.w >= pw and r.h >= ph:
+                    leftover = min(r.w - pw, r.h - ph)
+                    if leftover < best_short_side_fit:
+                        best_short_side_fit = leftover
+                        best_rect_idx = i
+                        best_rotated = False
+
+                if allow_rotation and r.w >= ph and r.h >= pw:
+                    leftover = min(r.w - ph, r.h - pw)
+                    if leftover < best_short_side_fit:
+                        best_short_side_fit = leftover
+                        best_rect_idx = i
+                        best_rotated = True
+
+        return best_rect_idx, best_rotated
+
+    @staticmethod
+    def _split_and_prune_free_rects(
+        free_rects: List[Rect],
+        placed_box: Rect,
+    ) -> List[Rect]:
+        new_free: List[Rect] = []
+        for fr in free_rects:
+            if not (
+                placed_box.x >= fr.x + fr.w
+                or placed_box.x + placed_box.w <= fr.x
+                or placed_box.y >= fr.y + fr.h
+                or placed_box.y + placed_box.h <= fr.y
+            ):
+                if placed_box.x > fr.x and placed_box.x < fr.x + fr.w:
+                    new_free.append(Rect(fr.x, fr.y, placed_box.x - fr.x, fr.h))
+                if placed_box.x + placed_box.w < fr.x + fr.w:
+                    new_free.append(
+                        Rect(
+                            placed_box.x + placed_box.w,
+                            fr.y,
+                            fr.x + fr.w - (placed_box.x + placed_box.w),
+                            fr.h,
+                        )
+                    )
+                if placed_box.y > fr.y and placed_box.y < fr.y + fr.h:
+                    new_free.append(Rect(fr.x, fr.y, fr.w, placed_box.y - fr.y))
+                if placed_box.y + placed_box.h < fr.y + fr.h:
+                    new_free.append(
+                        Rect(
+                            fr.x,
+                            placed_box.y + placed_box.h,
+                            fr.w,
+                            fr.y + fr.h - (placed_box.y + placed_box.h),
+                        )
+                    )
+            else:
+                new_free.append(fr)
+
+        pruned: List[Rect] = []
+        for i_f, r1 in enumerate(new_free):
+            is_contained = False
+            for j_f, r2 in enumerate(new_free):
+                if (
+                    i_f != j_f
+                    and r1.x >= r2.x
+                    and r1.y >= r2.y
+                    and (r1.x + r1.w) <= (r2.x + r2.w)
+                    and (r1.y + r1.h) <= (r2.y + r2.h)
+                ):
+                    is_contained = True
+                    break
+            if not is_contained:
+                pruned.append(r1)
+        return pruned
+
+    @staticmethod
+    def _make_sheet_result(
+        sheet_index: int,
+        sheet_w_mm: float,
+        sheet_h_mm: float,
+        placed_items: List[PlacedSheetItem],
+    ) -> SingleSheetResult:
+        used_area = sum((p.w_mm * p.h_mm) for p in placed_items) / 1000000.0
+        total_sheet_area = (sheet_w_mm * sheet_h_mm) / 1000000.0
+        eff = (used_area / total_sheet_area) * 100.0 if total_sheet_area > 0 else 0.0
+        return SingleSheetResult(
+            sheet_index=sheet_index,
+            sheet_w_mm=sheet_w_mm,
+            sheet_h_mm=sheet_h_mm,
+            placed_items=placed_items,
+            used_area_m2=used_area,
+            efficiency_pct=eff,
+        )
+
+    @staticmethod
+    def _pack_single_sheet_pass(
+        items: List[dict],
+        sheet_index: int,
+        usable_x: float,
+        usable_y: float,
+        usable_w: float,
+        usable_h: float,
+        gap_mm: float,
+        allow_rotation: bool,
+    ) -> Tuple[List[PlacedSheetItem], List[dict]]:
+        free_rects: List[Rect] = [Rect(usable_x, usable_y, usable_w, usable_h)]
+        placed_on_sheet: List[PlacedSheetItem] = []
+        remaining_unplaced: List[dict] = []
+
+        for item in items:
+            pw, ph = item["w"], item["h"]
+            forced_rot = item.get("forced_rot")
+            best_rect_idx, best_rotated = MaxRectsSheetPacker._find_best_rect(
+                free_rects, pw, ph, forced_rot, allow_rotation
+            )
+
+            if best_rect_idx != -1:
+                target_rect = free_rects[best_rect_idx]
+                placed_w = (ph if best_rotated else pw) if forced_rot is None else pw
+                placed_h = (pw if best_rotated else ph) if forced_rot is None else ph
+
+                placed_on_sheet.append(
+                    MaxRectsSheetPacker._make_placed_item(
+                        item,
                         sheet_index=sheet_index,
                         x_mm=target_rect.x,
                         y_mm=target_rect.y,
                         w_mm=placed_w,
                         h_mm=placed_h,
                         rotated=best_rotated,
-                        pdf_path=item["pdf_path"],
-                        shape_type=item["shape_type"],
-                        keep_aspect=item["keep_aspect"],
-                        fill_color=item["fill_color"],
-                        page_num=item.get("page_num", 0),
-                        file_id=item.get("file_id", ""),
-                        fit_mode=item.get("fit_mode", "stretch"),
-                        page_rotation=item.get("page_rotation", "none"),
-                        bleed_mode=item.get("bleed_mode", "none"),
-                        bleed_mm=item.get("bleed_mm", 0.0),
-                        bleed_color=item.get("bleed_color", "#FFFFFF"),
-                        bleed_type=item.get("bleed_type", "inside"),
-                        target_w_mm=item.get("target_w_mm", 0.0),
-                        target_h_mm=item.get("target_h_mm", 0.0),
                     )
-                    placed_on_sheet.append(placed_item)
+                )
 
-                    # Split free rect
-                    new_free = []
-                    placed_box = Rect(target_rect.x, target_rect.y, placed_w + gap_mm, placed_h + gap_mm)
+                placed_box = Rect(
+                    target_rect.x,
+                    target_rect.y,
+                    placed_w + gap_mm,
+                    placed_h + gap_mm,
+                )
+                free_rects = MaxRectsSheetPacker._split_and_prune_free_rects(
+                    free_rects, placed_box
+                )
+            else:
+                remaining_unplaced.append(item)
 
-                    for fr in free_rects:
-                        # Check intersection
-                        if not (placed_box.x >= fr.x + fr.w or placed_box.x + placed_box.w <= fr.x or
-                                placed_box.y >= fr.y + fr.h or placed_box.y + placed_box.h <= fr.y):
-                            # Split into top, bottom, left, right
-                            if placed_box.x > fr.x and placed_box.x < fr.x + fr.w:
-                                new_free.append(Rect(fr.x, fr.y, placed_box.x - fr.x, fr.h))
-                            if placed_box.x + placed_box.w < fr.x + fr.w:
-                                new_free.append(Rect(placed_box.x + placed_box.w, fr.y, fr.x + fr.w - (placed_box.x + placed_box.w), fr.h))
-                            if placed_box.y > fr.y and placed_box.y < fr.y + fr.h:
-                                new_free.append(Rect(fr.x, fr.y, fr.w, placed_box.y - fr.y))
-                            if placed_box.y + placed_box.h < fr.y + fr.h:
-                                new_free.append(Rect(fr.x, placed_box.y + placed_box.h, fr.w, fr.y + fr.h - (placed_box.y + placed_box.h)))
-                        else:
-                            new_free.append(fr)
-
-                    # Prune contained rects
-                    pruned = []
-                    for i, r1 in enumerate(new_free):
-                        is_contained = False
-                        for j, r2 in enumerate(new_free):
-                            if i != j and r1.x >= r2.x and r1.y >= r2.y and (r1.x + r1.w) <= (r2.x + r2.w) and (r1.y + r1.h) <= (r2.y + r2.h):
-                                is_contained = True
-                                break
-                        if not is_contained:
-                            pruned.append(r1)
-                    free_rects = pruned
-                else:
-                    remaining_unplaced.append(item)
-
-            if not placed_on_sheet:
-                # Security break to prevent infinite loop if item larger than sheet
-                break
-
-            used_area = sum((p.w_mm * p.h_mm) for p in placed_on_sheet) / 1000000.0
-            total_sheet_area = (sheet_w_mm * sheet_h_mm) / 1000000.0
-            eff = (used_area / total_sheet_area) * 100.0 if total_sheet_area > 0 else 0.0
-
-            sheets_results.append(SingleSheetResult(
-                sheet_index=sheet_index,
-                sheet_w_mm=sheet_w_mm,
-                sheet_h_mm=sheet_h_mm,
-                placed_items=placed_on_sheet,
-                used_area_m2=used_area,
-                efficiency_pct=eff
-            ))
-
-            sheet_index += 1
-            unplaced_items = remaining_unplaced
-
-        return sheets_results
+        return placed_on_sheet, remaining_unplaced

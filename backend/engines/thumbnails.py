@@ -127,10 +127,11 @@ def get_dimensions_mm(file_path: str) -> tuple:
     """Single-copy media dimensions lookup: PDF rect or 300-DPI raster fallback."""
     if file_path.lower().endswith(".pdf"):
         import fitz
+        from engines.units import PTS_TO_MM
         doc = fitz.open(file_path)
         try:
             rect = doc[0].rect
-            return ((rect.width / 72.0) * 25.4, (rect.height / 72.0) * 25.4)
+            return (rect.width * PTS_TO_MM, rect.height * PTS_TO_MM)
         finally:
             doc.close()
     import cv2
@@ -158,12 +159,13 @@ def get_pdf_page_count(file_path: str) -> int:
 def list_pdf_pages_mm(file_path: str) -> list:
     """Single-copy per-page (w_mm, h_mm) probe — closes doc before return."""
     import fitz
+    from engines.units import PTS_TO_MM
     doc = fitz.open(file_path)
     try:
         out = []
         for p in range(len(doc)):
             rect = doc[p].rect
-            out.append((((rect.width / 72.0) * 25.4), ((rect.height / 72.0) * 25.4)))
+            out.append((rect.width * PTS_TO_MM, rect.height * PTS_TO_MM))
         return out
     finally:
         doc.close()

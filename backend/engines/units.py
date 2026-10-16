@@ -26,30 +26,36 @@ def format_page_ranges(pages: List[int]) -> str:
     return ", ".join(ranges)
 
 
-def parse_page_range(range_str: str, max_pages: int) -> List[int]:
-    """Parse 'all' / '1-3, 5' (1-based) into 0-based page indices. Single copy."""
-    if not range_str or range_str.strip().lower() in ["all", ""]:
-        return list(range(max_pages))
+def _parse_1based_tokens(range_str: str, max_pages: Optional[int] = None) -> List[int]:
     pages: List[int] = []
     for part in range_str.split(","):
         part = part.strip()
         if not part:
             continue
         if "-" in part:
-            try:
-                start_s, end_s = part.split("-")
-                start = max(1, int(start_s))
-                end = min(max_pages, int(end_s))
-                pages.extend(range(start - 1, end))
-            except (ValueError, TypeError):
-                pass
+            start_s, end_s = part.split("-", 1)
+            start = max(1, int(start_s))
+            end = int(end_s)
+            if max_pages is not None:
+                end = min(max_pages, end)
+            pages.extend(range(start - 1, end))
         else:
-            try:
-                p = int(part)
-                if 1 <= p <= max_pages:
-                    pages.append(p - 1)
-            except (ValueError, TypeError):
-                pass
+            p = int(part)
+            if p >= 1 and (max_pages is None or p <= max_pages):
+                pages.append(p - 1)
+    return pages
+
+
+def parse_page_range(range_str: str, max_pages: int) -> List[int]:
+    """Parse 'all' / '1-3, 5' (1-based) into 0-based page indices. Single copy."""
+    if not range_str or range_str.strip().lower() in ["all", ""]:
+        return list(range(max_pages))
+    pages: List[int] = []
+    for sub in range_str.split(","):
+        try:
+            pages.extend(_parse_1based_tokens(sub, max_pages=max_pages))
+        except (ValueError, TypeError):
+            pass
     return sorted(set(pages)) if pages else list(range(max_pages))
 
 
@@ -57,19 +63,10 @@ def parse_page_selection(page_range: str) -> Optional[List[int]]:
     """Parse '1-3, 5' (1-based) into 0-based indices without a page-count clamp.
 
     Returns None for 'all'/empty/unparseable (caller renders everything).
-    Single copy of the flipbook router's inline splitter.
     """
     if not page_range or page_range.strip().lower() == "all":
         return None
     try:
-        indices: List[int] = []
-        for part in page_range.split(","):
-            part = part.strip()
-            if "-" in part:
-                start, end = part.split("-")
-                indices.extend(range(int(start) - 1, int(end)))
-            else:
-                indices.append(int(part) - 1)
-        return indices
+        return _parse_1based_tokens(page_range, max_pages=None)
     except (ValueError, TypeError, AttributeError):
         return None
