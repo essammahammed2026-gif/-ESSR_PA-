@@ -2,6 +2,24 @@
 
 ## Date: 2026-10-16
 
+### Book Studio Multi-File Intake & Collation Repair (Duplex & Sequential Merge)
+- **Objective**: Fix broken Odds/Evens duplex intake in Book Studio and expand it into a unified, high-utility multi-file engine that also supports sequential multi-part assembly (combining split scans/chapters) with file reordering and per-file page reversal.
+- **Rules Followed**: Consulted navigation map in `docs/architecture.md`, canonical single-source-of-truth registry in `AGENTS.md` (`useBookSession.ts`, `backend/engines/book_scan_engine.py`), fast inner-loop checks only (`tsc --noEmit` and `py_compile`), zero-retention storage cleanup, and user-only git permissions.
+- **Changes Completed**:
+  1. **Root Cause Fix in Session Lifecycle**: Fixed `initSession()` in [`useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts) to construct proper multipart payloads for `dual` (with `file_odds`, `file_evens`, `odds_order`, `evens_order`, `start_with`) and `multi_merge` (with `files` queue and `reverse_file_indices`).
+  2. **Backend Router & Engine Collation**:
+     - Refactored `/api/book-scan/init-session` in [`book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py) so `mode == "dual"` is evaluated first and cleanly dispatches duplex collation.
+     - Added `start_with` parameter (`odds` vs `evens`) to `collate_from_paths` and `collate_scans` in [`book_scan_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/book_scan_engine.py).
+     - Enhanced `combine_files_to_pdf` with `reverse_indices` support to efficiently reverse page order for selected parts prior to merging.
+  3. **UI / UX Polish in Book Studio**:
+     - Evolved intake mode to **Multi-File & Collation** in [`BookLeftPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookLeftPanel.tsx) with a sleek segmented pill selector between **Duplex (Odds / Evens)** and **Combine Parts**.
+     - Added 1-click **Swap (⇄)** button and **Start with** (Odd vs. Even) selector in Duplex mode.
+     - Reused and enhanced [`FileUploadQueue.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/FileUploadQueue.tsx) for Sequential Merge with Move Up/Down, Remove, Clear All, and per-file **Rev** toggle.
+     - Aligned all intake cards and buttons with the application's dynamic accent theme (`var(--app-accent)`).
+  4. **Verification & Storage Clean**: Passed `tsc --noEmit` (0 errors), `py_compile` (0 errors), and programmatic `BookScanEngine` verification tests in `.venv`. `StorageCleaner.clean('runtime')` executed cleanly.
+
+---
+
 ### Preflight Studio Deprecation & Command Center (Home) Polish
 - **Objective**: Completely deprecate and remove the obsolete Preflight Studio (`frontend/src/app/preflight/`, `backend/engines/preflight.py`, and `/api/preflight`), consolidating all artwork verification and prepress inspection into the Command Center / Home Studio. Polish the Home Studio with unit management, 4-studio launchpad, metric telemetry tiles, dynamic accent styling, and customer-ready PDF report generation.
 - **Rules Followed**: Fast lookup index in `docs/architecture.md`, canonical single-source-of-truth registry in `AGENTS.md` (`src/lib/units.ts`, `src/lib/api.ts`), 30s code inspection and cleanup in-stride, fast inner-loop checks only (`tsc --noEmit` & `py_compile`), zero-retention storage cleanup, and user-only git permissions.

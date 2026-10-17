@@ -3,6 +3,7 @@
  */
 
 export type BookIntakeMode = "single_page" | "spread" | "dual_pass";
+export type MultiFileStrategy = "duplex" | "sequential";
 
 export interface CropBox {
   x1: number; // 0.0 to 1.0 (relative left)

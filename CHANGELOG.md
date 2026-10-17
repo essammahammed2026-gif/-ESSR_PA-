@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Book Studio Multi-File Collation & Sequential Merge (Combine Parts)**:
+  - **Fixed Dual Pass Intake**: Resolved bug where `initSession()` hardcoded `mode="single"` and dropped `file_odds`, `file_evens`, `odds_order`, and `evens_order`. Repaired backend router dispatch in `backend/book_scan_api.py` so `mode="dual"` is evaluated correctly without being swallowed by batch file arrays.
+  - **Quick Swap & Starting Parity**: Added 1-click **Swap (⇄)** button in `BookLeftPanel.tsx` to instantly swap Odds and Evens files without re-browsing. Added **Start with** selector (`Odd (1, 2...)` vs `Even (2, 1...)`) forwarded through `BookScanEngine.collate_scans` and `collate_from_paths`.
+  - **Sequential Merge (Combine Parts)**: Integrated `FileUploadQueue.tsx` with reorderable file parts (Move Up, Move Down, Remove, Clear All), multi-format intake (PDF, PNG, JPG, TIFF, WebP), and an inline **Rev** toggle to reverse individual batch page order before merging.
+  - **High-Performance Backend Assembly**: Enhanced `BookScanEngine.combine_files_to_pdf` with `reverse_indices` support to efficiently merge documents with selective per-part reversal using PyMuPDF stream insertion.
+  - **Unified Accent Theming**: Converted `FileUploadQueue` and intake status indicators to respect the dynamic application theme accent (`var(--app-accent)`).
 - **Preflight Studio Deprecation & Command Center (Home) Consolidation & Polish**:
   - **Complete Preflight Deprecation**: Deleted redundant `src/app/preflight/page.tsx`, removed `/api/preflight` route from `backend/main.py`, and removed prototype `backend/engines/preflight.py`. Scrubbed all lingering preflight mentions from `asset_inspector.py`, `flipbook/page.tsx`, and `prepress.ts`.
   - **Sidebar & Quick Launch Streamlining**: Removed Preflight Studio link from global sidebar navigation in `layout.tsx` and aligned the home studio cards in `DropzonePanel.tsx` to match the exact sidebar navbar order: **Book Studio, Imposing Studio, Contour Studio, Flipbook Studio**, displaying clean names and icons without redundant descriptions.

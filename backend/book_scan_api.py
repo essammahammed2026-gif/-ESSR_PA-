@@ -44,15 +44,17 @@ def cleanup_session_dir(session_dir: str):
 
 @router.post("/init-session")
 async def init_book_scan_session(
-    mode: str = Form("single"),         # 'single' or 'dual'
+    mode: str = Form("single"),         # 'single', 'dual', or 'multi_merge'
     is_spread: bool = Form(False),     # False by default (treat as-is)
     odds_order: str = Form("forward"), # 'forward' or 'reverse'
     evens_order: str = Form("reverse"),# 'reverse' or 'forward'
     spread_split_pos: float = Form(0.5),
+    start_with: str = Form("odds"),    # 'odds' or 'evens'
     file_odds: Optional[UploadFile] = File(None),
     file_evens: Optional[UploadFile] = File(None),
     file_single: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
+    reverse_file_indices: Optional[str] = Form(None),
     existing_file_path: Optional[str] = Form(None),
 ):
     session_id = str(uuid.uuid4())
@@ -63,33 +65,13 @@ async def init_book_scan_session(
     evens_path = None
     single_path = None
 
-    if files and len(files) > 0:
-        saved_paths = []
-        for idx, upload in enumerate(files):
-            clean_name = f"{idx}_{upload.filename}"
-            save_path = os.path.join(session_dir, clean_name)
-            with open(save_path, "wb") as f:
-                shutil.copyfileobj(upload.file, f)
-            saved_paths.append(save_path)
-
-        combined_pdf_path = os.path.join(session_dir, "combined_book.pdf")
-        if BookScanEngine.combine_files_to_pdf(saved_paths, combined_pdf_path):
-            single_path = combined_pdf_path
-        elif len(saved_paths) == 1 and saved_paths[0].lower().endswith(".pdf"):
-            single_path = saved_paths[0]
-        else:
-            raise HTTPException(status_code=500, detail="Failed to combine uploaded files into document.")
-
-        pages = BookScanEngine.collate_from_paths(
-            single_path=single_path,
-            is_spread=is_spread,
-            odds_order=odds_order,
-            evens_order=evens_order,
-            spread_split_pos=spread_split_pos,
-        )
-    elif mode == "dual":
+    if mode == "dual":
         if not file_odds or not file_evens:
-            raise HTTPException(status_code=400, detail="Both Odds and Evens PDF files are required in dual mode.")
+            if files and len(files) >= 2:
+                file_odds = files[0]
+                file_evens = files[1]
+            else:
+                raise HTTPException(status_code=400, detail="Both Odds and Evens PDF files are required in dual mode.")
         odds_path = os.path.join(session_dir, f"odds_{file_odds.filename}")
         evens_path = os.path.join(session_dir, f"evens_{file_evens.filename}")
         with open(odds_path, "wb") as f:
@@ -104,10 +86,47 @@ async def init_book_scan_session(
             odds_order=odds_order,
             evens_order=evens_order,
             spread_split_pos=spread_split_pos,
+            start_with=start_with,
+        )
+    elif mode == "multi_merge" or (files and len(files) > 1):
+        if not files or len(files) == 0:
+            raise HTTPException(status_code=400, detail="Please upload at least one file to merge.")
+        saved_paths = []
+        for idx, upload in enumerate(files):
+            clean_name = f"{idx}_{upload.filename}"
+            save_path = os.path.join(session_dir, clean_name)
+            with open(save_path, "wb") as f:
+                shutil.copyfileobj(upload.file, f)
+            saved_paths.append(save_path)
+
+        rev_indices_set = set()
+        if reverse_file_indices:
+            for token in reverse_file_indices.split(","):
+                token = token.strip()
+                if token.isdigit():
+                    rev_indices_set.add(int(token))
+
+        combined_pdf_path = os.path.join(session_dir, "combined_book.pdf")
+        if BookScanEngine.combine_files_to_pdf(saved_paths, combined_pdf_path, reverse_indices=rev_indices_set):
+            single_path = combined_pdf_path
+        elif len(saved_paths) == 1 and saved_paths[0].lower().endswith(".pdf"):
+            single_path = saved_paths[0]
+        else:
+            raise HTTPException(status_code=500, detail="Failed to combine uploaded files into document.")
+
+        pages = BookScanEngine.collate_from_paths(
+            single_path=single_path,
+            is_spread=is_spread,
+            odds_order=odds_order,
+            evens_order=evens_order,
+            spread_split_pos=spread_split_pos,
         )
     else:
         if not file_single and not existing_file_path:
-            raise HTTPException(status_code=400, detail="Please upload at least one file.")
+            if files and len(files) == 1:
+                file_single = files[0]
+            else:
+                raise HTTPException(status_code=400, detail="Please upload at least one file.")
         if file_single:
             single_path = os.path.join(session_dir, f"single_{file_single.filename}")
             with open(single_path, "wb") as f:
@@ -136,6 +155,7 @@ async def init_book_scan_session(
         "is_spread": is_spread,
         "odds_order": odds_order,
         "evens_order": evens_order,
+        "start_with": start_with,
         "spread_split_pos": spread_split_pos,
         "odds_path": odds_path,
         "evens_path": evens_path,

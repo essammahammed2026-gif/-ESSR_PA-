@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Settings, Layers, Scissors, BookOpen, RotateCcw, Save, CheckCircle2, AlertCircle, Sliders, HardDrive, Palette, Keyboard } from "lucide-react";
+import { Layers, Scissors, BookOpen, RotateCcw, Save, CheckCircle2, AlertCircle, Sliders, HardDrive, Palette, Keyboard } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import SheetsSection from "@/components/settings/SheetsSection";
 import RollsSection from "@/components/settings/RollsSection";

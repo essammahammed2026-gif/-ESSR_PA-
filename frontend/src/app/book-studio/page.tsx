@@ -22,6 +22,16 @@ function BookStudioContent() {
     fileEvens, setFileEvens,
     oddsOrder, setOddsOrder,
     evensOrder, setEvensOrder,
+    startWith, setStartWith,
+    multiFileStrategy, setMultiFileStrategy,
+    reverseFileIndices,
+    swapOddsEvens,
+    files,
+    addFiles,
+    removeFile,
+    moveFile,
+    toggleReverseFile,
+    clearFiles,
     splitPos, setSplitPos,
     sessionId,
     pages,
@@ -188,6 +198,18 @@ function BookStudioContent() {
           setOddsOrder={setOddsOrder}
           evensOrder={evensOrder}
           setEvensOrder={setEvensOrder}
+          startWith={startWith}
+          setStartWith={setStartWith}
+          multiFileStrategy={multiFileStrategy}
+          setMultiFileStrategy={setMultiFileStrategy}
+          reverseFileIndices={reverseFileIndices}
+          swapOddsEvens={swapOddsEvens}
+          files={files}
+          addFiles={addFiles}
+          removeFile={removeFile}
+          moveFile={moveFile}
+          toggleReverseFile={toggleReverseFile}
+          clearFiles={clearFiles}
           splitPos={splitPos}
           setSplitPos={setSplitPos}
           sessionId={sessionId}

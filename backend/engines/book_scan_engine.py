@@ -94,6 +94,7 @@ class BookScanEngine:
         odds_order: str = "forward",
         evens_order: str = "reverse",
         spread_split_pos: float = 0.5,
+        start_with: str = "odds",
     ) -> List[Dict[str, Any]]:
         """Single-copy collation entry point by path — opens, collates, closes.
 
@@ -111,6 +112,7 @@ class BookScanEngine:
                 evens_order=evens_order,
                 spread_split_pos=spread_split_pos,
                 single_doc=single_doc,
+                start_with=start_with,
             )
         finally:
             for d in (odds_doc, evens_doc, single_doc):
@@ -134,17 +136,27 @@ class BookScanEngine:
             return False
 
     @staticmethod
-    def combine_files_to_pdf(file_paths: List[str], output_pdf_path: str) -> bool:
+    def combine_files_to_pdf(
+        file_paths: List[str],
+        output_pdf_path: str,
+        reverse_indices: Optional[Set[int]] = None
+    ) -> bool:
         """Combines multiple files (PDFs, images: PNG, JPG, TIFF, WEBP, etc.) into a single unified PDF."""
         doc = fitz.open()
+        rev_set = reverse_indices or set()
         try:
-            for fpath in file_paths:
+            for idx, fpath in enumerate(file_paths):
                 if not os.path.exists(fpath):
                     continue
+                should_reverse = idx in rev_set
                 ext = os.path.splitext(fpath)[1].lower()
                 if ext == ".pdf":
                     sub_doc = fitz.open(fpath)
-                    doc.insert_pdf(sub_doc)
+                    if should_reverse:
+                        for p_idx in range(len(sub_doc) - 1, -1, -1):
+                            doc.insert_pdf(sub_doc, from_page=p_idx, to_page=p_idx)
+                    else:
+                        doc.insert_pdf(sub_doc)
                     sub_doc.close()
                 else:
                     img_doc = fitz.open(fpath)
@@ -182,7 +194,8 @@ class BookScanEngine:
         odds_order: str = "forward",   # 'forward' (1, 3, 5...) or 'reverse'
         evens_order: str = "reverse",  # 'reverse' (...6, 4, 2) or 'forward'
         spread_split_pos: float = 0.5, # relative position 0.0 to 1.0 (seam)
-        single_doc: Optional[fitz.Document] = None
+        single_doc: Optional[fitz.Document] = None,
+        start_with: str = "odds"
     ) -> List[Dict[str, Any]]:
         """
         Creates an ordered sequence of logical pages from the uploaded file(s).
@@ -256,12 +269,20 @@ class BookScanEngine:
         spread_suffix = " (Spread)" if is_spread else ""
 
         for i in range(max_sheets):
-            if i < len(odds_indices) and odds_doc is not None:
-                p_odd = odds_indices[i]
-                pages.append(_make_entry(odds_doc[p_odd], "odds", p_odd, f"Odds Sheet {p_odd+1}{spread_suffix}"))
-            if i < len(evens_indices) and evens_doc is not None:
-                p_even = evens_indices[i]
-                pages.append(_make_entry(evens_doc[p_even], "evens", p_even, f"Evens Sheet {p_even+1}{spread_suffix}"))
+            if start_with == "evens":
+                if i < len(evens_indices) and evens_doc is not None:
+                    p_even = evens_indices[i]
+                    pages.append(_make_entry(evens_doc[p_even], "evens", p_even, f"Evens Sheet {p_even+1}{spread_suffix}"))
+                if i < len(odds_indices) and odds_doc is not None:
+                    p_odd = odds_indices[i]
+                    pages.append(_make_entry(odds_doc[p_odd], "odds", p_odd, f"Odds Sheet {p_odd+1}{spread_suffix}"))
+            else:
+                if i < len(odds_indices) and odds_doc is not None:
+                    p_odd = odds_indices[i]
+                    pages.append(_make_entry(odds_doc[p_odd], "odds", p_odd, f"Odds Sheet {p_odd+1}{spread_suffix}"))
+                if i < len(evens_indices) and evens_doc is not None:
+                    p_even = evens_indices[i]
+                    pages.append(_make_entry(evens_doc[p_even], "evens", p_even, f"Evens Sheet {p_even+1}{spread_suffix}"))
 
         return pages
 
