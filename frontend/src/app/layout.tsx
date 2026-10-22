@@ -6,7 +6,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Settings, Power } from "lucide-react";
+import { Settings, Power, Sun, Moon } from "lucide-react";
 import {
   IconHome,
   IconBookStudio,
@@ -14,7 +14,7 @@ import {
   IconContourStudio,
   IconFlipbookStudio,
 } from "@/components/shared/StudioIcons";
-import { AppearanceProvider } from "@/context/AppearanceContext";
+import { AppearanceProvider, useAppearance } from "@/context/AppearanceContext";
 
 const font = Roboto({
   weight: ["300", "400", "500", "700"],
@@ -47,20 +47,20 @@ const NavItem = ({ href, icon, label, isCollapsed, pathname }: NavItemProps) => 
           isCollapsed ? "justify-center w-10 h-10" : "px-2.5 py-2 w-full space-x-2.5"
         } rounded-lg transition-all text-xs ${
           isActive 
-            ? "font-medium shadow-sm shadow-black/40" 
+            ? "font-semibold shadow-xs" 
             : "text-slate-400 hover:bg-[#1E2330] hover:text-slate-200 border border-transparent"
         }`}
         style={isActive ? {
           backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
           borderColor: "var(--app-accent-30, rgba(6, 182, 212, 0.3))",
           borderWidth: "1px",
-          color: "var(--app-accent, #06b6d4)",
+          color: "var(--app-accent-text, var(--app-accent, #06b6d4))",
         } : undefined}
         title={label}
       >
         <div 
           className={`shrink-0 transition-colors ${isActive ? "" : "text-slate-400 group-hover:text-slate-200"}`}
-          style={isActive ? { color: "var(--app-accent, #06b6d4)" } : undefined}
+          style={isActive ? { color: "var(--app-accent-text, var(--app-accent, #06b6d4))" } : undefined}
         >
           {icon}
         </div>
@@ -77,6 +77,42 @@ const NavItem = ({ href, icon, label, isCollapsed, pathname }: NavItemProps) => 
     </div>
   );
 };
+
+function ThemeToggleButton({ isCollapsed }: { isCollapsed: boolean }) {
+  const { theme, setTheme } = useAppearance();
+  const isLight = theme === "light";
+  const nextLabel = isLight ? "Switch to Dark Mode" : "Switch to Light Mode";
+
+  return (
+    <div className="relative group flex items-center justify-center">
+      <button
+        type="button"
+        onClick={() => setTheme(isLight ? "dark" : "light")}
+        className={`flex items-center ${
+          isCollapsed ? "justify-center w-10 h-10" : "px-2.5 py-2 w-full space-x-2.5"
+        } rounded-lg transition-all text-xs text-slate-400 hover:bg-[#1E2330] hover:text-slate-200 border border-transparent cursor-pointer`}
+        title={nextLabel}
+      >
+        {isLight ? (
+          <Moon size={18} className="shrink-0 text-slate-500 group-hover:text-slate-800" />
+        ) : (
+          <Sun size={18} className="shrink-0 text-amber-400 group-hover:text-amber-300" />
+        )}
+        {!isCollapsed && (
+          <span className="truncate font-medium">
+            {isLight ? "Dark Mode" : "Light Mode"}
+          </span>
+        )}
+      </button>
+      {isCollapsed && (
+        <div className="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-[#1B212D] text-slate-100 text-xs font-medium rounded-md shadow-2xl border border-[#2E374A] whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-150 z-50 flex items-center shadow-black/80">
+          <span>{nextLabel}</span>
+          <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1B212D]" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function RootLayout({
   children,
@@ -158,8 +194,9 @@ export default function RootLayout({
             </nav>
           </div>
           
-          {/* Settings & Shutdown Footer */}
+          {/* Settings, Theme Toggle & Shutdown Footer */}
           <div className={`p-2 border-t border-[#242A38] space-y-1 ${isSidebarCollapsed ? "overflow-visible" : ""}`}>
+            <ThemeToggleButton isCollapsed={isSidebarCollapsed} />
             <NavItem href="/settings" icon={<Settings size={18}/>} label="Settings" isCollapsed={isSidebarCollapsed} pathname={pathname} />
             
             <div className="relative group flex items-center justify-center">

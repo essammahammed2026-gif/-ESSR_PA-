@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useRef, useState } from "react";
-import { BleedModuleConfig, CropModuleConfig, SplitLine } from "@/types/book_studio";
+import React, { useRef, useState, useEffect } from "react";
+import { X } from "lucide-react";
+import { BleedModuleConfig, CropBox, CropModuleConfig, MaskBox, SplitLine } from "@/types/book_studio";
 import { clampCut } from "@/lib/splitLines";
 
 import { type LengthUnit, mmToUnit, UNIT_OPTIONS } from "@/lib/units";
@@ -115,10 +116,10 @@ function SplitLineOverlay({
       />
       {/* Position pill */}
       <div
-        className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded-full text-slate-950 font-mono font-semibold text-[9px] shadow-md ring-1 ring-black/60 pointer-events-none whitespace-nowrap transition-transform ${
+        className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded-full font-mono font-semibold text-[9px] shadow-md ring-1 ring-black/60 pointer-events-none whitespace-nowrap transition-transform ${
           active ? "scale-110" : "group-hover:scale-105"
         }`}
-        style={{ backgroundColor: ACCENT }}
+        style={{ backgroundColor: ACCENT, color: "var(--app-accent-fg, #0f172a)" }}
       >
         {(line.pos * 100).toFixed(1)}%
       </div>
@@ -190,6 +191,12 @@ export interface PageCanvasProps {
   showSplitSizes?: boolean;
   eyedropperActive?: boolean;
   onPickColor?: (hex: string) => void;
+  straightenActive?: boolean;
+  onApplyStraightenAngle?: (deltaAngle: number) => void;
+  maskToolActive?: boolean;
+  pageMasks?: MaskBox[];
+  onApplyMaskBox?: (box: CropBox) => void;
+  onRemoveMaskBox?: (maskId: string) => void;
   cropModule?: CropModuleConfig;
   bleedModule?: BleedModuleConfig;
   splitLines: SplitLine[];
@@ -221,6 +228,12 @@ export function PageCanvas({
   showSplitSizes = true,
   eyedropperActive = false,
   onPickColor,
+  straightenActive = false,
+  onApplyStraightenAngle,
+  maskToolActive = false,
+  pageMasks = [],
+  onApplyMaskBox,
+  onRemoveMaskBox,
   cropModule,
   bleedModule,
   splitLines,
@@ -239,8 +252,143 @@ export function PageCanvas({
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [hoveredLineIndex, setHoveredLineIndex] = useState<number | null>(null);
   const [loupe, setLoupe] = useState<{ x: number; y: number; color: string } | null>(null);
+  const [rulerDrag, setRulerDrag] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    deltaAngle: number;
+  } | null>(null);
+  const [maskDrag, setMaskDrag] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null>(null);
+  const [hintText, setHintText] = useState<string | null>(null);
+  const [hintVisible, setHintVisible] = useState<boolean>(false);
   const lines = hideCutLines ? [] : splitLines;
   const hasCutLines = lines.length > 0;
+
+  // Auto-fading tool hint pill so it never permanently blocks the preview canvas
+  useEffect(() => {
+    let msg: string | null = null;
+    if (eyedropperActive) {
+      msg = "Click anywhere on the page to sample color";
+    } else if (straightenActive) {
+      msg = "Drag along any horizontal text line or vertical border to straighten page";
+    } else if (maskToolActive) {
+      msg = "Drag a rectangle on the page to erase marks";
+    } else if (cropModule?.enabled) {
+      msg = "Drag crop handles or cut lines to adjust trim boundaries";
+    }
+
+    if (!msg) {
+      setHintVisible(false);
+      return;
+    }
+
+    setHintText(msg);
+    setHintVisible(true);
+    const fadeTimer = setTimeout(() => {
+      setHintVisible(false);
+    }, 1800);
+    return () => clearTimeout(fadeTimer);
+  }, [eyedropperActive, straightenActive, maskToolActive, cropModule?.enabled]);
+
+  const computeStraightenDelta = (x1: number, y1: number, x2: number, y2: number, w: number, h: number): number => {
+    const dx = (x2 - x1) * w;
+    const dy = (y2 - y1) * h;
+    if (Math.hypot(dx, dy) < 6) return 0;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      // Horizontal reference line: ensure left-to-right vector
+      const vx = dx >= 0 ? dx : -dx;
+      const vy = dx >= 0 ? dy : -dy;
+      const tiltDeg = (Math.atan2(vy, vx) * 180) / Math.PI;
+      return Math.round(tiltDeg * 100) / 100;
+    } else {
+      // Vertical reference line: ensure top-to-bottom vector
+      const vx = dy >= 0 ? dx : -dx;
+      const vy = dy >= 0 ? dy : -dy;
+      const tiltFromVertDeg = (Math.atan2(vx, vy) * 180) / Math.PI;
+      return Math.round(-tiltFromVertDeg * 100) / 100;
+    }
+  };
+
+  const handleRulerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!straightenActive) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setRulerDrag({ x1: x, y1: y, x2: x, y2: y, deltaAngle: 0 });
+  };
+
+  const handleRulerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!straightenActive || !rulerDrag) return;
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const x2 = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y2 = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    const deltaAngle = computeStraightenDelta(rulerDrag.x1, rulerDrag.y1, x2, y2, rect.width, rect.height);
+    setRulerDrag((prev) => (prev ? { ...prev, x2, y2, deltaAngle } : null));
+  };
+
+  const handleRulerPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!straightenActive || !rulerDrag) return;
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const dxPx = (rulerDrag.x2 - rulerDrag.x1) * rect.width;
+    const dyPx = (rulerDrag.y2 - rulerDrag.y1) * rect.height;
+    const dist = Math.hypot(dxPx, dyPx);
+    const delta = rulerDrag.deltaAngle;
+    setRulerDrag(null);
+    if (dist >= 12 && onApplyStraightenAngle) {
+      onApplyStraightenAngle(delta);
+    }
+  };
+
+  const handleMaskPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!maskToolActive) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setMaskDrag({ x1: x, y1: y, x2: x, y2: y });
+  };
+
+  const handleMaskPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!maskToolActive || !maskDrag) return;
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const x2 = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y2 = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    setMaskDrag((prev) => (prev ? { ...prev, x2, y2 } : null));
+  };
+
+  const handleMaskPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!maskToolActive || !maskDrag) return;
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x1 = Math.min(maskDrag.x1, maskDrag.x2);
+    const y1 = Math.min(maskDrag.y1, maskDrag.y2);
+    const x2 = Math.max(maskDrag.x1, maskDrag.x2);
+    const y2 = Math.max(maskDrag.y1, maskDrag.y2);
+    const wPx = (x2 - x1) * rect.width;
+    const hPx = (y2 - y1) * rect.height;
+    setMaskDrag(null);
+    if (wPx >= 6 && hPx >= 6 && onApplyMaskBox) {
+      onApplyMaskBox({ x1, y1, x2, y2 });
+    }
+  };
 
   const unitShort = UNIT_OPTIONS.find((o) => o.value === unit)?.short || "mm";
   const displayWidthMm = cropModule?.enabled ? currentCropWidthMm : pageBaseWidthMm;
@@ -325,8 +473,8 @@ export function PageCanvas({
       }}
 
       style={{ backgroundImage: "radial-gradient(rgba(148,163,184,0.08) 1px, transparent 1px)", backgroundSize: "18px 18px" }}
-      className={`flex-1 overflow-hidden bg-[#0A0D14] flex items-center justify-center p-8 relative ${
-        eyedropperActive
+      className={`flex-1 overflow-hidden bg-[var(--surface-canvas,#0A0D14)] flex items-center justify-center p-8 relative ${
+        eyedropperActive || straightenActive || maskToolActive
           ? "cursor-crosshair"
           : isPanMode || zoom > 1.0
             ? (isPanning ? "cursor-grabbing" : "cursor-grab")
@@ -349,10 +497,14 @@ export function PageCanvas({
         )}
       </div>
 
-      {/* Eyedropper active hint pill */}
-      {eyedropperActive && (
-        <div className="absolute top-8 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold shadow-lg pointer-events-none animate-pulse">
-          Click anywhere on the page to sample color
+      {/* Auto-fading active tool hint pill (fades out after 1.8s so it never blocks the preview) */}
+      {hintText && (
+        <div
+          className={`absolute top-8 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold shadow-lg pointer-events-none transition-all duration-500 ${
+            hintVisible ? "opacity-95 translate-y-0" : "opacity-0 -translate-y-1.5"
+          }`}
+        >
+          {hintText}
         </div>
       )}
 
@@ -407,7 +559,7 @@ export function PageCanvas({
           <div
             ref={overlayRef}
 
-            className={`absolute inset-0 select-none ${isPanMode || eyedropperActive ? "pointer-events-none" : "pointer-events-auto"}`}
+            className={`absolute inset-0 select-none ${isPanMode || eyedropperActive || straightenActive || maskToolActive ? "pointer-events-none" : "pointer-events-auto"}`}
           >
             <div className="absolute top-0 left-0 right-0 bg-black/55 backdrop-blur-[1px] pointer-events-none" style={{ height: `${cropModule.cropBox.y1 * 100}%` }} />
             <div className="absolute left-0 right-0 bottom-0 bg-black/55 backdrop-blur-[1px] pointer-events-none" style={{ top: `${cropModule.cropBox.y2 * 100}%` }} />
@@ -524,6 +676,110 @@ export function PageCanvas({
                 );
               })}
             </div>
+          </div>
+        )}
+        {straightenActive && (
+          <div
+            onPointerDown={handleRulerPointerDown}
+            onPointerMove={handleRulerPointerMove}
+            onPointerUp={handleRulerPointerUp}
+            className="absolute inset-0 z-50 cursor-crosshair select-none touch-none"
+          >
+            {rulerDrag && (
+              <>
+                <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                  <line
+                    x1={`${rulerDrag.x1 * 100}%`}
+                    y1={`${rulerDrag.y1 * 100}%`}
+                    x2={`${rulerDrag.x2 * 100}%`}
+                    y2={`${rulerDrag.y2 * 100}%`}
+                    stroke="#000000"
+                    strokeWidth={4}
+                    strokeOpacity={0.75}
+                  />
+                  <line
+                    x1={`${rulerDrag.x1 * 100}%`}
+                    y1={`${rulerDrag.y1 * 100}%`}
+                    x2={`${rulerDrag.x2 * 100}%`}
+                    y2={`${rulerDrag.y2 * 100}%`}
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
+                  />
+                  <circle cx={`${rulerDrag.x1 * 100}%`} cy={`${rulerDrag.y1 * 100}%`} r={4} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.5} />
+                  <circle cx={`${rulerDrag.x2 * 100}%`} cy={`${rulerDrag.y2 * 100}%`} r={4} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.5} />
+                </svg>
+                <div
+                  className="absolute -translate-x-1/2 -translate-y-[140%] px-2 py-0.5 rounded bg-slate-950/95 border border-amber-500/60 text-amber-300 font-mono text-[10px] font-bold shadow-lg pointer-events-none whitespace-nowrap"
+                  style={{ left: `${rulerDrag.x2 * 100}%`, top: `${rulerDrag.y2 * 100}%` }}
+                >
+                  {rulerDrag.deltaAngle > 0 ? "+" : ""}{rulerDrag.deltaAngle.toFixed(2)}°
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Saved Spot Mask Overlay Badges (renders instant visual fill + click × to remove) */}
+        {pageMasks.length > 0 && (
+          <div className="absolute inset-0 z-40 pointer-events-none select-none">
+            {pageMasks.map((m, idx) => {
+              const x1 = Math.min(m.x1, m.x2);
+              const y1 = Math.min(m.y1, m.y2);
+              const w = Math.max(0.01, Math.abs(m.x2 - m.x1));
+              const h = Math.max(0.01, Math.abs(m.y2 - m.y1));
+              const fillColor = m.color || "#ffffff";
+              return (
+                <div
+                  key={m.id || idx}
+                  className="group/mask absolute border border-dashed border-transparent hover:border-amber-500/80 transition-all pointer-events-auto rounded-[1px]"
+                  style={{
+                    left: `${x1 * 100}%`,
+                    top: `${y1 * 100}%`,
+                    width: `${w * 100}%`,
+                    height: `${h * 100}%`,
+                    backgroundColor: fillColor,
+                  }}
+                  title="Erase Box (hover and click × to delete)"
+                >
+                  {onRemoveMaskBox && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveMaskBox(m.id);
+                      }}
+                      className="opacity-0 group-hover/mask:opacity-100 absolute -top-2.5 -right-2.5 w-5 h-5 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-md transition-opacity cursor-pointer z-[60] pointer-events-auto"
+                      title="Delete this erase box"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Interactive Erase / Whiteout Box Drawing Surface */}
+        {maskToolActive && (
+          <div
+            onPointerDown={handleMaskPointerDown}
+            onPointerMove={handleMaskPointerMove}
+            onPointerUp={handleMaskPointerUp}
+            className="absolute inset-0 z-50 cursor-crosshair select-none touch-none"
+          >
+            {maskDrag && (
+              <div
+                className="absolute border-2 border-dashed border-amber-400 bg-white/65 backdrop-blur-[1px] shadow-md pointer-events-none"
+                style={{
+                  left: `${Math.min(maskDrag.x1, maskDrag.x2) * 100}%`,
+                  top: `${Math.min(maskDrag.y1, maskDrag.y2) * 100}%`,
+                  width: `${Math.abs(maskDrag.x2 - maskDrag.x1) * 100}%`,
+                  height: `${Math.abs(maskDrag.y2 - maskDrag.y1) * 100}%`,
+                }}
+              />
+            )}
           </div>
         )}
       </div>

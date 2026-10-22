@@ -10,6 +10,10 @@ import {
   Undo2,
   Redo2,
   History,
+  Crop,
+  Ruler,
+  Eraser,
+  Grid,
 } from "lucide-react";
 import { IconCompareScan } from "@/components/shared/StudioIcons";
 import { HistoryPopover } from "./HistoryPopover";
@@ -22,10 +26,18 @@ export interface WorkspaceToolbarProps {
   totalPages: number;
   isViewingOriginal: boolean;
   showSplitSizes: boolean;
+  cropEnabled?: boolean;
+  straightenActive?: boolean;
+  maskToolActive?: boolean;
+  showGrid?: boolean;
   onPrev: () => void;
   onNext: () => void;
   onToggleOriginal: () => void;
   onToggleSplitSizes: () => void;
+  onToggleCropTool?: () => void;
+  onToggleStraighten?: () => void;
+  onToggleMaskTool?: () => void;
+  onToggleGrid?: () => void;
   onRotate: (delta: number) => void;
   // History & Safety controls
   onUndo?: () => void;
@@ -44,10 +56,18 @@ export function WorkspaceToolbar({
   totalPages,
   isViewingOriginal,
   showSplitSizes,
+  cropEnabled = false,
+  straightenActive = false,
+  maskToolActive = false,
+  showGrid = false,
   onPrev,
   onNext,
   onToggleOriginal,
   onToggleSplitSizes,
+  onToggleCropTool,
+  onToggleStraighten,
+  onToggleMaskTool,
+  onToggleGrid,
   onRotate,
   onUndo,
   canUndo = false,
@@ -79,7 +99,7 @@ export function WorkspaceToolbar({
             </button>
             <span
               className="text-[11px] font-mono font-bold px-1.5 min-w-[48px] text-center"
-              style={{ color: "var(--app-accent, #f59e0b)" }}
+              style={{ color: "var(--app-accent-text, var(--app-accent, #f59e0b))" }}
             >
               {selectedIdx + 1} / {totalPages}
             </span>
@@ -162,15 +182,80 @@ export function WorkspaceToolbar({
           </div>
         </div>
 
-        {/* Center: Show Original / Show Edited Toggle */}
-        <div className="flex items-center">
+        {/* Center: Quick Canvas Tools (Crop, Straighten, Erase Box, Grid, Compare) */}
+        <div className="flex items-center space-x-1">
+          {onToggleCropTool && (
+            <button
+              type="button"
+              onClick={onToggleCropTool}
+              className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
+                cropEnabled
+                  ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                  : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
+              }`}
+              title={`Toggle Crop Box Overlay (${shortcutLabels.crop_toggle || "C"})`}
+            >
+              <Crop size={12} />
+              <span className="hidden xl:inline">Crop</span>
+            </button>
+          )}
+
+          {onToggleStraighten && (
+            <button
+              type="button"
+              onClick={onToggleStraighten}
+              className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
+                straightenActive
+                  ? "bg-amber-500 text-slate-950 font-bold border-amber-400"
+                  : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
+              }`}
+              title={`Draw Straighten Line (${shortcutLabels.straighten_tool || "S"})`}
+            >
+              <Ruler size={12} />
+              <span className="hidden xl:inline">Straighten</span>
+            </button>
+          )}
+
+          {onToggleMaskTool && (
+            <button
+              type="button"
+              onClick={onToggleMaskTool}
+              className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
+                maskToolActive
+                  ? "bg-amber-500 text-slate-950 font-bold border-amber-400"
+                  : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
+              }`}
+              title={`Draw Erase / Whiteout Box (${shortcutLabels.mask_tool || "M"})`}
+            >
+              <Eraser size={12} />
+              <span className="hidden xl:inline">Erase</span>
+            </button>
+          )}
+
+          {onToggleGrid && (
+            <button
+              type="button"
+              onClick={onToggleGrid}
+              className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                showGrid
+                  ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50"
+                  : "bg-[var(--surface-card,#181D27)] text-slate-400 border-[var(--border-subtle,#242A38)] hover:text-white"
+              }`}
+              title={`Toggle Horizon Alignment Grid (${shortcutLabels.grid_toggle || "G"})`}
+            >
+              <Grid size={13} />
+            </button>
+          )}
+
+          <div className="h-4 w-px bg-[var(--border-subtle,#242A38)] mx-0.5" />
+
           <button
             type="button"
             onClick={onToggleOriginal}
             className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
               isViewingOriginal
                 ? "bg-slate-800 text-white border-slate-600"
-                : "bg-[#181D27] text-slate-300 border-[#242A38] hover:text-white hover:border-slate-600"
+                : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
             }`}
             title={`Toggle Original vs. Processed View (Shortcut: ${shortcutLabels.toggle_original || "O"} or Hold Space)`}
           >

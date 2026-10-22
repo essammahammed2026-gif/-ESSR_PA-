@@ -57,10 +57,11 @@ export function cutPageCount(lines: SplitLine[]): number {
 }
 
 /** Calculates the next non-overlapping cut line position (0.50, 0.67, or 0.33). */
-export function getNextCutLine(lines: SplitLine[]): SplitLine {
-  const lastDir = lines.length > 0 ? lines[lines.length - 1].direction : "vertical";
-  const lastPos = lines.length > 0 ? lines[lines.length - 1].pos : 0.5;
-  const hasCenter = lines.some((l) => l.direction === lastDir && Math.abs(l.pos - 0.5) < 0.08);
+export function getNextCutLine(lines: SplitLine[], preferredDirection?: SplitDirection): SplitLine {
+  const dir = preferredDirection ?? (lines.length > 0 ? lines[lines.length - 1].direction : "vertical");
+  const sameDirLines = lines.filter((l) => l.direction === dir);
+  const lastPos = sameDirLines.length > 0 ? sameDirLines[sameDirLines.length - 1].pos : 0.5;
+  const hasCenter = sameDirLines.some((l) => Math.abs(l.pos - 0.5) < 0.08);
   const nextPos = hasCenter ? (lastPos <= 0.5 ? 0.67 : 0.33) : 0.5;
-  return { pos: clampCut(nextPos), direction: lastDir };
+  return { pos: clampCut(nextPos), direction: dir };
 }

@@ -62,7 +62,7 @@ export function PagePropertiesModal({
             <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Page Size</span>
             <span
               className="font-bold font-mono text-sm block"
-              style={{ color: "var(--app-accent, #f59e0b)" }}
+              style={{ color: "var(--app-accent-text, var(--app-accent, #f59e0b))" }}
             >
               {dimString}
             </span>

@@ -15,6 +15,17 @@ export interface BookShortcutHandlers {
   zoomOut?: () => void;
   zoomReset?: () => void;
   togglePan?: () => void;
+  toggleStraighten?: () => void;
+  toggleMaskTool?: () => void;
+  toggleCropTool?: () => void;
+  addCutLine?: () => void;
+  toggleGrid?: () => void;
+  toggleEyedropper?: () => void;
+  detectPage?: () => void;
+  detectAll?: () => void;
+  applyAction?: () => void;
+  focusModule?: (moduleIndex: number) => void;
+  exitModule?: () => void;
 }
 
 export interface UseBookShortcutsArgs {
@@ -35,6 +46,15 @@ export const DEFAULT_BOOK_SHORTCUTS: Record<string, string> = {
   zoom_out: "-",
   zoom_reset: "ctrl+0",
   pan: "h",
+  straighten_tool: "s",
+  mask_tool: "m",
+  crop_toggle: "c",
+  add_cut: "x",
+  grid_toggle: "g",
+  eyedropper: "i",
+  detect_page: "a",
+  detect_all: "shift+a",
+  apply_action: "enter",
 };
 
 export function useBookShortcuts({
@@ -112,6 +132,38 @@ export function useBookShortcuts({
       } else if (combo === activeShortcuts.rotate && handlers.rotateCW) {
         e.preventDefault();
         handlers.rotateCW();
+      } else if (combo === activeShortcuts.straighten_tool && handlers.toggleStraighten) {
+        e.preventDefault();
+        handlers.toggleStraighten();
+      } else if (combo === activeShortcuts.mask_tool && handlers.toggleMaskTool) {
+        e.preventDefault();
+        handlers.toggleMaskTool();
+      } else if (combo === activeShortcuts.crop_toggle && handlers.toggleCropTool) {
+        e.preventDefault();
+        handlers.toggleCropTool();
+      } else if (combo === activeShortcuts.add_cut && handlers.addCutLine) {
+        e.preventDefault();
+        handlers.addCutLine();
+      } else if (combo === activeShortcuts.grid_toggle && handlers.toggleGrid) {
+        e.preventDefault();
+        handlers.toggleGrid();
+      } else if (combo === activeShortcuts.eyedropper && handlers.toggleEyedropper) {
+        e.preventDefault();
+        handlers.toggleEyedropper();
+      } else if (combo === activeShortcuts.detect_page && handlers.detectPage) {
+        e.preventDefault();
+        handlers.detectPage();
+      } else if (combo === activeShortcuts.detect_all && handlers.detectAll) {
+        e.preventDefault();
+        handlers.detectAll();
+      } else if (combo === activeShortcuts.apply_action && handlers.applyAction) {
+        e.preventDefault();
+        handlers.applyAction();
+      } else if (["1", "2", "3", "4", "5"].includes(combo) && handlers.focusModule) {
+        e.preventDefault();
+        handlers.focusModule(Number(combo));
+      } else if (combo === "escape" && handlers.exitModule) {
+        handlers.exitModule();
       }
     };
 

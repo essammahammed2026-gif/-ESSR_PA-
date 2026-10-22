@@ -3,12 +3,29 @@
  */
 
 export type BookIntakeMode = "single_page" | "spread" | "dual_pass";
+export type MultiFileStrategy = "duplex" | "sequential";
 
 export interface CropBox {
   x1: number; // 0.0 to 1.0 (relative left)
   y1: number; // 0.0 to 1.0 (relative top)
   x2: number; // 0.0 to 1.0 (relative right)
   y2: number; // 0.0 to 1.0 (relative bottom)
+}
+
+export interface MaskBox extends CropBox {
+  id: string;
+  color?: string; // "#ffffff" | hex
+}
+
+export type FocusedModuleId = "crop" | "deskew" | "cleanup" | "restore" | "bleed";
+export type ExportFormat = "pdf" | "pdf_split" | "jpeg" | "png" | "tiff";
+export type TiffCompression = "lzw" | "deflate" | "none";
+
+export interface ExportOptions {
+  format?: ExportFormat;
+  dpi?: number;
+  quality?: number;
+  tiffCompression?: TiffCompression;
 }
 
 export type SplitDirection = "vertical" | "horizontal";
@@ -53,7 +70,19 @@ export interface BookStudioPage extends BasePage {
   orig_height_mm?: number;
   color_space?: string;
   dpi?: number;
+  deskew_angle?: number;
+  masks?: MaskBox[];
+  color_mode?: CleanupColorMode;
   rev?: number; // mutation counter: busts cached thumbnails after in-place crop/rotate
+}
+
+export type CropDetectMode = "paper" | "content";
+
+export interface AppliedModuleEntry {
+  id: string;
+  label: string;
+  scopeLabel: string;
+  prevPagesSnapshot?: BookStudioPage[];
 }
 
 export interface CropModuleConfig {
@@ -62,6 +91,8 @@ export interface CropModuleConfig {
   cropBox: CropBox;
   splitPos: number; // legacy mirror of splitLines[0]?.pos (default 0.50)
   target: CropTarget;
+  detectMode?: CropDetectMode;
+  appliedEntries?: AppliedModuleEntry[];
 }
 
 export type CropTargetBase = "all" | "current" | "range";
@@ -74,7 +105,7 @@ export interface CropTarget {
   parity: CropParity;
 }
 
-export type ModulePageScopeMode = "all" | "range" | "odds" | "evens";
+export type ModulePageScopeMode = "all" | "current" | "odds" | "evens" | "range";
 
 export interface ModulePageScope {
   mode: ModulePageScopeMode;
@@ -90,6 +121,7 @@ export interface DeskewModuleConfig {
   showGrid: boolean;
   gridColor: string;
   scope: ModulePageScope;
+  appliedEntries?: AppliedModuleEntry[];
 }
 
 export interface BleedEntry {
@@ -99,6 +131,7 @@ export interface BleedEntry {
   solidColor?: string;
   placement: "outside" | "inside";
   showCropMarks: boolean;
+  scopeLabel?: string;
 }
 
 export interface BleedModuleConfig {
@@ -113,7 +146,20 @@ export interface BleedModuleConfig {
   appliedBleeds: BleedEntry[];
 }
 
-export type CleanupColorMode = "color" | "grayscale" | "bw";
+export type CleanupColorMode = "auto" | "color" | "grayscale" | "bw";
+
+export type MaskApplyScopeMode = ModulePageScopeMode;
+
+export interface CleanupModuleConfig {
+  enabled: boolean;
+  maskScopeMode: MaskApplyScopeMode;
+  maskCustomRange: string;
+  maskColor: string;
+  flattenIllumination: boolean;
+  despeckleLevel: 0 | 1 | 2 | 3;
+  scope: ModulePageScope;
+  appliedEntries?: AppliedModuleEntry[];
+}
 
 export interface RestorationModuleConfig {
   enabled: boolean;
@@ -128,6 +174,7 @@ export interface RestorationModuleConfig {
   whitenBg: boolean;
   sharpen: boolean;
   scope: ModulePageScope;
+  appliedEntries?: AppliedModuleEntry[];
 }
 
 export interface BookProcessSettings {
@@ -143,6 +190,7 @@ export interface BookProcessSettings {
   deskew: boolean;
   sharpen: boolean;
   deskewModule?: DeskewModuleConfig;
+  cleanupModule?: CleanupModuleConfig;
   bleedModule?: BleedModuleConfig;
   restorationModule?: RestorationModuleConfig;
 }
@@ -168,6 +216,10 @@ export interface ThumbnailRenderOpts {
   deskewAngle: number;
   deskewMaxAngle: number;
   deskewIgnoreBorders: boolean;
+  cleanupEnabled: boolean;
+  cleanupScope: ModulePageScope;
+  flattenIllumination: boolean;
+  despeckleLevel: number;
   restorationEnabled: boolean;
   restorationScope: ModulePageScope;
   cleanBorders: boolean;
@@ -186,6 +238,12 @@ export interface ThumbnailRenderOpts {
   bleedColor: string;
   bleedPlacement: "outside" | "inside";
   showCropMarks: boolean;
+}
+
+export interface ModuleTaskProgress {
+  active: boolean;
+  progress: number;
+  label: string;
 }
 
 export interface ExportJobProgress {

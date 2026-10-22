@@ -8,6 +8,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Book Studio Explicit Apply, Reversible Applied History & High-Density UI Polish**:
+  - **Explicit Apply & No Auto-Apply on Entry**:
+    - Removed auto-enabling side-effects on module entry (`openModule`). Entering `Crop & Split`, `Deskew`, `Cleanup`, `Colors`, or `Bleed` never activates the effect automatically; only explicit clicks on **Apply** commit the module's effect.
+    - Isolated crop guide canvas overlay to activate only while inside `Crop & Split`.
+  - **Applied Entries List with Delete-to-Reverse**:
+    - Added an `Applied` list at the bottom of every module showing committed actions, concise labels, and scope tags (`Current`, `All`, `Odds`, `Evens`, `Range`).
+    - Every applied item includes a `Trash2` button that removes the entry and reverses the effect (e.g., restoring previous page geometry for crop/split, clearing deskew tilts, resetting color/background filters, or removing bleed margins).
+  - **Optimistic 0ms Erase Boxes & Canvas Overlay Fix**:
+    - Fixed the Erase Box tool (`PageCanvas.tsx`) by raising saved masks to `z-40` with hover delete `×` buttons on `z-[60]` so pointer events are never captured by the active drawing surface.
+    - Implemented instant optimistic local state updates in `useBookModules.ts` for `applyMaskBox`, `removeMaskBox`, `clearPageMasks`, and `clearAllMasks`.
+    - Added 1-click **Clear Page** and **Clear All** buttons without duplicating scope pickers.
+  - **High-Density 1–2 Word Labels & Zero Clipping/Duplication**:
+    - Reduced verbose titles and multi-word descriptions across all tools, module panels, and Hub cards to concise 1–2 word names (`Crop & Split`, `Deskew`, `Cleanup`, `Colors`, `Bleed`, `Paper`, `Content`, `Detect`, `Detect All`, `Spine Shadow`, `Despeckle`, `Whiten BG`).
+    - Replaced flex layout in `PageScopeSelector` with a non-clipping 5-column full-width grid (`Current | All | Odds | Evens | Range`).
+    - Eliminated redundant scope selectors and dual color mode controls in `RestorePanel.tsx`.
+- **Book Studio Drill-Down Modules Hub & Dedicated Module Workspaces**:
+  - **Modules Hub Overview (`BookRightPanel.tsx`)**: Replaced stacked accordion modules with a master-detail Drill-Down Hub displaying 5 rich module cards (`[1] Crop & Split`, `[2] Deskew & Straighten`, `[3] Cleanup & Masking`, `[4] Color & Tone Studio`, `[5] Print Bleed & Marks`) with live status summaries, active layer count pill, inline ON/OFF toggles, and per-module task progress bars.
+  - **Dedicated Module Workspace Navigation**: Clicking any module card (or pressing `1`–`5`, or activating a canvas tool in `WorkspaceToolbar`) auto-enables the module and transitions the Right Panel into a dedicated full-height workspace with a `← All Modules` (`Esc`) back button and a compact 5-icon quick-jump strip.
+  - **Expanded Per-Module UI/UX**:
+    - **`CropSplitPanel.tsx`**: Added descriptive `Paper Sheet` vs. `Tight Content` mode cards, live 4-edge crop inset percentage readouts (`Left`, `Top`, `Right`, `Bottom`), separate `+ Vertical Cut` and `+ Horizontal Cut` buttons with output page count preview, and inline visible target scope pills (`Current | All | Odds | Evens | Range`). Removed the obsolete `CropTargetPopover.tsx` side-file.
+    - **`DeskewPanel.tsx`**: Unified Auto Baseline Detection and Manual Page Angle fine-tuning into a single view with a live angle badge, slider, and 1-click micro-nudge buttons (`-0.5°`, `-0.1°`, `Reset`, `+0.1°`, `+0.5°`).
+    - **`CleanupPanel` & `RestorePanel.tsx`**: Expanded Spot Erase / Whiteout Box (`M`) controls, Spine & Gutter shadow leveling, Safe Despeckle, 2×2 Global Book Color Mode cards with descriptions, Per-Page Override bar, and tone sliders with 1-click default reset links.
+    - **`BleedPanel.tsx`**: Added Outside/Inside bleed cards, Mirror/Solid mode switcher, and 1-click prepress bleed width presets (`0 mm`, `2 mm`, `3 mm`, `5 mm`).
+- **Book Studio Complete Prepress Suite: Cleanup & Masking, Smart Mixed-Content Auto Color, Multi-Format Export, Layer Hotkeys & Unified Flint Design System**:
+  - **Unified 1-Line Global Scope Picker (`PageScopeSelector`) & Auto-Fading Canvas Tooltips**:
+    - Standardized `PageScopeSelector.tsx` across all Book Studio modules (`Erase`, `Background Cleanup`, `Deskew`, `Color & Tone Studio`, `Print Bleed`) into a compact 1-line segmented control supporting `Current | All | Odds | Evens | Range`.
+    - Added a `1.8s` auto-fade timer to the floating active-tool hint pill on `PageCanvas.tsx` (`Crop`, `Erase`, `Straighten`, `Eyedropper`) so it never obstructs the preview canvas.
+  - **Dedicated Cleanup & Spot Masking Module (`CleanupPanel`)**:
+    - Added interactive **Erase / Whiteout Box (`M`)** canvas tool (`PageCanvas.tsx`, `BookWorkspace.tsx`) allowing operators to drag a box over scanner fingers, 3-hole punches, staples, or edge marks and apply it across **`Current`**, **`Selected`** (Deck multi-select), **`All`**, **`Odds`**, **`Evens`**, or **`Range`** in the exact same coordinates.
+    - Added 1-click removal via hover `×` badges on the canvas, **Clear Page**, or **Clear All** across the book (`POST /api/book-scan/mask-page/{session_id}`).
+    - Added **Morphological Spine & Gutter Shadow Leveling** (`flatten_illumination`) and connected-component **Safe Despeckle** (`despeckle_level: 0 | 1 | 2 | 3`) that removes scanner dust specks while protecting punctuation periods and Arabic/Latin diacritics.
+  - **Smart Mixed-Content Color & Tone Studio (`Smart Auto`)**:
+    - Implemented **Pixel-Level Chroma-Aware Hybrid Compositing** (`BookScanEngine.apply_smart_auto_color`) for `color_mode = "auto"`, separating chromatic pixels (color illustrations, stamps, signatures) from neutral text/paper so mixed-content pages get crisp dark text, clean white paper, and vibrant color regions simultaneously without JPEG/B&W artifacts.
+    - Added **Per-Page Color Mode Overrides** (`Default`, `Auto`, `Color`, `Gray`, `B&W`) via `POST /api/book-scan/color-mode-page/{session_id}` with Deck status dots.
+  - **Expandable Multi-Format Export Dropdown**:
+    - Upgraded the Book Studio Export button (`frontend/src/app/book-studio/page.tsx`) into a split-button + popover supporting **Merged PDF (`.pdf`)**, **Separate PDF Pages (`.zip`)**, **JPEG Images (`.zip`)**, **Lossless PNG Images (`.zip`)**, and **Archival TIFF Images (`.zip`)** with Output DPI (`150 / 200 / 300 / 400`), Quality slider (`60–100%`), and TIFF compression (`LZW`, `Deflate`, `None`).
+  - **Layer-Stack vs. Focused Module Architecture & Full Hotkey Matrix**:
+    - Separated active layer state (`module.enabled`) from the **Focused Module (`1`–`5`)** so multiple modules remain active simultaneously while context-aware hotkeys (`A` Detect Page, `Shift+A` Detect All, `Enter` Apply) target the focused module.
+    - Added direct canvas tool hotkeys (`S` Straighten Line, `M` Erase Box, `C` Crop Overlay, `X` Add Cut Line, `G` Alignment Grid, `I` Eyedropper) to `useBookShortcuts.ts`, `WorkspaceToolbar.tsx`, and `ShortcutsSection.tsx`.
+  - **Unified Flint Design System ("Obsidian Studio" Dark & "Daylight Paper" Light Mode)**:
+    - Enabled **Light Mode ("Daylight Paper")** and refined **Dark Mode ("Obsidian Studio")** across the App Shell (`layout.tsx`, `StudioLayout.tsx`), Settings (`AppearanceSection.tsx`), Home Studio, and Book Studio via semantic CSS variables in `globals.css` and `AppearanceContext.tsx`, plus a 1-click theme toggle button in the sidebar.
+    - Added **independent per-theme accent colors** (`darkAccentColor` stored in `essr_accent_color_dark` defaulting to `#F59E0B` Amber Gold, and `lightAccentColor` stored in `essr_accent_color_light` defaulting to `#2563EB` Cobalt Blue) with a dedicated **Dark Accent / Light Accent** switcher and curated per-theme preset swatches in `AppearanceSection.tsx`.
+    - Implemented automatic WCAG luminance contrast variables (`--app-accent-text` for accent text on light/dark panels and `--app-accent-fg` for text on solid accent buttons), enabled `darkMode: "class"` in `tailwind.config.ts`, and strengthened Light Mode borders, segmented pills, and status badges for high-contrast readability.
+    - Documented the design system in `docs/design_system.md` and linked it in `docs/architecture.md`.
+- **Book Studio Smart Per-Page Crop, Deskew, Live Module Progress Bars & Exact Export Fidelity**:
+  - **2-Stage Smart Auto-Detect Crop (`Paper Sheet` vs. `Tight Content`)**: Upgraded `BookScanEngine.detect_book_crop_and_seam` (`backend/engines/book_scan_engine.py`) with a 2-stage scanner edge detector that strips synthetic white PDF wrapper padding and marches past dark scanner lid voids/black border lines while preserving page paper margins, stamps, and signatures (`paper` mode), or crops tightly to inner ink (`content` mode).
+  - **Batch "Detect All → Browse & Tweak → Apply All" Crop Workflow**: Added `POST /api/book-scan/detect-crop-batch/{session_id}` and per-page `per_page_crops` support to `POST /api/book-scan/crop-page/{session_id}`. Updated `useBookModules.ts` and `CropSplitPanel.tsx` so operators can run **Detect All**, step through pages (`[` / `]` or arrows) to inspect and tweak each page's individual crop box (`pageCrops[pageId]`), and commit all per-page crop boxes in one click (`Apply`).
+  - **Upgraded Per-Page Deskew, Batch Detect All & Interactive 2-Point Straighten Ruler**:
+    - Upgraded `BookScanEngine.detect_skew_angle` with dark scanner void masking (`bg < 175`), 1px-thin horizontal word fusion, `cv2.fitLine` L1 baseline regression, and `cv2.HoughLinesP` line detection for tables and architectural drawings.
+    - Added per-page `deskew_angle` storage on `BookStudioPage`, `POST /api/book-scan/detect-angle-batch/{session_id}`, and `POST /api/book-scan/deskew-page/{session_id}`.
+    - Added **Detect Page** + **Detect All** buttons, per-page angle badge/slider, and an interactive **Draw Straighten Line** ruler tool in `DeskewPanel.tsx` and `PageCanvas.tsx` allowing operators to drag along any horizontal text line or vertical table border on the canvas to immediately compute and apply the exact straightening angle.
+  - **Live Per-Module Progress Bars**: Added `ModuleProgressBar` across `CropSplitPanel`, `DeskewPanel`, `BleedPanel`, and `RestorePanel`, plus chunked batch progress tracking in `useBookSession.ts` so long batch operations (`Detect All` crops/angles across 140+ pages, `Apply` crop/split, and live slider renders) display real-time percentage and page counts inside each module header.
+  - **Removed Clean Border Option**: Removed the `Border Clean` UI section from `RestorePanel.tsx` and disabled `cleanBorders` by default across frontend and backend schemas so outer paper content, stamps, and signatures are never altered by border whitening.
+  - **Guaranteed Export Fidelity**: Updated `BookScanEngine.render_export_pages` and `useBookModules.ts` (`exportPdf`) to pass and strictly honor all committed per-page crops, uncommitted draft `pageCrops`, and per-page `deskew_angle` overrides without re-running `detect_skew_angle` or overwriting per-page edits with global defaults.
+- **Book Studio Multi-File Collation & Sequential Merge (Combine Parts)**:
+  - **Fixed Dual Pass Intake**: Resolved bug where `initSession()` hardcoded `mode="single"` and dropped `file_odds`, `file_evens`, `odds_order`, and `evens_order`. Repaired backend router dispatch in `backend/book_scan_api.py` so `mode="dual"` is evaluated correctly without being swallowed by batch file arrays.
+  - **Quick Swap & Starting Parity**: Added 1-click **Swap (⇄)** button in `BookLeftPanel.tsx` to instantly swap Odds and Evens files without re-browsing. Added **Start with** selector (`Odd (1, 2...)` vs `Even (2, 1...)`) forwarded through `BookScanEngine.collate_scans` and `collate_from_paths`.
+  - **Sequential Merge (Combine Parts)**: Integrated `FileUploadQueue.tsx` with reorderable file parts (Move Up, Move Down, Remove, Clear All), multi-format intake (PDF, PNG, JPG, TIFF, WebP), and an inline **Rev** toggle to reverse individual batch page order before merging.
+  - **High-Performance Backend Assembly**: Enhanced `BookScanEngine.combine_files_to_pdf` with `reverse_indices` support to efficiently merge documents with selective per-part reversal using PyMuPDF stream insertion.
+  - **Unified Accent Theming**: Converted `FileUploadQueue` and intake status indicators to respect the dynamic application theme accent (`var(--app-accent)`).
 - **Preflight Studio Deprecation & Command Center (Home) Consolidation & Polish**:
   - **Complete Preflight Deprecation**: Deleted redundant `src/app/preflight/page.tsx`, removed `/api/preflight` route from `backend/main.py`, and removed prototype `backend/engines/preflight.py`. Scrubbed all lingering preflight mentions from `asset_inspector.py`, `flipbook/page.tsx`, and `prepress.ts`.
   - **Sidebar & Quick Launch Streamlining**: Removed Preflight Studio link from global sidebar navigation in `layout.tsx` and aligned the home studio cards in `DropzonePanel.tsx` to match the exact sidebar navbar order: **Book Studio, Imposing Studio, Contour Studio, Flipbook Studio**, displaying clean names and icons without redundant descriptions.

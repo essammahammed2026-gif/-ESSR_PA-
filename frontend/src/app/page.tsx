@@ -243,8 +243,8 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={handleAnalyzeAnother}
-                className="font-medium hover:underline transition-all flex items-center space-x-1 cursor-pointer"
-                style={{ color: "var(--app-accent, #06b6d4)" }}
+                className="font-semibold hover:underline transition-all flex items-center space-x-1 cursor-pointer"
+                style={{ color: "var(--app-accent-text, var(--app-accent, #06b6d4))" }}
                 title="Return to Home dropzone"
               >
                 <span>Home</span>

@@ -2,18 +2,23 @@ import { useState, useEffect, useCallback, useMemo, useRef, type Dispatch, type 
 import { apiFetch, downloadBlob } from "@/lib/api";
 import { useDebounce } from "@/lib/useDebounce";
 import { groupSplitLines } from "@/lib/splitLines";
-import { resolveCropTarget } from "@/lib/pageScope";
+import { resolveCropTarget, resolveMaskTargetIds } from "@/lib/pageScope";
 import {
   BookIntakeMode,
   BookStudioPage,
   BookProcessSettings,
   DeskewModuleConfig,
+  CleanupModuleConfig,
   BleedModuleConfig,
   RestorationModuleConfig,
   CropModuleConfig,
   CropBox,
+  MaskBox,
+  CleanupColorMode,
+  ExportOptions,
   SplitLine,
   ExportJobProgress,
+  ModuleTaskProgress,
 } from "@/types/book_studio";
 
 /** Typed args for the unified module-config, split/crop, and export hook. */
@@ -33,6 +38,7 @@ interface PhaseResult {
 }
 
 const FULL_BED: CropBox = { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0 };
+const IDLE_PROGRESS: ModuleTaskProgress = { active: false, progress: 0, label: "" };
 
 /**
  * Unified Book Studio processing hook:
@@ -53,6 +59,7 @@ export function useBookModules({
   const [previewCleaned, setPreviewCleaned] = useState<boolean>(true);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [cropActionProgress, setCropActionProgress] = useState<ModuleTaskProgress>(IDLE_PROGRESS);
   const [exportProgress, setExportProgress] = useState<ExportJobProgress>({
     jobId: null,
     status: "idle",
@@ -82,9 +89,11 @@ export function useBookModules({
     cropBox: { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 },
     splitPos: 0.50,
     target: { base: "all", customRange: "", parity: "both" },
+    detectMode: "paper",
+    appliedEntries: [],
   });
 
-  // Track page-specific overrides per active page
+  // Track page-specific draft overrides per page (populated by batch Auto-Detect or manual per-page tweaks)
   const [pageCrops, setPageCrops] = useState<Record<string, { cropBox: CropBox; splitPos: number; splitLines: SplitLine[] }>>({});
   const pageCropsRef = useRef(pageCrops);
   pageCropsRef.current = pageCrops;
@@ -92,9 +101,8 @@ export function useBookModules({
   // Sync cropModule state when user navigates between pages
   useEffect(() => {
     if (!selectedPageId) return;
-    // Per-page override applies when targeting "current" page
-    const isCurrentTarget = cropModule.target.base === "current";
-    const existing = isCurrentTarget ? pageCropsRef.current[selectedPageId] : undefined;
+    // Always restore a page's specific draft crop if one exists (e.g. from Auto-Detect All or manual adjustment)
+    const existing = pageCropsRef.current[selectedPageId];
     if (existing) {
       setCropModule((prev) => ({
         ...prev,
@@ -147,10 +155,10 @@ export function useBookModules({
       }));
     }
     // If uncut spread and not yet committed, we KEEP cropModule as is (working template inheritance across spreads)!
-  }, [selectedPageId, pages, cropModule.target.base]);
+  }, [selectedPageId, pages]);
 
-  // When user updates cropModule, save it specifically for the active page if targeting "current".
-  // In "all" or "range" modes, cropModule is the shared document template across all spreads!
+  // When user updates cropModule, save it specifically for the active page so browsing back & forth
+  // never loses per-page adjustments.
   const updateCropModule: Dispatch<SetStateAction<CropModuleConfig>> = useCallback((action) => {
     setCropModule((prev) => {
       const next = typeof action === "function" ? action(prev) : action;
@@ -158,7 +166,15 @@ export function useBookModules({
         ...next,
         splitPos: next.splitLines.length > 0 ? next.splitLines[0].pos : next.splitPos,
       };
-      if (selectedPageId && synced.target.base === "current") {
+      const geomChanged = (
+        synced.cropBox.x1 !== prev.cropBox.x1 ||
+        synced.cropBox.y1 !== prev.cropBox.y1 ||
+        synced.cropBox.x2 !== prev.cropBox.x2 ||
+        synced.cropBox.y2 !== prev.cropBox.y2 ||
+        synced.splitPos !== prev.splitPos ||
+        synced.splitLines.length !== prev.splitLines.length
+      );
+      if (selectedPageId && (synced.target.base === "current" || geomChanged || pageCropsRef.current[selectedPageId])) {
         setPageCrops((existing) => ({
           ...existing,
           [selectedPageId]: {
@@ -172,6 +188,35 @@ export function useBookModules({
     });
   }, [selectedPageId]);
 
+  const setBatchPageCrops = useCallback((
+    cropsMap: Record<string, { crop_box: CropBox; split_pos: number }>,
+    seedCutLine: boolean = false
+  ) => {
+    setPageCrops((prev) => {
+      const next = { ...prev };
+      for (const [pid, item] of Object.entries(cropsMap)) {
+        const prevLines = prev[pid]?.splitLines ?? [];
+        next[pid] = {
+          cropBox: item.crop_box,
+          splitPos: item.split_pos,
+          splitLines: seedCutLine && prevLines.length === 0
+            ? [{ pos: item.split_pos, direction: "vertical" }]
+            : prevLines,
+        };
+      }
+      return next;
+    });
+    if (selectedPageId && cropsMap[selectedPageId]) {
+      const activeItem = cropsMap[selectedPageId];
+      setCropModule((prev) => ({
+        ...prev,
+        enabled: true,
+        cropBox: activeItem.crop_box,
+        splitPos: activeItem.split_pos,
+      }));
+    }
+  }, [selectedPageId]);
+
   const [deskewModule, setDeskewModule] = useState<DeskewModuleConfig>({
     enabled: false,
     mode: "auto",
@@ -181,6 +226,7 @@ export function useBookModules({
     showGrid: false,
     gridColor: "#06b6d4",
     scope: { mode: "all", customRange: "" },
+    appliedEntries: [],
   });
 
   const [bleedModule, setBleedModule] = useState<BleedModuleConfig>({
@@ -195,19 +241,33 @@ export function useBookModules({
     appliedBleeds: [],
   });
 
+  const [cleanupModule, setCleanupModule] = useState<CleanupModuleConfig>({
+    enabled: false,
+    maskScopeMode: "current",
+    maskCustomRange: "",
+    maskColor: "#ffffff",
+    flattenIllumination: false,
+    despeckleLevel: 0,
+    scope: { mode: "current", customRange: "" },
+    appliedEntries: [],
+  });
+
+  const [cleanupActionProgress, setCleanupActionProgress] = useState<ModuleTaskProgress>(IDLE_PROGRESS);
+
   const [restorationModule, setRestorationModule] = useState<RestorationModuleConfig>({
     enabled: false,
-    cleanBorders: true,
+    cleanBorders: false,
     borderMarginPx: 15,
     borderThreshold: 210,
     enhanceColors: true,
     saturation: 1.30,
     contrast: 1.10,
-    colorMode: "color",
+    colorMode: "auto",
     bwThreshold: 180,
     whitenBg: false,
     sharpen: true,
     scope: { mode: "all", customRange: "" },
+    appliedEntries: [],
   });
 
   // Responsive slider controls (50ms for live dragging preview)
@@ -233,9 +293,10 @@ export function useBookModules({
     deskew: false,
     sharpen: restorationModule.sharpen,
     deskewModule,
+    cleanupModule,
     bleedModule,
     restorationModule,
-  }), [bleedModule, restorationModule, deskewModule]);
+  }), [bleedModule, restorationModule, deskewModule, cleanupModule]);
 
   const clearPageCrops = useCallback((ids?: string[]) => {
     if (!ids) {
@@ -257,6 +318,8 @@ export function useBookModules({
       cropBox: { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 },
       splitPos: 0.50,
       target: { base: "all", customRange: "", parity: "both" },
+      detectMode: "paper",
+      appliedEntries: [],
     });
     setPageCrops({});
     setDeskewModule({
@@ -268,6 +331,7 @@ export function useBookModules({
       showGrid: false,
       gridColor: "#06b6d4",
       scope: { mode: "all", customRange: "" },
+      appliedEntries: [],
     });
     setBleedModule({
       enabled: false,
@@ -280,19 +344,30 @@ export function useBookModules({
       scope: { mode: "all", customRange: "" },
       appliedBleeds: [],
     });
+    setCleanupModule({
+      enabled: false,
+      maskScopeMode: "current",
+      maskCustomRange: "",
+      maskColor: "#ffffff",
+      flattenIllumination: false,
+      despeckleLevel: 0,
+      scope: { mode: "current", customRange: "" },
+      appliedEntries: [],
+    });
     setRestorationModule({
       enabled: false,
-      cleanBorders: true,
+      cleanBorders: false,
       borderMarginPx: 15,
       borderThreshold: 210,
       enhanceColors: true,
       saturation: 1.30,
       contrast: 1.10,
-      colorMode: "color",
+      colorMode: "auto",
       bwThreshold: 180,
       whitenBg: false,
       sharpen: true,
       scope: { mode: "all", customRange: "" },
+      appliedEntries: [],
     });
     setExportError(null);
   }, []);
@@ -340,11 +415,24 @@ export function useBookModules({
     return { pages: nextPages, newIds, newSelectedId: data.new_selected_id ?? null };
   }, [sessionId, cropModule.cropBox, selectedPageId]);
 
+  const formatCropScopeLabel = useCallback(() => {
+    const t = cropModule.target;
+    if (t.base === "current") return "Current";
+    if (t.base === "range") return t.customRange?.trim() ? `Pages ${t.customRange.trim()}` : "Range";
+    if (t.parity === "odds") return "Odds";
+    if (t.parity === "evens") return "Evens";
+    return "All";
+  }, [cropModule.target]);
+
   // Cut along the configured cut lines across the crop target (empty = plain crop)
   const splitSpread = useCallback(async () => {
     if (!sessionId || !selectedPageId) return;
     const { vertical, horizontal } = groupSplitLines(cropModule.splitLines);
     if (vertical.length === 0 && horizontal.length === 0) return;
+    const prevSnapshot: BookStudioPage[] = JSON.parse(JSON.stringify(pages));
+    const cutCount = vertical.length + horizontal.length;
+    const scopeLbl = formatCropScopeLabel();
+    setCropActionProgress({ active: true, progress: 25, label: "Splitting pages..." });
     try {
       const resolved = resolveCropTarget(pages, selectedPageId, cropModule.target);
       let applyToAll = resolved.applyToAll;
@@ -355,6 +443,7 @@ export function useBookModules({
       let newSelectedId: string | null = null;
       // Phase 1: vertical cuts
       if (vertical.length > 0) {
+        setCropActionProgress({ active: true, progress: 45, label: "Applying vertical cuts..." });
         const phase = await runSplitPhase(current, vertical, "vertical", parentIds, applyToAll, targetPageIds);
         if (!phase) return;
         current = phase.pages;
@@ -374,6 +463,7 @@ export function useBookModules({
       }
       // Phase 2 (or single pass): horizontal cuts
       if (horizontal.length > 0) {
+        setCropActionProgress({ active: true, progress: 75, label: "Applying horizontal cuts..." });
         const phase = await runSplitPhase(current, horizontal, "horizontal", parentIds, applyToAll, targetPageIds);
         if (!phase) return;
         current = phase.pages;
@@ -391,18 +481,31 @@ export function useBookModules({
         ...prev,
         cropBox: { ...FULL_BED },
         splitLines: [],
+        appliedEntries: [
+          ...(prev.appliedEntries || []),
+          {
+            id: `split_${Date.now()}`,
+            label: `Split (${cutCount} cut${cutCount > 1 ? "s" : ""})`,
+            scopeLabel: scopeLbl,
+            prevPagesSnapshot: prevSnapshot,
+          },
+        ],
       }));
+      setCropActionProgress({ active: true, progress: 100, label: "Split complete" });
       recordStep?.("Split Sheet", current, newSelectedId ?? selectedPageId);
     } catch (err) {
       console.error("Split spread failed:", err);
+    } finally {
+      setTimeout(() => setCropActionProgress(IDLE_PROGRESS), 250);
     }
-  }, [sessionId, selectedPageId, cropModule, pages, setPages, setSelectedPageId, updateCropModule, runSplitPhase, clearPageCrops, recordStep]);
+  }, [sessionId, selectedPageId, cropModule, pages, setPages, setSelectedPageId, updateCropModule, runSplitPhase, clearPageCrops, recordStep, formatCropScopeLabel]);
 
   // Recombine split slices back into the uncut spread
   const revertSpread = useCallback(async (mode: "current" | "all" = "current", pageId?: string) => {
     const targetId = pageId || selectedPageId;
     if (!sessionId) return;
     if (mode === "current" && !targetId) return;
+    setCropActionProgress({ active: true, progress: 40, label: "Reverting split..." });
     try {
       const res = await apiFetch(`/api/book-scan/revert-spread/${sessionId}`, {
         method: "POST",
@@ -424,17 +527,38 @@ export function useBookModules({
         if (data.new_selected_id) {
           setSelectedPageId(data.new_selected_id);
         }
+        setCropActionProgress({ active: true, progress: 100, label: "Revert complete" });
       }
     } catch (err) {
       console.error("Revert spread failed:", err);
+    } finally {
+      setTimeout(() => setCropActionProgress(IDLE_PROGRESS), 250);
     }
   }, [sessionId, selectedPageId, setPages, setSelectedPageId, updateCropModule, clearPageCrops]);
 
   // Commit the crop box across the crop target (final: overlay resets to full bed)
   const applyCrop = useCallback(async () => {
     if (!sessionId || !selectedPageId) return;
+    const prevSnapshot: BookStudioPage[] = JSON.parse(JSON.stringify(pages));
+    const scopeLbl = formatCropScopeLabel();
+    const modeLabel = (cropModule.detectMode || "paper") === "content" ? "Content" : "Paper";
+    const resolved = resolveCropTarget(pages, selectedPageId, cropModule.target);
+    const targetIdSet = resolved.applyToAll
+      ? new Set(pages.map((p) => p.id))
+      : new Set(resolved.ids ?? [selectedPageId]);
+    setCropActionProgress({
+      active: true,
+      progress: 45,
+      label: `Applying crop to ${targetIdSet.size} page${targetIdSet.size === 1 ? "" : "s"}...`,
+    });
     try {
-      const resolved = resolveCropTarget(pages, selectedPageId, cropModule.target);
+      const perPageCropsPayload: Record<string, CropBox> = {};
+      for (const [pid, draft] of Object.entries(pageCropsRef.current)) {
+        if (targetIdSet.has(pid)) {
+          perPageCropsPayload[pid] = draft.cropBox;
+        }
+      }
+
       const res = await apiFetch(`/api/book-scan/crop-page/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -443,6 +567,7 @@ export function useBookModules({
           crop_box: cropModule.cropBox,
           apply_to_all: resolved.applyToAll,
           target_page_ids: resolved.ids,
+          per_page_crops: Object.keys(perPageCropsPayload).length > 0 ? perPageCropsPayload : undefined,
         }),
       });
       if (res.ok) {
@@ -461,13 +586,57 @@ export function useBookModules({
           ...prev,
           cropBox: { ...FULL_BED },
           splitLines: [],
+          appliedEntries: [
+            ...(prev.appliedEntries || []),
+            {
+              id: `crop_${Date.now()}`,
+              label: `Crop (${modeLabel})`,
+              scopeLabel: scopeLbl,
+              prevPagesSnapshot: prevSnapshot,
+            },
+          ],
         }));
+        setCropActionProgress({ active: true, progress: 100, label: `Cropped ${targetIdSet.size} page${targetIdSet.size === 1 ? "" : "s"}` });
         recordStep?.("Crop Page", data.pages, selectedPageId);
       }
     } catch (err) {
       console.error("Apply crop failed:", err);
+    } finally {
+      setTimeout(() => setCropActionProgress(IDLE_PROGRESS), 250);
     }
-  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.target, pages, setPages, updateCropModule, clearPageCrops, recordStep]);
+  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.target, cropModule.detectMode, pages, setPages, updateCropModule, clearPageCrops, recordStep, formatCropScopeLabel]);
+
+  // Reverse an applied crop/split entry by restoring its saved page snapshot
+  const removeAppliedCrop = useCallback(async (entryId: string) => {
+    const entry = (cropModule.appliedEntries || []).find((e) => e.id === entryId);
+    setCropModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).filter((e) => e.id !== entryId),
+    }));
+    if (!entry?.prevPagesSnapshot || !sessionId) return;
+    const snapshot = entry.prevPagesSnapshot.map((p) => ({
+      ...p,
+      rev: (p.rev ?? 0) + 1,
+    }));
+    setPages(snapshot);
+    clearPageCrops();
+    try {
+      const res = await apiFetch(`/api/book-scan/restore-pages/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pages: snapshot }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.("Undo Crop", data.pages, selectedPageId);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to reverse applied crop:", err);
+    }
+  }, [cropModule.appliedEntries, sessionId, setPages, clearPageCrops, recordStep, selectedPageId]);
 
   const dismissExportProgress = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -478,11 +647,242 @@ export function useBookModules({
     setIsExporting(false);
   }, []);
 
-  // Export print-ready PDF with real-time job progress tracking
-  const exportPdf = useCallback(async (intakeMode: BookIntakeMode = "single_page") => {
+  // Add a spot mask box across the unified cleanupModule.scope (Current, All, Odds, Evens, Range)
+  const applyMaskBox = useCallback(async (box: CropBox, selectedPageIds: string[] = []) => {
+    if (!sessionId || !selectedPageId) return;
+    const scopeMode = cleanupModule.scope?.mode || "current";
+    const scopeRange = cleanupModule.scope?.customRange || "";
+    const { ids: targetIds, label: targetLabel } = resolveMaskTargetIds(
+      pages,
+      selectedPageId,
+      selectedPageIds,
+      scopeMode,
+      scopeRange
+    );
+    if (targetIds.length === 0) return;
+
+    const maskBox: MaskBox = {
+      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+      x1: Math.round(box.x1 * 10000) / 10000,
+      y1: Math.round(box.y1 * 10000) / 10000,
+      x2: Math.round(box.x2 * 10000) / 10000,
+      y2: Math.round(box.y2 * 10000) / 10000,
+      color: cleanupModule.maskColor || "#ffffff",
+    };
+
+    // Optimistic 0ms update so the erase box appears immediately on canvas
+    const targetIdSet = new Set(targetIds);
+    setPages((prev) =>
+      prev.map((p) =>
+        targetIdSet.has(p.id)
+          ? { ...p, masks: [...(p.masks || []), maskBox], rev: (p.rev ?? 0) + 1 }
+          : p
+      )
+    );
+
+    setCleanupActionProgress({
+      active: true,
+      progress: 45,
+      label: `Applying erase box (${targetLabel})...`,
+    });
+
+    try {
+      const res = await apiFetch(`/api/book-scan/mask-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add",
+          page_id: selectedPageId,
+          mask: maskBox,
+          mask_box: maskBox,
+          target_page_ids: targetIds,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.(`Erase Box (${targetLabel})`, data.pages, selectedPageId);
+        }
+        setCleanupActionProgress({
+          active: true,
+          progress: 100,
+          label: `Added box (${targetIds.length}p)`,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to apply mask box:", err);
+    } finally {
+      setTimeout(() => setCleanupActionProgress(IDLE_PROGRESS), 250);
+    }
+  }, [sessionId, selectedPageId, pages, cleanupModule.scope, cleanupModule.maskColor, setPages, recordStep]);
+
+  // Remove a single mask box by its ID (across all pages where that shared mask ID exists)
+  const removeMaskBox = useCallback(async (maskId: string) => {
+    if (!sessionId) return;
+    // Optimistic immediate removal
+    setPages((prev) =>
+      prev.map((p) => {
+        if (!p.masks || !p.masks.some((m) => m.id === maskId)) return p;
+        return {
+          ...p,
+          masks: p.masks.filter((m) => m.id !== maskId),
+          rev: (p.rev ?? 0) + 1,
+        };
+      })
+    );
+    setCleanupActionProgress({ active: true, progress: 50, label: "Removing box..." });
+    try {
+      const res = await apiFetch(`/api/book-scan/mask-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove",
+          mask_id: maskId,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.("Remove Erase Box", data.pages, selectedPageId);
+        }
+        setCleanupActionProgress({ active: true, progress: 100, label: "Box removed" });
+      }
+    } catch (err) {
+      console.error("Failed to remove mask:", err);
+    } finally {
+      setTimeout(() => setCleanupActionProgress(IDLE_PROGRESS), 200);
+    }
+  }, [sessionId, selectedPageId, setPages, recordStep]);
+
+  // Clear all masks on the current page (or explicit page IDs)
+  const clearPageMasks = useCallback(async (targetIds?: string[]) => {
+    if (!sessionId) return;
+    const ids = targetIds && targetIds.length > 0 ? targetIds : (selectedPageId ? [selectedPageId] : []);
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    setPages((prev) =>
+      prev.map((p) =>
+        idSet.has(p.id) ? { ...p, masks: [], rev: (p.rev ?? 0) + 1 } : p
+      )
+    );
+    setCleanupActionProgress({ active: true, progress: 50, label: "Clearing page boxes..." });
+    try {
+      const res = await apiFetch(`/api/book-scan/mask-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "clear_page",
+          page_id: selectedPageId ?? undefined,
+          target_page_ids: ids,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.("Clear Page Boxes", data.pages, selectedPageId);
+        }
+        setCleanupActionProgress({ active: true, progress: 100, label: "Cleared page boxes" });
+      }
+    } catch (err) {
+      console.error("Failed to clear page masks:", err);
+    } finally {
+      setTimeout(() => setCleanupActionProgress(IDLE_PROGRESS), 200);
+    }
+  }, [sessionId, selectedPageId, setPages, recordStep]);
+
+  // Clear every spot mask across the entire book
+  const clearAllMasks = useCallback(async () => {
+    if (!sessionId) return;
+    setPages((prev) =>
+      prev.map((p) => (p.masks && p.masks.length > 0 ? { ...p, masks: [], rev: (p.rev ?? 0) + 1 } : p))
+    );
+    setCleanupActionProgress({ active: true, progress: 50, label: "Clearing all boxes..." });
+    try {
+      const res = await apiFetch(`/api/book-scan/mask-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_all" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.("Clear All Boxes", data.pages, selectedPageId);
+        }
+        setCleanupActionProgress({ active: true, progress: 100, label: "All boxes cleared" });
+      }
+    } catch (err) {
+      console.error("Failed to clear all masks:", err);
+    } finally {
+      setTimeout(() => setCleanupActionProgress(IDLE_PROGRESS), 250);
+    }
+  }, [sessionId, selectedPageId, setPages, recordStep]);
+
+  // Set or clear per-page color mode override ("auto" | "color" | "grayscale" | "bw" | null)
+  const setPageColorMode = useCallback(async (
+    colorMode: CleanupColorMode | null,
+    targetIds?: string[],
+    clearAll: boolean = false
+  ) => {
+    if (!sessionId) return;
+    const ids = targetIds && targetIds.length > 0 ? targetIds : (selectedPageId ? [selectedPageId] : []);
+    if (!clearAll && ids.length === 0) return;
+
+    // Optimistic update
+    const idSet = new Set(ids);
+    setPages((prev) =>
+      prev.map((p) => {
+        if (clearAll) {
+          if (!p.color_mode) return p;
+          const next = { ...p, rev: (p.rev ?? 0) + 1 };
+          delete next.color_mode;
+          return next;
+        }
+        if (idSet.has(p.id)) {
+          const next = { ...p, rev: (p.rev ?? 0) + 1 };
+          if (colorMode) next.color_mode = colorMode;
+          else delete next.color_mode;
+          return next;
+        }
+        return p;
+      })
+    );
+    if (colorMode) {
+      setRestorationModule((prev) => ({ ...prev, enabled: true }));
+    }
+
+    try {
+      await apiFetch(`/api/book-scan/color-mode-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_id: selectedPageId ?? undefined,
+          color_mode: colorMode ?? "",
+          target_page_ids: clearAll ? undefined : ids,
+          clear_all: clearAll,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to persist per-page color mode:", err);
+    }
+  }, [sessionId, selectedPageId, setPages]);
+
+  // Export print-ready PDF or multi-format ZIP archive with real-time job progress tracking
+  const exportPdf = useCallback(async (
+    intakeMode: BookIntakeMode = "single_page",
+    options?: ExportOptions
+  ) => {
     if (!sessionId) return;
     setIsExporting(true);
     setExportError(null);
+
+    const exportFormat = options?.format || "pdf";
+    const exportDpi = options?.dpi || bleedModule.exportDpi || 200;
+    const exportQuality = options?.quality ?? 88;
+    const tiffCompression = options?.tiffCompression || "lzw";
 
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -501,14 +901,41 @@ export function useBookModules({
       error: null,
     });
 
+    // Collect any per-page uncommitted draft crops, deskew angles, and color modes so export never overrides user edits
+    const draftCropsMap: Record<string, CropBox> = {};
+    for (const [pid, draft] of Object.entries(pageCropsRef.current)) {
+      draftCropsMap[pid] = draft.cropBox;
+    }
+    const perPageAnglesMap: Record<string, number> = {};
+    const perPageColorsMap: Record<string, string> = {};
+    for (const p of pages) {
+      if (p.deskew_angle !== undefined && p.deskew_angle !== null) {
+        perPageAnglesMap[p.id] = Number(p.deskew_angle);
+      }
+      if (p.color_mode) {
+        perPageColorsMap[p.id] = p.color_mode;
+      }
+    }
+
+    const activeIdx = selectedPageId ? pages.findIndex((p) => p.id === selectedPageId) : -1;
+    const activePageNum = activeIdx >= 0 ? activeIdx + 1 : 1;
+    const resolveExportScope = (sc: { mode: string; customRange: string }) => {
+      if (sc.mode === "current") {
+        return { mode: "range", customRange: String(activePageNum) };
+      }
+      return sc;
+    };
+
     const exportPayload = {
+      export_format: exportFormat,
+      tiff_compression: tiffCompression,
       bleed_mm: bleedModule.bleedMm,
       bleed_mode: bleedModule.mode,
       bleed_color: bleedModule.solidColor,
       bleed_placement: bleedModule.placement,
       show_crop_marks: bleedModule.showCropMarks,
-      dpi: bleedModule.exportDpi,
-      quality: 88,
+      dpi: exportDpi,
+      quality: exportQuality,
       optimize_compression: true,
       clean_borders: restorationModule.cleanBorders,
       border_margin_px: restorationModule.borderMarginPx,
@@ -528,16 +955,25 @@ export function useBookModules({
       deskew_angle: deskewModule.angle,
       deskew_max_angle: deskewModule.maxAngle,
       deskew_ignore_borders: deskewModule.ignoreBorders,
-      deskew_scope_mode: deskewModule.scope.mode,
-      deskew_custom_range: deskewModule.scope.customRange,
+      deskew_scope_mode: resolveExportScope(deskewModule.scope).mode,
+      deskew_custom_range: resolveExportScope(deskewModule.scope).customRange,
+      per_page_deskew_angles: Object.keys(perPageAnglesMap).length > 0 ? perPageAnglesMap : undefined,
+      per_page_crops: cropModule.enabled && Object.keys(draftCropsMap).length > 0 ? draftCropsMap : undefined,
+      per_page_color_modes: Object.keys(perPageColorsMap).length > 0 ? perPageColorsMap : undefined,
+
+      cleanup_module_enabled: cleanupModule.enabled,
+      flatten_illumination: cleanupModule.flattenIllumination,
+      despeckle_level: cleanupModule.despeckleLevel,
+      cleanup_scope_mode: resolveExportScope(cleanupModule.scope).mode,
+      cleanup_custom_range: resolveExportScope(cleanupModule.scope).customRange,
 
       bleed_module_enabled: bleedModule.enabled,
-      bleed_scope_mode: bleedModule.scope.mode,
-      bleed_custom_range: bleedModule.scope.customRange,
+      bleed_scope_mode: resolveExportScope(bleedModule.scope).mode,
+      bleed_custom_range: resolveExportScope(bleedModule.scope).customRange,
 
       restoration_module_enabled: restorationModule.enabled,
-      restoration_scope_mode: restorationModule.scope.mode,
-      restoration_custom_range: restorationModule.scope.customRange,
+      restoration_scope_mode: resolveExportScope(restorationModule.scope).mode,
+      restoration_custom_range: resolveExportScope(restorationModule.scope).customRange,
     };
 
     try {
@@ -589,8 +1025,10 @@ export function useBookModules({
             }
             setIsExporting(false);
 
-            // Automatically trigger download
-            const targetFilename = `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
+            const isArchive = exportFormat !== "pdf";
+            const targetFilename = isArchive
+              ? `book_${intakeMode}_${exportFormat}_${exportDpi}dpi.zip`
+              : `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
             const downloadUrl = data.download_url || `/api/book-scan/export-download/${job_id}`;
             downloadBlob(downloadUrl, targetFilename).catch((e) => {
               console.error("Auto download failed:", e);
@@ -618,13 +1056,16 @@ export function useBookModules({
       }));
       setIsExporting(false);
     }
-  }, [sessionId, pages.length, bleedModule, restorationModule, deskewModule]);
+  }, [sessionId, pages, selectedPageId, cropModule.enabled, bleedModule, cleanupModule, restorationModule, deskewModule]);
 
   return {
+    pageCrops,
+    setBatchPageCrops,
     clearPageCrops,
     previewCleaned, setPreviewCleaned,
     cropModule, setCropModule: updateCropModule,
     deskewModule, setDeskewModule,
+    cleanupModule, setCleanupModule,
     bleedModule, setBleedModule,
     restorationModule, setRestorationModule,
     debouncedBleed,
@@ -639,6 +1080,14 @@ export function useBookModules({
     splitSpread,
     revertSpread,
     applyCrop,
+    removeAppliedCrop,
+    applyMaskBox,
+    removeMaskBox,
+    clearPageMasks,
+    clearAllMasks,
+    setPageColorMode,
+    cropActionProgress,
+    cleanupActionProgress,
     isExporting,
     exportError,
     setExportError,

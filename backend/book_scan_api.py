@@ -8,6 +8,8 @@ from engines.book_scan_engine import BookScanEngine, PageOpError
 from engines.schemas import (
     SessionInitResponse, ReorderRequest, PageRotateRequest, ProcessPageRequest,
     CropBoxModel, SplitSpreadRequest, RevertSpreadRequest, CropPageRequest,
+    BatchDetectCropRequest, BatchDetectAngleRequest, PageDeskewRequest,
+    MaskPageRequest, PageColorModeRequest,
     ExportRequest, DuplicatePageRequest, InsertBlankPageRequest, RestorePagesRequest,
 )
 
@@ -44,15 +46,17 @@ def cleanup_session_dir(session_dir: str):
 
 @router.post("/init-session")
 async def init_book_scan_session(
-    mode: str = Form("single"),         # 'single' or 'dual'
+    mode: str = Form("single"),         # 'single', 'dual', or 'multi_merge'
     is_spread: bool = Form(False),     # False by default (treat as-is)
     odds_order: str = Form("forward"), # 'forward' or 'reverse'
     evens_order: str = Form("reverse"),# 'reverse' or 'forward'
     spread_split_pos: float = Form(0.5),
+    start_with: str = Form("odds"),    # 'odds' or 'evens'
     file_odds: Optional[UploadFile] = File(None),
     file_evens: Optional[UploadFile] = File(None),
     file_single: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
+    reverse_file_indices: Optional[str] = Form(None),
     existing_file_path: Optional[str] = Form(None),
 ):
     session_id = str(uuid.uuid4())
@@ -63,33 +67,13 @@ async def init_book_scan_session(
     evens_path = None
     single_path = None
 
-    if files and len(files) > 0:
-        saved_paths = []
-        for idx, upload in enumerate(files):
-            clean_name = f"{idx}_{upload.filename}"
-            save_path = os.path.join(session_dir, clean_name)
-            with open(save_path, "wb") as f:
-                shutil.copyfileobj(upload.file, f)
-            saved_paths.append(save_path)
-
-        combined_pdf_path = os.path.join(session_dir, "combined_book.pdf")
-        if BookScanEngine.combine_files_to_pdf(saved_paths, combined_pdf_path):
-            single_path = combined_pdf_path
-        elif len(saved_paths) == 1 and saved_paths[0].lower().endswith(".pdf"):
-            single_path = saved_paths[0]
-        else:
-            raise HTTPException(status_code=500, detail="Failed to combine uploaded files into document.")
-
-        pages = BookScanEngine.collate_from_paths(
-            single_path=single_path,
-            is_spread=is_spread,
-            odds_order=odds_order,
-            evens_order=evens_order,
-            spread_split_pos=spread_split_pos,
-        )
-    elif mode == "dual":
+    if mode == "dual":
         if not file_odds or not file_evens:
-            raise HTTPException(status_code=400, detail="Both Odds and Evens PDF files are required in dual mode.")
+            if files and len(files) >= 2:
+                file_odds = files[0]
+                file_evens = files[1]
+            else:
+                raise HTTPException(status_code=400, detail="Both Odds and Evens PDF files are required in dual mode.")
         odds_path = os.path.join(session_dir, f"odds_{file_odds.filename}")
         evens_path = os.path.join(session_dir, f"evens_{file_evens.filename}")
         with open(odds_path, "wb") as f:
@@ -104,10 +88,47 @@ async def init_book_scan_session(
             odds_order=odds_order,
             evens_order=evens_order,
             spread_split_pos=spread_split_pos,
+            start_with=start_with,
+        )
+    elif mode == "multi_merge" or (files and len(files) > 1):
+        if not files or len(files) == 0:
+            raise HTTPException(status_code=400, detail="Please upload at least one file to merge.")
+        saved_paths = []
+        for idx, upload in enumerate(files):
+            clean_name = f"{idx}_{upload.filename}"
+            save_path = os.path.join(session_dir, clean_name)
+            with open(save_path, "wb") as f:
+                shutil.copyfileobj(upload.file, f)
+            saved_paths.append(save_path)
+
+        rev_indices_set = set()
+        if reverse_file_indices:
+            for token in reverse_file_indices.split(","):
+                token = token.strip()
+                if token.isdigit():
+                    rev_indices_set.add(int(token))
+
+        combined_pdf_path = os.path.join(session_dir, "combined_book.pdf")
+        if BookScanEngine.combine_files_to_pdf(saved_paths, combined_pdf_path, reverse_indices=rev_indices_set):
+            single_path = combined_pdf_path
+        elif len(saved_paths) == 1 and saved_paths[0].lower().endswith(".pdf"):
+            single_path = saved_paths[0]
+        else:
+            raise HTTPException(status_code=500, detail="Failed to combine uploaded files into document.")
+
+        pages = BookScanEngine.collate_from_paths(
+            single_path=single_path,
+            is_spread=is_spread,
+            odds_order=odds_order,
+            evens_order=evens_order,
+            spread_split_pos=spread_split_pos,
         )
     else:
         if not file_single and not existing_file_path:
-            raise HTTPException(status_code=400, detail="Please upload at least one file.")
+            if files and len(files) == 1:
+                file_single = files[0]
+            else:
+                raise HTTPException(status_code=400, detail="Please upload at least one file.")
         if file_single:
             single_path = os.path.join(session_dir, f"single_{file_single.filename}")
             with open(single_path, "wb") as f:
@@ -136,6 +157,7 @@ async def init_book_scan_session(
         "is_spread": is_spread,
         "odds_order": odds_order,
         "evens_order": evens_order,
+        "start_with": start_with,
         "spread_split_pos": spread_split_pos,
         "odds_path": odds_path,
         "evens_path": evens_path,
@@ -157,7 +179,7 @@ async def get_page_thumbnail(
     session_id: str,
     page_id: str,
     preview_clean: bool = False,
-    clean_borders: bool = True,
+    clean_borders: bool = False,
     border_margin_px: int = 15,
     border_threshold: int = 210,
     enhance_colors: bool = True,
@@ -178,6 +200,8 @@ async def get_page_thumbnail(
     bleed_color: str = "#ffffff",
     bleed_placement: str = "outside",
     show_crop_marks: bool = False,
+    flatten_illumination: bool = False,
+    despeckle_level: int = 0,
     rev: int = 0,
 ):
     session = SESSIONS.get(session_id)
@@ -194,7 +218,13 @@ async def get_page_thumbnail(
     rot = page_info.get("rotation", 0)
     half = page_info.get("half", "full")
     sp = int(page_info.get("spread_split_pos", page_info.get("split_pos", 0.5)) * 1000)
-    cache_tag = f"thumb_{page_id}_{half}_{sp}_{rot}_{preview_clean}_{dpi}_r{rev}"
+    masks_list = (page_info.get("masks") or []) if preview_clean else []
+    eff_color_mode = (page_info.get("color_mode") if preview_clean else None) or color_mode
+    mask_sig = "_".join(
+        f"{m.get('id','')}:{int(float(m.get('x1',0))*100)}-{int(float(m.get('y1',0))*100)}-{str(m.get('color') or m.get('fill') or 'ffffff').lstrip('#')}"
+        for m in masks_list
+    )
+    cache_tag = f"thumb_{page_id}_{half}_{sp}_{rot}_{preview_clean}_{dpi}_r{rev}_m{len(masks_list)}_{mask_sig}"
     cb = page_info.get("crop_box")
     if cb:
         cache_tag += f"_cb_{int(cb.get('x1', 0)*1000)}_{int(cb.get('y1', 0)*1000)}_{int(cb.get('x2', 1)*1000)}_{int(cb.get('y2', 1)*1000)}"
@@ -203,14 +233,27 @@ async def get_page_thumbnail(
         cache_tag += f"_scb_{int(scb.get('x1', 0)*1000)}_{int(scb.get('y1', 0)*1000)}_{int(scb.get('x2', 1)*1000)}_{int(scb.get('y2', 1)*1000)}"
     pcb = page_info.get("page_crop_box")
     if pcb:
-        cache_tag += f"_pcb_{int(pcb.get('x1', 0)*1000)}_{int(pcb.get('y1', 0)*1000)}_{int(pcb.get('x2', 1)*1000)}_{int(pcb.get('y2', 1)*1000)}"
+        cache_tag += f"_pcb_{int(pcb.get('x1', 0)*1000)}_{int(pcb.get('y1', 0)*1000)}_{int(pcb.get('get_x2', pcb.get('x2', 1))*1000)}_{int(pcb.get('y2', 1)*1000)}"
     sb = page_info.get("slice_box")
     if sb:
         cache_tag += f"_sb_{int(sb.get('x1', 0)*1000)}_{int(sb.get('y1', 0)*1000)}_{int(sb.get('x2', 1)*1000)}_{int(sb.get('y2', 1)*1000)}"
-    if preview_clean:
-        cache_tag += f"_{border_margin_px}_{int(saturation*100)}_{int(contrast*100)}_{color_mode}_{bw_threshold}_{int(whiten_bg)}_{int(deskew)}"
-        if deskew_module_enabled:
-            cache_tag += f"_dm_{deskew_mode}_{int(deskew_angle*10)}_{int(deskew_max_angle)}_{int(deskew_ignore_borders)}"
+
+    has_active_processing = (
+        clean_borders
+        or enhance_colors
+        or whiten_bg
+        or deskew
+        or deskew_module_enabled
+        or (page_info.get("deskew_angle") is not None)
+        or len(masks_list) > 0
+        or flatten_illumination
+        or despeckle_level > 0
+    )
+    if preview_clean and has_active_processing:
+        cache_tag += f"_{int(clean_borders)}_{border_margin_px}_{int(enhance_colors)}_{int(saturation*100)}_{int(contrast*100)}_{eff_color_mode}_{bw_threshold}_{int(whiten_bg)}_{int(deskew)}_fi{int(flatten_illumination)}_ds{despeckle_level}"
+        if deskew_module_enabled or (page_info.get("deskew_angle") is not None):
+            eff_ang = float(page_info["deskew_angle"]) if page_info.get("deskew_angle") is not None else deskew_angle
+            cache_tag += f"_dm_{deskew_mode}_{int(eff_ang*100)}_{int(deskew_max_angle)}_{int(deskew_ignore_borders)}"
     if bleed_mm > 0:
         clean_hex = (bleed_color or "#ffffff").lstrip("#")
         cache_tag += f"_bl_{int(bleed_mm*100)}_{bleed_mode}_{clean_hex}_{int(show_crop_marks)}_{bleed_placement}"
@@ -223,7 +266,12 @@ async def get_page_thumbnail(
 
     try:
         raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=dpi)
-        if preview_clean:
+        if preview_clean and has_active_processing:
+            eff_deskew_mode = deskew_mode
+            eff_deskew_angle = deskew_angle
+            if page_info.get("deskew_angle") is not None:
+                eff_deskew_mode = "manual"
+                eff_deskew_angle = float(page_info["deskew_angle"])
             proc_img = BookScanEngine.process_single_page(
                 raw_img,
                 clean_borders=clean_borders,
@@ -232,16 +280,19 @@ async def get_page_thumbnail(
                 enhance_colors=enhance_colors,
                 saturation=saturation,
                 contrast=contrast,
-                color_mode=color_mode,
+                color_mode=eff_color_mode if enhance_colors else "original",
                 bw_threshold=bw_threshold,
                 whiten_bg=whiten_bg,
                 deskew=deskew,
-                sharpen=True,
-                deskew_module_enabled=deskew_module_enabled,
-                deskew_mode=deskew_mode,
-                deskew_angle=deskew_angle,
+                sharpen=enhance_colors,
+                deskew_module_enabled=deskew_module_enabled or (page_info.get("deskew_angle") is not None),
+                deskew_mode=eff_deskew_mode,
+                deskew_angle=eff_deskew_angle,
                 deskew_max_angle=deskew_max_angle,
                 deskew_ignore_borders=deskew_ignore_borders,
+                masks=masks_list,
+                flatten_illumination=flatten_illumination,
+                despeckle_level=despeckle_level,
             )
         else:
             proc_img = raw_img
@@ -261,6 +312,7 @@ async def get_page_thumbnail(
             )
 
 
+        os.makedirs(session["session_dir"], exist_ok=True)
         if not BookScanEngine.write_thumbnail_jpg(proc_img, thumb_path, quality=80):
             raise HTTPException(status_code=500, detail="Failed to encode thumbnail.")
 
@@ -343,16 +395,104 @@ async def detect_page_angle(
             max_angle=max_angle,
             ignore_borders=ignore_borders
         )
+        page_info["deskew_angle"] = detected_angle
+        page_info["rev"] = int(page_info.get("rev", 0)) + 1
         return {
             "status": "ok",
             "page_id": page_id,
-            "detected_angle": detected_angle
+            "detected_angle": detected_angle,
+            "pages": session["pages"],
         }
     finally:
         BookScanEngine.close_session_docs(doc_map)
 
+@router.post("/detect-angle-batch/{session_id}")
+async def detect_angle_batch(session_id: str, req: BatchDetectAngleRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    target_set = set(req.target_page_ids) if req.target_page_ids else None
+    doc_map = BookScanEngine.open_session_docs(session)
+    angles_map: Dict[str, float] = {}
+
+    try:
+        for p in session["pages"]:
+            pid = p["id"]
+            if target_set is not None and pid not in target_set:
+                continue
+            raw_img = BookScanEngine.extract_page_image(doc_map, p, dpi=100)
+            ang = BookScanEngine.detect_skew_angle(
+                raw_img,
+                max_angle=req.max_angle,
+                ignore_borders=req.ignore_borders,
+            )
+            p["deskew_angle"] = ang
+            p["rev"] = int(p.get("rev", 0)) + 1
+            angles_map[pid] = ang
+
+        return {
+            "status": "ok",
+            "angles": angles_map,
+            "pages": session["pages"],
+        }
+    finally:
+        BookScanEngine.close_session_docs(doc_map)
+
+@router.post("/deskew-page/{session_id}")
+async def set_page_deskew(session_id: str, req: PageDeskewRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    BookScanEngine.apply_deskew_to_pages(
+        session["pages"],
+        page_id=req.page_id,
+        angle=req.angle,
+        per_page_angles=req.per_page_angles,
+        clear_all=req.clear_all,
+    )
+    return {
+        "status": "ok",
+        "pages": session["pages"],
+    }
+
+@router.post("/mask-page/{session_id}")
+async def mask_page(session_id: str, req: MaskPageRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    BookScanEngine.apply_masks_to_pages(session["pages"], req)
+    return {
+        "status": "ok",
+        "pages": session["pages"],
+    }
+
+@router.post("/color-mode-page/{session_id}")
+async def set_page_color_mode(session_id: str, req: PageColorModeRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    BookScanEngine.apply_color_mode_to_pages(
+        session["pages"],
+        page_id=req.page_id,
+        color_mode=req.color_mode,
+        target_page_ids=req.target_page_ids,
+        clear_all=req.clear_all,
+    )
+    return {
+        "status": "ok",
+        "pages": session["pages"],
+    }
+
 @router.post("/detect-crop/{session_id}/{page_id}")
-async def detect_page_crop(session_id: str, page_id: str):
+async def detect_page_crop(
+    session_id: str,
+    page_id: str,
+    mode: str = "paper"
+):
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
@@ -368,12 +508,40 @@ async def detect_page_crop(session_id: str, page_id: str):
         # returned box is view-relative, matching canvas overlay coordinates.
         # Apply composes it onto the stored box (compose-on-commit).
         raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=100)
-        res = BookScanEngine.detect_book_crop_and_seam(raw_img)
+        res = BookScanEngine.detect_book_crop_and_seam(raw_img, mode=mode)
         return {
             "status": "ok",
             "page_id": page_id,
             "crop_box": res["crop_box"],
             "split_pos": res["split_pos"]
+        }
+    finally:
+        BookScanEngine.close_session_docs(doc_map)
+
+@router.post("/detect-crop-batch/{session_id}")
+async def detect_crop_batch(session_id: str, req: BatchDetectCropRequest):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    target_set = set(req.target_page_ids) if req.target_page_ids else None
+    doc_map = BookScanEngine.open_session_docs(session)
+    crops_map: Dict[str, Any] = {}
+
+    try:
+        for p in session["pages"]:
+            pid = p["id"]
+            if target_set is not None and pid not in target_set:
+                continue
+            raw_img = BookScanEngine.extract_page_image(doc_map, p, dpi=100)
+            res = BookScanEngine.detect_book_crop_and_seam(raw_img, mode=req.mode)
+            crops_map[pid] = {
+                "crop_box": res["crop_box"],
+                "split_pos": res["split_pos"],
+            }
+        return {
+            "status": "ok",
+            "crops": crops_map,
         }
     finally:
         BookScanEngine.close_session_docs(doc_map)
@@ -450,6 +618,7 @@ async def crop_page(session_id: str, req: CropPageRequest):
         req.crop_box.dict(),
         apply_to_all=req.apply_to_all,
         target_page_ids=req.target_page_ids,
+        per_page_crops=req.per_page_crops,
     )
 
     return {
@@ -503,8 +672,8 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
             doc_map, pages, req, progress_callback=render_progress
         )
 
-        export_filename = f"cleaned_book_{session_id[:8]}.pdf"
-        output_pdf_path = os.path.join(session["session_dir"], export_filename)
+        export_fmt = (getattr(req, "export_format", "pdf") or "pdf").lower()
+        effective_quality = getattr(req, "quality", 88) or 88
 
         def bleed_progress(cur, total, msg):
             pct = 60 + int((cur / max(1, total)) * 38)
@@ -513,34 +682,57 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
             EXPORT_JOBS[job_id]["stage"] = "compiling_pdf"
             EXPORT_JOBS[job_id]["message"] = msg
 
-        effective_quality = getattr(req, "quality", 88) or 88
-        success = BookScanEngine.add_bleed_and_export_pdf(
-            processed_images=processed_images,
-            output_pdf_path=output_pdf_path,
-            bleed_mm=req.bleed_mm,
-            bleed_mode=req.bleed_mode,
-            bleed_color=req.bleed_color,
-            show_crop_marks=req.show_crop_marks,
-            dpi=req.dpi,
-            jpeg_quality=effective_quality,
-            per_page_bleed=per_page_bleed_list,
-            bleed_placement=req.bleed_placement,
-            progress_callback=bleed_progress,
-        )
+        if export_fmt in ["pdf_split", "jpeg", "jpg", "png", "tiff", "tif"]:
+            export_filename = f"cleaned_book_{session_id[:8]}_{export_fmt}.zip"
+            output_file_path = os.path.join(session["session_dir"], export_filename)
+            media_type = "application/zip"
+            success = BookScanEngine.export_pages_archive(
+                processed_images=processed_images,
+                output_zip_path=output_file_path,
+                export_format=export_fmt,
+                bleed_mm=req.bleed_mm,
+                bleed_mode=req.bleed_mode,
+                bleed_color=req.bleed_color,
+                show_crop_marks=req.show_crop_marks,
+                dpi=req.dpi,
+                quality=effective_quality,
+                tiff_compression=getattr(req, "tiff_compression", "lzw") or "lzw",
+                per_page_bleed=per_page_bleed_list,
+                bleed_placement=req.bleed_placement,
+                progress_callback=bleed_progress,
+            )
+        else:
+            export_filename = f"cleaned_book_{session_id[:8]}.pdf"
+            output_file_path = os.path.join(session["session_dir"], export_filename)
+            media_type = "application/pdf"
+            success = BookScanEngine.add_bleed_and_export_pdf(
+                processed_images=processed_images,
+                output_pdf_path=output_file_path,
+                bleed_mm=req.bleed_mm,
+                bleed_mode=req.bleed_mode,
+                bleed_color=req.bleed_color,
+                show_crop_marks=req.show_crop_marks,
+                dpi=req.dpi,
+                jpeg_quality=effective_quality,
+                per_page_bleed=per_page_bleed_list,
+                bleed_placement=req.bleed_placement,
+                progress_callback=bleed_progress,
+            )
 
-        if not success or not os.path.exists(output_pdf_path):
+        if not success or not os.path.exists(output_file_path):
             EXPORT_JOBS[job_id]["status"] = "failed"
-            EXPORT_JOBS[job_id]["error"] = "PDF compilation failed."
-            EXPORT_JOBS[job_id]["message"] = "PDF compilation failed."
+            EXPORT_JOBS[job_id]["error"] = "Export compilation failed."
+            EXPORT_JOBS[job_id]["message"] = "Export compilation failed."
             return
 
-        file_size = os.path.getsize(output_pdf_path)
+        file_size = os.path.getsize(output_file_path)
         EXPORT_JOBS[job_id]["status"] = "success"
         EXPORT_JOBS[job_id]["progress"] = 100
         EXPORT_JOBS[job_id]["stage"] = "completed"
         EXPORT_JOBS[job_id]["message"] = f"Export complete ({total_pages} pages)"
-        EXPORT_JOBS[job_id]["output_path"] = output_pdf_path
+        EXPORT_JOBS[job_id]["output_path"] = output_file_path
         EXPORT_JOBS[job_id]["filename"] = export_filename
+        EXPORT_JOBS[job_id]["media_type"] = media_type
         EXPORT_JOBS[job_id]["file_size_bytes"] = file_size
         EXPORT_JOBS[job_id]["download_url"] = f"/api/book-scan/export-download/{job_id}"
     except Exception as e:
@@ -605,7 +797,7 @@ async def download_export_file(job_id: str):
 
     return FileResponse(
         output_path,
-        media_type="application/pdf",
+        media_type=job.get("media_type", "application/pdf"),
         filename=job.get("filename", "exported_book.pdf")
     )
 

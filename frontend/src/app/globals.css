@@ -1,5 +1,3 @@
-
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -110,31 +108,239 @@
   }
 }
 
-/* Dynamic App-Wide Accent Color System */
-:root {
+/* ───────── Flint Unified Design System: Semantic Surface & Accent Tokens ───────── */
+:root,
+html[data-theme="dark"] {
   --app-accent: #f59e0b;
+  --app-accent-fg: #0f172a;
+  --app-accent-text: #f59e0b;
   --app-accent-rgb: 245, 158, 11;
   --app-accent-hover: #d97706;
-  --app-accent-15: rgba(245, 158, 11, 0.15);
-  --app-accent-30: rgba(245, 158, 11, 0.3);
+  --app-accent-15: rgba(245, 158, 11, 0.16);
+  --app-accent-30: rgba(245, 158, 11, 0.32);
   --app-accent-50: rgba(245, 158, 11, 0.5);
   --app-accent-glow: rgba(245, 158, 11, 0.35);
+
+  /* Obsidian Studio (Dark Theme) Semantic Tokens */
+  --surface-app: #0E1117;
+  --surface-panel: #141923;
+  --surface-card: #181D27;
+  --surface-inset: #11151E;
+  --surface-canvas: #090C12;
+  --surface-selected: #1E2638;
+  --border-subtle: #242C3D;
+  --border-strong: #333E54;
+  --text-primary: #F1F5F9;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
 }
 
+html[data-theme="light"] {
+  /* Daylight Studio (Warm Neutral Prepress Light Theme) Semantic Tokens */
+  --surface-app: #E2E6EC;
+  --surface-panel: #F6F7F9;
+  --surface-card: #FFFFFF;
+  --surface-inset: #EAEEF3;
+  --surface-canvas: #D5DBE3;
+  --surface-selected: var(--app-accent-15);
+  --border-subtle: #CBD2DC;
+  --border-strong: #94A0B2;
+  --text-primary: #111827;
+  --text-secondary: #334155;
+  --text-muted: #526277;
+}
+
+/* ───────── Automatic High-Contrast Remapping for Daylight Studio (Light Mode) ───────── */
+html[data-theme="light"] body,
+html[data-theme="light"] main {
+  background-color: var(--surface-app) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Canvas & Deepest Backdrop Surfaces */
+html[data-theme="light"] .bg-\[\#12151B\],
+html[data-theme="light"] .bg-\[\#10131A\],
+html[data-theme="light"] .bg-\[\#10141D\] {
+  background-color: var(--surface-app) !important;
+}
+
+html[data-theme="light"] .bg-\[\#0A0D14\],
+html[data-theme="light"] .bg-\[var\(--surface-canvas\,\#0A0D14\)\] {
+  background-color: var(--surface-canvas) !important;
+}
+
+/* Elevated Panel & Card Surfaces */
+html[data-theme="light"] .bg-\[\#181D27\],
+html[data-theme="light"] .bg-\[\#161A24\],
+html[data-theme="light"] .bg-\[\#141822\],
+html[data-theme="light"] .bg-\[\#1B212D\] {
+  background-color: var(--surface-card) !important;
+}
+
+/* Interactive Card Hovers */
+html[data-theme="light"] .hover\:bg-\[\#1A1F2C\]:hover,
+html[data-theme="light"] .hover\:bg-\[\#1B202D\]:hover,
+html[data-theme="light"] .hover\:bg-\[\#1E2432\]:hover,
+html[data-theme="light"] .hover\:bg-\[\#1E2330\]:hover {
+  background-color: var(--surface-inset) !important;
+}
+
+/* Recessed / Inset Tracks & Inputs */
+html[data-theme="light"] .bg-\[\#131720\],
+html[data-theme="light"] .bg-\[\#131720\]\/95,
+html[data-theme="light"] .bg-\[\#131720\]\/80,
+html[data-theme="light"] .bg-\[\#131720\]\/70,
+html[data-theme="light"] .bg-\[\#131720\]\/40,
+html[data-theme="light"] .bg-\[\#11141B\],
+html[data-theme="light"] .bg-\[\#1E2432\],
+html[data-theme="light"] .bg-\[\#232936\],
+html[data-theme="light"] .bg-\[\#242A38\] {
+  background-color: var(--surface-inset) !important;
+}
+
+html[data-theme="light"] .bg-\[\#1E2638\] {
+  background-color: var(--app-accent-15) !important;
+}
+
+/* Crisp Borders & Dividers in Light Mode */
+html[data-theme="light"] .border-\[\#1D2330\],
+html[data-theme="light"] .border-\[\#1E2432\],
+html[data-theme="light"] .border-\[\#1F2533\],
+html[data-theme="light"] .border-\[\#242A38\],
+html[data-theme="light"] .border-\[\#242A38\]\/60,
+html[data-theme="light"] .border-\[\#272E3F\],
+html[data-theme="light"] .border-\[\#283040\],
+html[data-theme="light"] .border-\[\#2B3242\],
+html[data-theme="light"] .border-\[\#2B3344\],
+html[data-theme="light"] .border-\[\#2E3648\],
+html[data-theme="light"] .border-\[\#2E374A\],
+html[data-theme="light"] .border-\[\#333D52\] {
+  border-color: var(--border-subtle) !important;
+}
+
+html[data-theme="light"] .divide-\[\#1D2330\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-subtle) !important;
+}
+
+/* High-Contrast Typography in Light Mode */
+/* Note: Do NOT override .text-white on solid colored buttons (rose, emerald, purple, or inline accent fills) */
+html[data-theme="light"] .text-white:not(.bg-rose-600):not(.bg-emerald-600):not(.bg-purple-600):not([style*="background-color"]),
+html[data-theme="light"] .text-slate-100,
+html[data-theme="light"] .text-slate-200 {
+  color: var(--text-primary) !important;
+}
+
+html[data-theme="light"] .text-slate-300,
+html[data-theme="light"] .text-slate-400 {
+  color: var(--text-secondary) !important;
+}
+
+html[data-theme="light"] .text-slate-500 {
+  color: var(--text-muted) !important;
+}
+
+html[data-theme="light"] .hover\:text-white:hover,
+html[data-theme="light"] .hover\:text-slate-200:hover,
+html[data-theme="light"] .hover\:text-slate-300:hover,
+html[data-theme="light"] .group:hover .group-hover\:text-slate-200 {
+  color: var(--text-primary) !important;
+}
+
+/* Segmented Controls, Active Pills & Toggle Tracks in Light Mode */
+html[data-theme="light"] button.bg-slate-800 {
+  background-color: #FFFFFF !important;
+  color: var(--app-accent-text, var(--text-primary)) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 0 0 1px #CBD5E1 !important;
+}
+
+html[data-theme="light"] div.bg-slate-800,
+html[data-theme="light"] span.bg-slate-800,
+html[data-theme="light"] .bg-slate-800\/50 {
+  background-color: #CBD5E1 !important;
+  color: var(--text-primary) !important;
+}
+
+html[data-theme="light"] .hover\:bg-slate-800:hover,
+html[data-theme="light"] .hover\:bg-slate-800\/80:hover,
+html[data-theme="light"] .hover\:bg-slate-800\/70:hover,
+html[data-theme="light"] .hover\:bg-slate-800\/40:hover,
+html[data-theme="light"] .hover\:bg-slate-700:hover {
+  background-color: #CBD5E1 !important;
+  color: var(--text-primary) !important;
+}
+
+/* Semantic Status Badges (Audit Report, Export Modal, Deck Badges) in Light Mode */
+html[data-theme="light"] .bg-emerald-950,
+html[data-theme="light"] .bg-emerald-950\/80,
+html[data-theme="light"] .bg-emerald-950\/30,
+html[data-theme="light"] .bg-emerald-500\/15,
+html[data-theme="light"] .bg-emerald-500\/20 {
+  background-color: #DCFCE7 !important;
+  border-color: #86EFAC !important;
+  color: #166534 !important;
+}
+
+html[data-theme="light"] .text-emerald-400,
+html[data-theme="light"] .text-emerald-300,
+html[data-theme="light"] .text-emerald-200 {
+  color: #15803D !important;
+}
+
+html[data-theme="light"] .bg-amber-950,
+html[data-theme="light"] .bg-amber-950\/80 {
+  background-color: #FEF3C7 !important;
+  border-color: #FCD34D !important;
+  color: #92400E !important;
+}
+
+html[data-theme="light"] .bg-rose-950\/50,
+html[data-theme="light"] .bg-rose-950\/40,
+html[data-theme="light"] .bg-rose-950\/30,
+html[data-theme="light"] .bg-rose-500\/10,
+html[data-theme="light"] .bg-rose-500\/15 {
+  background-color: #FFE4E6 !important;
+  border-color: #FDA4AF !important;
+  color: #9F1239 !important;
+}
+
+html[data-theme="light"] .text-rose-400,
+html[data-theme="light"] .text-rose-300 {
+  color: #BE123C !important;
+}
+
+html[data-theme="light"] .bg-cyan-950,
+html[data-theme="light"] .bg-cyan-950\/80,
+html[data-theme="light"] .bg-cyan-950\/60,
+html[data-theme="light"] .bg-cyan-500\/10,
+html[data-theme="light"] .bg-cyan-500\/20 {
+  background-color: var(--app-accent-15) !important;
+  border-color: var(--app-accent-30) !important;
+  color: var(--app-accent-text) !important;
+}
+
+html[data-theme="light"] .text-cyan-400,
+html[data-theme="light"] .text-cyan-300,
+html[data-theme="light"] .text-amber-400,
+html[data-theme="light"] .text-amber-300 {
+  color: var(--app-accent-text) !important;
+}
+
+/* Global Purple Accent Utility Mapping */
 .bg-purple-600,
 .bg-purple-500 {
   background-color: var(--app-accent, #8b5cf6) !important;
+  color: var(--app-accent-fg, #ffffff) !important;
 }
 
 .hover\:bg-purple-700:hover,
 .hover\:bg-purple-600:hover {
-  filter: brightness(0.9);
+  filter: brightness(0.92);
 }
 
 .text-purple-600,
 .text-purple-500,
 .text-purple-400 {
-  color: var(--app-accent, #8b5cf6) !important;
+  color: var(--app-accent-text, var(--app-accent, #8b5cf6)) !important;
 }
 
 .border-purple-600,
@@ -146,38 +352,116 @@
 .focus\:ring-purple-600:focus {
   --tw-ring-color: var(--app-accent, #8b5cf6) !important;
 }
-/* ───────── Global UI polish ───────── */
-::selection { background: var(--app-accent-30); color: #fff; }
 
-* { scrollbar-width: thin; scrollbar-color: #2E3648 transparent; }
-*::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: #2E3648; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
-*::-webkit-scrollbar-thumb:hover { background: #3B4560; background-clip: padding-box; }
-
-button, a, [role="button"] { transition-property: color, background-color, border-color, box-shadow, opacity, transform; transition-duration: 150ms; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
-  outline: 2px solid var(--app-accent); outline-offset: 2px; border-radius: 6px;
+/* ───────── Global UI Polish & Scrollbars ───────── */
+::selection {
+  background: var(--app-accent-30);
+  color: var(--text-primary);
 }
-button:not(:disabled):active { transform: translateY(0.5px); }
 
-input[type="range"] { accent-color: var(--app-accent); cursor: pointer; }
-input[type="checkbox"], input[type="radio"] { accent-color: var(--app-accent); }
-
-/* ───────── Book Studio: unify cyan/amber into the user accent ───────── */
-.book-studio .text-cyan-300, .book-studio .text-cyan-400,
-.book-studio .text-amber-300, .book-studio .text-amber-400 { color: var(--app-accent) !important; }
-.book-studio .bg-cyan-600, .book-studio .bg-amber-500, .book-studio .bg-amber-600 {
-  background-color: var(--app-accent) !important; color: #0B0E14 !important;
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
-.book-studio .hover\:bg-cyan-500:hover, .book-studio .hover\:bg-amber-400:hover { filter: brightness(1.08); }
-.book-studio .bg-cyan-950\/40, .book-studio .bg-cyan-950\/70, .book-studio .bg-cyan-950\/80,
-.book-studio .bg-amber-500\/10, .book-studio .bg-amber-500\/20, .book-studio .bg-amber-950\/30 {
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: padding-box;
+}
+
+button,
+a,
+[role="button"] {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+button:not(:disabled):active {
+  transform: translateY(0.5px);
+}
+
+input[type="range"] {
+  accent-color: var(--app-accent);
+  cursor: pointer;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--app-accent);
+}
+
+/* ───────── Book Studio: Unify Cyan/Amber into the Active Theme Accent ───────── */
+.book-studio .text-cyan-300,
+.book-studio .text-cyan-400,
+.book-studio .text-amber-300,
+.book-studio .text-amber-400,
+.book-studio .text-amber-200 {
+  color: var(--app-accent-text) !important;
+}
+
+.book-studio .bg-cyan-600,
+.book-studio .bg-amber-500,
+.book-studio .bg-amber-600 {
+  background-color: var(--app-accent) !important;
+  color: var(--app-accent-fg) !important;
+}
+
+.book-studio .hover\:bg-cyan-500:hover,
+.book-studio .hover\:bg-amber-400:hover,
+.book-studio .hover\:bg-amber-500:hover {
+  filter: brightness(1.08);
+}
+
+.book-studio .bg-cyan-950,
+.book-studio .bg-cyan-950\/40,
+.book-studio .bg-cyan-950\/70,
+.book-studio .bg-cyan-950\/80,
+.book-studio .bg-amber-500\/10,
+.book-studio .bg-amber-500\/15,
+.book-studio .bg-amber-500\/20,
+.book-studio .bg-amber-950\/30 {
   background-color: var(--app-accent-15) !important;
 }
-.book-studio .border-cyan-500, .book-studio .border-cyan-600\/60, .book-studio .border-cyan-700\/50,
-.book-studio .border-amber-500\/30, .book-studio .border-amber-500\/40, .book-studio .border-amber-800\/40 {
+
+.book-studio .border-cyan-500,
+.book-studio .border-cyan-600\/40,
+.book-studio .border-cyan-600\/60,
+.book-studio .border-cyan-700\/50,
+.book-studio .border-amber-500,
+.book-studio .border-amber-500\/30,
+.book-studio .border-amber-500\/40,
+.book-studio .border-amber-500\/50,
+.book-studio .border-amber-500\/60,
+.book-studio .border-amber-800\/40 {
   border-color: var(--app-accent-30) !important;
 }
-.book-studio .ring-cyan-500\/30, .book-studio .ring-amber-500\/40 { --tw-ring-color: var(--app-accent-30) !important; }
-.book-studio .font-black, .book-studio .font-extrabold { font-weight: 600 !important; }
+
+.book-studio .ring-cyan-500\/30,
+.book-studio .ring-cyan-500\/40,
+.book-studio .ring-amber-500\/20,
+.book-studio .ring-amber-500\/40 {
+  --tw-ring-color: var(--app-accent-30) !important;
+}
+
+.book-studio .font-black,
+.book-studio .font-extrabold {
+  font-weight: 600 !important;
+}

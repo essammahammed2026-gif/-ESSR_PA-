@@ -1,6 +1,117 @@
 # Session Log
 
+## Date: 2026-10-21
+
+### Book Studio Explicit Apply, Reversible Applied History & High-Density UI Polish
+- **Objective**: Implement explicit Apply buttons across all Book Studio prepress modules, prevent automatic effect application on module entry, render an Applied entries list at the bottom of each module with delete-to-reverse support, fix the Erase Box drawing/deletion tool and layout clipping, reduce all labels to concise 1–2 words, and eliminate duplicate options.
+- **Rules Followed**: `AGENTS.md` rules honored: strict TypeScript (`0` errors, zero `any`), centralized `src/lib/api.ts`, no new fragmented side-files, zero-retention temp directory hygiene, and user-only git permissions.
+- **Changes Completed**:
+  1. **Explicit Apply & No Auto-Apply on Entry (`useBookStudioState.ts`, `CropSplitPanel.tsx`, `DeskewPanel.tsx`, `RestorePanel.tsx`, `BleedPanel.tsx`)**:
+     - Modified `openModule(mod)` to set `focusedModule = mod` and ensure `cropModule.enabled` is only true while `mod === 'crop'`.
+     - Completely removed auto-enabling side-effects on entry so entering `deskew`, `cleanup`, `restore`, or `bleed` leaves the module inactive until the operator clicks **Apply**.
+  2. **Applied Entries List with Delete-to-Reverse (`PageScopeSelector.tsx`, `useBookModules.ts`, `useBookStudioState.ts`, and all 5 module panels)**:
+     - Created reusable `AppliedEntriesList` in `PageScopeSelector.tsx` displaying applied items with scope pills, concise labels, and a `Trash2` button.
+     - In `useBookModules.ts`, saved snapshots prior to commit in `splitSpread` and `applyCrop`, and added `removeAppliedCrop(id)` to restore the snapshot and sync via `POST /api/book-scan/restore-pages`.
+     - Added `clearAllDeskewAngles` and reverse handlers for `deskewModule`, `cleanupModule`, `restorationModule`, and `bleedModule`.
+  3. **Fixed Erase Box Tool & Optimistic Updates (`PageCanvas.tsx`, `useBookModules.ts`, `RestorePanel.tsx`)**:
+     - Fixed `PageCanvas.tsx` z-index layering (`z-40` for masks, `z-[60]` for delete `×` button) so hover-deletion works seamlessly even while the erase box drawing tool is active.
+     - Added optimistic 0ms updates in `useBookModules.ts` for `applyMaskBox`, `removeMaskBox`, `clearPageMasks`, and `clearAllMasks`.
+     - Preserved **Clear Page** and **Clear All** buttons.
+  4. **High-Density 1–2 Word Labels & Zero Clipping/Duplication**:
+     - Redesigned `PageScopeSelector` with a non-clipping full-width 5-column grid (`Current | All | Odds | Evens | Range`).
+     - Reduced verbose text across all modules to 1–2 word names (`Crop & Split`, `Deskew`, `Cleanup`, `Colors`, `Bleed`, `Paper`, `Content`, `Detect`, `Detect All`, `Spine Shadow`, `Despeckle`, `Whiten BG`).
+     - Removed duplicate scope selectors and unified color mode picking in `RestorePanel.tsx`.
+  5. **Verification**: Frontend (`npx tsc --noEmit`) and Backend (`python3 -m py_compile`) passed with 0 errors.
+
+---
+
+### Book Studio Drill-Down Modules Hub & Dedicated Module Workspaces
+- **Objective**: Redesign the Book Studio Right Panel (`BookRightPanel.tsx`) from stacked nested accordions into a Drill-Down Modules Hub + Dedicated Module Workspace architecture, expanding the UI/UX of all 5 prepress modules.
+- **Rules Followed**: Consulted `docs/architecture.md` and `AGENTS.md`, maintained strict TypeScript (`0` errors, zero `any`), consolidated and removed the fragmented `CropTargetPopover.tsx` side-file, updated `docs/architecture.md` in the same turn, and verified clean runtime storage (`StorageCleaner.clean('runtime')`).
+- **Changes Completed**:
+  1. **State & Shortcut Navigation (`useBookStudioState.ts`, `useBookShortcuts.ts`, `book-studio/page.tsx`, `BookWorkspace.tsx`)**:
+     - Initialized `focusedModule` to `null` (Modules Hub view) and added `openModule(mod)` which auto-enables a module when entered and clears transient canvas tools when backing out (`mod = null`).
+     - Added `Esc` shortcut (`exitModule`) to back out of active canvas tools or return from a dedicated module view to the Modules Hub.
+     - Synced top canvas toolbar buttons (`Crop`, `Straighten`, `Erase`) to automatically open their corresponding module workspace in the Right Panel.
+  2. **Drill-Down Hub & Quick-Jump Header (`BookRightPanel.tsx`)**:
+     - Built the **Modules Hub** view with an active layer counter badge and 5 rich module cards displaying live configuration summaries, badges, progress bars, and independent inline ON/OFF switches.
+     - Built the **Dedicated Module Workspace** header with a `← All Modules` (`Esc`) button and a 5-icon quick-jump bar (`1`–`5`) with active-layer indicator dots.
+  3. **Upgraded Individual Module Workspaces (`CropSplitPanel.tsx`, `DeskewPanel.tsx`, `RestorePanel.tsx`, `BleedPanel.tsx`, `splitLines.ts`)**:
+     - `CropSplitPanel`: Added descriptive `Paper Sheet` / `Tight Content` cards, live 4-edge trim percentage readouts, separate `+ Vertical Cut` and `+ Horizontal Cut` buttons, and inline target scope pills; removed `CropTargetPopover.tsx`.
+     - `DeskewPanel`: Unified Auto detection and Manual angle fine-tuning into a single view with `±0.1° / ±0.5° / Reset` micro-nudge buttons.
+     - `CleanupPanel` & `RestorePanel`: Reorganized into spacious section cards with 2×2 descriptive color mode cards and 1-click slider reset links.
+     - `BleedPanel`: Added descriptive Outside/Inside placement cards and 1-click standard bleed presets (`0`, `2`, `3`, `5` mm).
+
+---
+
+### Book Studio Complete Prepress Suite & Flint Unified Design System
+- **Objective**: Execute the approved 5-phase upgrade roadmap (`book_studio_roadmap.md`):
+  1. Dedicated **Cleanup & Spot Masking** module (`Erase / Whiteout Box` across `Current`, `Selected`, `All`, `Odds`, `Evens`, `Range`, 1-click clear, Morphological Spine Shadow Illumination Leveling, and Safe Despeckle).
+  2. **Smart Mixed-Content Color & Tone Studio** (`Smart Auto` pixel-level chroma-aware hybrid compositing + per-page color mode overrides).
+  3. **Expandable Multi-Format Export Dropdown** (`Merged PDF`, `Separate PDF Pages .zip`, `JPEG .zip`, `PNG .zip`, `TIFF .zip` with DPI, Quality, and TIFF compression controls).
+  4. **Layer-Stack vs. Focused Module Architecture & Comprehensive Hotkeys** (`1`–`5` module focus, `S` Straighten, `M` Erase Box, `C` Crop, `X` Cut Line, `G` Grid, `I` Eyedropper, `A` Detect Page, `Shift+A` Detect All, `Enter` Apply).
+  5. **Unified Flint Design System** (**Obsidian Studio** Dark Mode + **Daylight Paper** Light Mode + `docs/design_system.md`).
+- **Rules Followed**: Centralized API client (`src/lib/api.ts`), strict TypeScript (`0` errors, zero `any`), thin FastAPI routers / pure OpenCV & PyMuPDF engines (`backend/engines/book_scan_engine.py`), zero fragmented side-files, synchronized `docs/architecture.md`, and zero-retention cleanup (`StorageCleaner.clean('runtime')`).
+- **Changes Completed**:
+  1. **Backend Engine & API (`backend/engines/schemas.py`, `backend/engines/book_scan_engine.py`, `backend/book_scan_api.py`)**:
+     - Added `apply_spot_masks`, `flatten_spine_illumination`, `despeckle_image`, `apply_smart_auto_color`, `apply_masks_to_pages`, `apply_color_mode_to_pages`, and `export_pages_archive`.
+     - Added `POST /api/book-scan/mask-page/{session_id}`, `POST /api/book-scan/color-mode-page/{session_id}`, and multi-format `.zip` / `.pdf` support in `_run_export_job` and `/export-download/{job_id}`.
+  2. **Frontend State, Modules & Canvas (`frontend/src/types/book_studio.ts`, `useBookSession.ts`, `useBookModules.ts`, `useBookStudioState.ts`, `useBookShortcuts.ts`, `RestorePanel.tsx`, `BookRightPanel.tsx`, `PageCanvas.tsx`, `BookWorkspace.tsx`, `WorkspaceToolbar.tsx`, `DeckCard.tsx`, `book-studio/page.tsx`)**:
+     - Built `CleanupPanel` and upgraded `RestorePanel` inside `RestorePanel.tsx` with `Smart Auto` and per-page override pills.
+     - Added interactive `Erase / Whiteout Box (M)` drawing and hover `×` badge deletion on `PageCanvas.tsx`.
+     - Added quick-tool buttons (`Crop`, `Straighten`, `Erase`, `Grid`, `Compare`) to `WorkspaceToolbar.tsx` and status dots (`Crop`, `Tilt`, `Mask`, `Color`) to `DeckCard.tsx`.
+     - Built the expandable Multi-Format Export Dropdown in `book-studio/page.tsx`.
+  3. **Unified Flint Design System (`AppearanceContext.tsx`, `globals.css`, `tailwind.config.ts`, `layout.tsx`, `AppearanceSection.tsx`, `docs/design_system.md`)**:
+     - Enabled live Light/Dark theme switching in `AppearanceContext.tsx`, `AppearanceSection.tsx`, and the sidebar footer in `layout.tsx`, backed by semantic CSS variables in `globals.css` and documented in `docs/design_system.md`.
+     - Added independent per-theme accent color persistence (`darkAccentColor` and `lightAccentColor`), automatic WCAG luminance contrast calculation (`--app-accent-text` and `--app-accent-fg`), `darkMode: "class"` in `tailwind.config.ts`, and high-contrast Daylight Paper borders, active segmented pills, and status badges.
+  4. **Verification & Clean**: Passed `npx tsc --noEmit` (`0` errors), `python -m py_compile` (`0` errors), end-to-end Python engine & multi-format ZIP tests, and `StorageCleaner.clean('runtime')`.
+
+---
+
+## Date: 2026-10-20
+
+### Book Studio Smart Per-Page Crop, Deskew, Chroma-Safe Border Cleanup & Exact Export Fidelity
+- **Objective**: Upgrade Book Studio's crop, deskew, border restoration, and export pipeline to handle real-world scanned books with shifting paper placement, black scanner lid voids, synthetic PDF white margins, per-page varying skew, architectural drawings, and edge-adjacent blue stamps/signatures (verified on `test_material/bag 1.pdf`), while guaranteeing that **Export PDF** strictly honors every per-page edit without overriding or re-detecting.
+- **Rules Followed**: Consulted `docs/architecture.md` and `AGENTS.md`, routed all frontend calls through `src/lib/api.ts`, kept FastAPI routers thin and OpenCV/PyMuPDF logic pure in `backend/engines/book_scan_engine.py`, maintained strict TypeScript (`0` errors, no `any`), and ran `StorageCleaner.clean('runtime')`.
+- **Changes Completed**:
+  1. **2-Stage Smart Auto-Detect Crop (`Paper Sheet` vs. `Tight Content`)**:
+     - Upgraded `BookScanEngine.detect_book_crop_and_seam(image, mode="paper")` in [`book_scan_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/book_scan_engine.py) to first strip synthetic pure-white PDF wrapper borders (`mean >= 254.2, std < 1.8`) and then march inward past dark scanner lid voids (`median < 175` or `mean(strip < 130) > 0.35`) and thin black border lines, isolating the true physical paper sheet while preserving stamps and signatures (`paper` mode), or cropping tightly around inner ink (`content` mode).
+  2. **Batch "Detect All → Browse & Tweak → Apply All" Crop Workflow**:
+     - Added `BatchDetectCropRequest` and `per_page_crops` to `CropPageRequest` and `ExportRequest` in [`schemas.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/schemas.py).
+     - Added `POST /api/book-scan/detect-crop-batch/{session_id}` in [`book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py) and updated `BookScanEngine.apply_crop_to_pages` to apply individual per-page crop boxes in a single batch commit.
+     - Updated [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts) and [`CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx) with a `Paper Sheet` / `Tight Content` mode toggle, **Detect Page** + **Detect All** buttons, a `<N> pages ready` badge, and seamless per-page draft crop persistence when stepping through pages (`[` / `]`).
+  3. **Upgraded Per-Page Deskew + Batch Detect All + Interactive 2-Point Straighten Ruler**:
+     - Upgraded `BookScanEngine.detect_skew_angle` with dark scanner void masking (`bg < 175`), 1px-thin horizontal word fusion, `cv2.fitLine` (`DIST_L1`) baseline regression, and `cv2.HoughLinesP` line detection for tables and engineering drawings.
+     - Added `POST /api/book-scan/detect-angle-batch/{session_id}` and `POST /api/book-scan/deskew-page/{session_id}` in [`book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py), plus `BookScanEngine.apply_deskew_to_pages`.
+     - Updated [`DeskewPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/DeskewPanel.tsx) and [`PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx) with **Detect Page** + **Detect All**, per-page angle slider tweaks, and an interactive **Draw Straighten Line** ruler tool on the canvas.
+  4. **Removed Clean Border Option, Added Per-Module Progress Bars & Fixed Preview Sync Bugs**:
+     - Removed the `Border Clean` UI section from [`RestorePanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/RestorePanel.tsx) and set `cleanBorders = false` by default in [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts), [`schemas.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/schemas.py), and [`book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py).
+     - Added [`ModuleProgressBar`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx#L10-L30) and chunked batch progress tracking in [`useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts) and [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts) so `Crop & Split`, `Deskew`, `Bleed`, and `Cleanup & Colors` each render a live progress bar with percentage and page counter whenever working.
+     - Fixed bug in `get_page_thumbnail` where `page_info["deskew_angle"]` was only applied when `deskew_module_enabled` was true, and fixed single-page `detectCrop` to auto-enable `cropModule.enabled`.
+     - Updated `BookScanEngine.render_export_pages` and `useBookModules.ts` (`exportPdf`) to pass and strictly honor all committed per-page crops, uncommitted draft `pageCrops`, and per-page `deskew_angle` overrides without re-running `detect_skew_angle` or overwriting with global defaults.
+  5. **Verification & Storage Clean**: Passed `npx tsc --noEmit` (0 errors), `py_compile` (0 errors), and end-to-end `BookScanEngine` verification on `test_material/bag 1.pdf`.
+
+---
+
 ## Date: 2026-10-16
+
+### Book Studio Multi-File Intake & Collation Repair (Duplex & Sequential Merge)
+- **Objective**: Fix broken Odds/Evens duplex intake in Book Studio and expand it into a unified, high-utility multi-file engine that also supports sequential multi-part assembly (combining split scans/chapters) with file reordering and per-file page reversal.
+- **Rules Followed**: Consulted navigation map in `docs/architecture.md`, canonical single-source-of-truth registry in `AGENTS.md` (`useBookSession.ts`, `backend/engines/book_scan_engine.py`), fast inner-loop checks only (`tsc --noEmit` and `py_compile`), zero-retention storage cleanup, and user-only git permissions.
+- **Changes Completed**:
+  1. **Root Cause Fix in Session Lifecycle**: Fixed `initSession()` in [`useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts) to construct proper multipart payloads for `dual` (with `file_odds`, `file_evens`, `odds_order`, `evens_order`, `start_with`) and `multi_merge` (with `files` queue and `reverse_file_indices`).
+  2. **Backend Router & Engine Collation**:
+     - Refactored `/api/book-scan/init-session` in [`book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py) so `mode == "dual"` is evaluated first and cleanly dispatches duplex collation.
+     - Added `start_with` parameter (`odds` vs `evens`) to `collate_from_paths` and `collate_scans` in [`book_scan_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/book_scan_engine.py).
+     - Enhanced `combine_files_to_pdf` with `reverse_indices` support to efficiently reverse page order for selected parts prior to merging.
+  3. **UI / UX Polish in Book Studio**:
+     - Evolved intake mode to **Multi-File & Collation** in [`BookLeftPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookLeftPanel.tsx) with a sleek segmented pill selector between **Duplex (Odds / Evens)** and **Combine Parts**.
+     - Added 1-click **Swap (⇄)** button and **Start with** (Odd vs. Even) selector in Duplex mode.
+     - Reused and enhanced [`FileUploadQueue.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/FileUploadQueue.tsx) for Sequential Merge with Move Up/Down, Remove, Clear All, and per-file **Rev** toggle.
+     - Aligned all intake cards and buttons with the application's dynamic accent theme (`var(--app-accent)`).
+  4. **Verification & Storage Clean**: Passed `tsc --noEmit` (0 errors), `py_compile` (0 errors), and programmatic `BookScanEngine` verification tests in `.venv`. `StorageCleaner.clean('runtime')` executed cleanly.
+
+---
 
 ### Preflight Studio Deprecation & Command Center (Home) Polish
 - **Objective**: Completely deprecate and remove the obsolete Preflight Studio (`frontend/src/app/preflight/`, `backend/engines/preflight.py`, and `/api/preflight`), consolidating all artwork verification and prepress inspection into the Command Center / Home Studio. Polish the Home Studio with unit management, 4-studio launchpad, metric telemetry tiles, dynamic accent styling, and customer-ready PDF report generation.
@@ -165,3 +276,18 @@
 
 
 
+
+---
+
+## Session Update: Dev Server "Internal Server Error" Recovery
+
+### 1. Root Cause
+- Frontend (`next dev`) and backend (`uvicorn`) had been running since Oct 16 under transient systemd units. The `frontend/` and `backend/` directories were later replaced on disk, leaving both processes attached to deleted directories (`/proc/<pid>/cwd -> ... (deleted)`). Next.js failed every request with `ENOENT: scandir 'frontend/src/app'` → HTTP 500.
+- `./start.sh restart` then aborted (`set -e`) because the stopped `flint-backend` transient unit was left in a `failed` state, which blocks `systemd-run --unit=flint-backend` from reusing the name.
+
+### 2. Changes Delivered
+- `start.sh`: Added `systemctl --user reset-failed` after every `systemctl --user stop` for `flint-backend` / `flint-frontend`, so a crashed/failed unit can no longer block a restart.
+
+### 3. Verification
+- `bash -n start.sh` passed.
+- After restart: `/`, `/book-studio`, `/imposing` → 200; backend `/docs` → 200; both units `active (running)`.

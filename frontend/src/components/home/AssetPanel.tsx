@@ -85,7 +85,7 @@ export function AssetPanel({
           </h3>
           <p
             className="text-xs font-mono font-semibold"
-            style={{ color: "var(--app-accent, #06b6d4)" }}
+            style={{ color: "var(--app-accent-text, var(--app-accent, #06b6d4))" }}
           >
             {formattedDimensions}
           </p>

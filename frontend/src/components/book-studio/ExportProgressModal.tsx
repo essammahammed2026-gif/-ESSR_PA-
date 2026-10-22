@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Download, CheckCircle2, AlertCircle, RefreshCw, X, FileCheck, Sparkles } from "lucide-react";
+import { CheckCircle2, AlertCircle, RefreshCw, X, FileCheck, Sparkles } from "lucide-react";
 import { ExportJobProgress } from "@/types/book_studio";
 
 interface ExportProgressModalProps {

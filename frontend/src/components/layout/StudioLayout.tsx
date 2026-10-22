@@ -136,8 +136,8 @@ export function StudioLayout({
           <nav className="flex items-center space-x-2" aria-label="Breadcrumb">
             <Link
               href={homeHref}
-              className="font-medium hover:underline transition-all"
-              style={{ color: "var(--app-accent, #06b6d4)" }}
+              className="font-semibold hover:underline transition-all"
+              style={{ color: "var(--app-accent-text, var(--app-accent, #06b6d4))" }}
             >
               Home
             </Link>
@@ -153,8 +153,8 @@ export function StudioLayout({
                 {crumb.href ? (
                   <Link
                     href={crumb.href}
-                    className="hover:underline transition-all"
-                    style={{ color: "var(--app-accent, #06b6d4)" }}
+                    className="hover:underline transition-all font-medium"
+                    style={{ color: "var(--app-accent-text, var(--app-accent, #06b6d4))" }}
                   >
                     {crumb.label}
                   </Link>
@@ -162,8 +162,8 @@ export function StudioLayout({
                   <button
                     type="button"
                     onClick={crumb.onClick}
-                    className="hover:underline transition-all cursor-pointer"
-                    style={{ color: "var(--app-accent, #06b6d4)" }}
+                    className="hover:underline transition-all cursor-pointer font-medium"
+                    style={{ color: "var(--app-accent-text, var(--app-accent, #06b6d4))" }}
                   >
                     {crumb.label}
                   </button>

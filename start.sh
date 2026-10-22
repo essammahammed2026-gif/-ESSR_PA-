@@ -57,6 +57,7 @@ start_services() {
     if ! is_backend_running; then
         echo "=> Starting Backend API (Port 8000)..."
         systemctl --user stop flint-backend 2>/dev/null || true
+        systemctl --user reset-failed flint-backend 2>/dev/null || true
         fuser -k 8000/tcp 2>/dev/null || true
         pkill -9 -f "uvicorn.*8000" 2>/dev/null || true
         systemd-run --user --unit=flint-backend bash -c "cd '$PROJECT_DIR/backend' && source .venv/bin/activate && exec uvicorn main:app --reload --host 0.0.0.0 --port 8000" >/dev/null 2>&1
@@ -66,6 +67,7 @@ start_services() {
     if ! is_frontend_running; then
         echo "=> Starting Frontend UI (Port 3000)..."
         systemctl --user stop flint-frontend 2>/dev/null || true
+        systemctl --user reset-failed flint-frontend 2>/dev/null || true
         fuser -k 3000/tcp 2>/dev/null || true
         pkill -9 -f "next-server" 2>/dev/null || true
         systemd-run --user --unit=flint-frontend bash -c "cd '$PROJECT_DIR/frontend' && exec npm run dev" >/dev/null 2>&1
@@ -90,6 +92,7 @@ stop_services() {
     command -v notify-send >/dev/null 2>&1 && notify-send -i flint "Flint" "Shutting down services..." || true
 
     systemctl --user stop flint-backend flint-frontend 2>/dev/null || true
+    systemctl --user reset-failed flint-backend flint-frontend 2>/dev/null || true
 
     # Cleanup any lingering processes on ports 8000 and 3000
     pkill -f "uvicorn main:app.*8000" 2>/dev/null || true

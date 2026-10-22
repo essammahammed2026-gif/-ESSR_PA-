@@ -76,7 +76,7 @@ class PageRotateRequest(BaseModel):
 
 class ProcessPageRequest(BaseModel):
     page_id: str
-    clean_borders: bool = True
+    clean_borders: bool = False
     border_margin_px: int = 15
     border_threshold: int = 210
     enhance_colors: bool = True
@@ -117,9 +117,59 @@ class CropPageRequest(BaseModel):
     crop_box: CropBoxModel
     apply_to_all: bool = False
     target_page_ids: Optional[List[str]] = None
+    per_page_crops: Optional[Dict[str, CropBoxModel]] = None
+
+
+class BatchDetectCropRequest(BaseModel):
+    mode: str = "paper"  # "paper" | "content"
+    target_page_ids: Optional[List[str]] = None
+
+
+class BatchDetectAngleRequest(BaseModel):
+    max_angle: float = 10.0
+    ignore_borders: bool = True
+    target_page_ids: Optional[List[str]] = None
+
+
+class PageDeskewRequest(BaseModel):
+    page_id: Optional[str] = None
+    angle: Optional[float] = None
+    per_page_angles: Optional[Dict[str, float]] = None
+    clear_all: bool = False
+
+
+class MaskBoxModel(BaseModel):
+    id: str = ""
+    x1: float = 0.0
+    y1: float = 0.0
+    x2: float = 0.0
+    y2: float = 0.0
+    color: Optional[str] = None
+    fill: Optional[str] = None
+
+
+class MaskPageRequest(BaseModel):
+    action: str = "add"  # "add" | "remove" | "clear_page" | "clear_all"
+    mask: Optional[MaskBoxModel] = None
+    mask_box: Optional[MaskBoxModel] = None
+    mask_id: Optional[str] = None
+    page_id: Optional[str] = None
+    scope: str = "current"  # "current" | "selected" | "all" | "odds" | "evens" | "range"
+    custom_range: str = ""
+    target_page_ids: Optional[List[str]] = None
+
+
+class PageColorModeRequest(BaseModel):
+    page_id: Optional[str] = None
+    color_mode: Optional[str] = None  # "auto" | "color" | "grayscale" | "bw" | None
+    target_page_ids: Optional[List[str]] = None
+    clear_all: bool = False
 
 
 class ExportRequest(BaseModel):
+    export_format: str = "pdf"  # "pdf" | "pdf_split" | "jpeg" | "png" | "tiff"
+    tiff_compression: str = "lzw"  # "lzw" | "deflate" | "none"
+
     bleed_mm: float = 3.0
     bleed_mode: str = "mirror"  # "mirror" | "solid"
     bleed_color: str = "#ffffff"
@@ -127,15 +177,15 @@ class ExportRequest(BaseModel):
     show_crop_marks: bool = True
 
     dpi: int = 200
-    quality: int = 88
+    quality: int = 90
     optimize_compression: bool = True
-    clean_borders: bool = True
+    clean_borders: bool = False
     border_margin_px: int = 15
     border_threshold: int = 210
     enhance_colors: bool = True
     saturation: float = 1.30
     contrast: float = 1.10
-    color_mode: str = "color"  # "color" | "grayscale" | "bw"
+    color_mode: str = "auto"  # "auto" | "color" | "grayscale" | "bw"
     bw_threshold: int = 180
     whiten_bg: bool = False
     deskew: bool = False
@@ -147,6 +197,15 @@ class ExportRequest(BaseModel):
     deskew_ignore_borders: bool = True
     deskew_scope_mode: str = "all"
     deskew_custom_range: str = ""
+    per_page_deskew_angles: Optional[Dict[str, float]] = None
+    per_page_crops: Optional[Dict[str, CropBoxModel]] = None
+    per_page_color_modes: Optional[Dict[str, str]] = None
+
+    cleanup_module_enabled: bool = False
+    flatten_illumination: bool = False
+    despeckle_level: int = 0  # 0=off, 1=light, 2=medium, 3=strong
+    cleanup_scope_mode: str = "all"
+    cleanup_custom_range: str = ""
 
     bleed_module_enabled: bool = False
     bleed_scope_mode: str = "all"

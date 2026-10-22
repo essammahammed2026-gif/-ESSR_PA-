@@ -1,6 +1,8 @@
 import os
+import io
 import math
 import uuid
+import zipfile
 import fitz  # PyMuPDF
 import cv2
 import numpy as np
@@ -94,6 +96,7 @@ class BookScanEngine:
         odds_order: str = "forward",
         evens_order: str = "reverse",
         spread_split_pos: float = 0.5,
+        start_with: str = "odds",
     ) -> List[Dict[str, Any]]:
         """Single-copy collation entry point by path — opens, collates, closes.
 
@@ -111,6 +114,7 @@ class BookScanEngine:
                 evens_order=evens_order,
                 spread_split_pos=spread_split_pos,
                 single_doc=single_doc,
+                start_with=start_with,
             )
         finally:
             for d in (odds_doc, evens_doc, single_doc):
@@ -134,17 +138,27 @@ class BookScanEngine:
             return False
 
     @staticmethod
-    def combine_files_to_pdf(file_paths: List[str], output_pdf_path: str) -> bool:
+    def combine_files_to_pdf(
+        file_paths: List[str],
+        output_pdf_path: str,
+        reverse_indices: Optional[Set[int]] = None
+    ) -> bool:
         """Combines multiple files (PDFs, images: PNG, JPG, TIFF, WEBP, etc.) into a single unified PDF."""
         doc = fitz.open()
+        rev_set = reverse_indices or set()
         try:
-            for fpath in file_paths:
+            for idx, fpath in enumerate(file_paths):
                 if not os.path.exists(fpath):
                     continue
+                should_reverse = idx in rev_set
                 ext = os.path.splitext(fpath)[1].lower()
                 if ext == ".pdf":
                     sub_doc = fitz.open(fpath)
-                    doc.insert_pdf(sub_doc)
+                    if should_reverse:
+                        for p_idx in range(len(sub_doc) - 1, -1, -1):
+                            doc.insert_pdf(sub_doc, from_page=p_idx, to_page=p_idx)
+                    else:
+                        doc.insert_pdf(sub_doc)
                     sub_doc.close()
                 else:
                     img_doc = fitz.open(fpath)
@@ -182,7 +196,8 @@ class BookScanEngine:
         odds_order: str = "forward",   # 'forward' (1, 3, 5...) or 'reverse'
         evens_order: str = "reverse",  # 'reverse' (...6, 4, 2) or 'forward'
         spread_split_pos: float = 0.5, # relative position 0.0 to 1.0 (seam)
-        single_doc: Optional[fitz.Document] = None
+        single_doc: Optional[fitz.Document] = None,
+        start_with: str = "odds"
     ) -> List[Dict[str, Any]]:
         """
         Creates an ordered sequence of logical pages from the uploaded file(s).
@@ -256,12 +271,20 @@ class BookScanEngine:
         spread_suffix = " (Spread)" if is_spread else ""
 
         for i in range(max_sheets):
-            if i < len(odds_indices) and odds_doc is not None:
-                p_odd = odds_indices[i]
-                pages.append(_make_entry(odds_doc[p_odd], "odds", p_odd, f"Odds Sheet {p_odd+1}{spread_suffix}"))
-            if i < len(evens_indices) and evens_doc is not None:
-                p_even = evens_indices[i]
-                pages.append(_make_entry(evens_doc[p_even], "evens", p_even, f"Evens Sheet {p_even+1}{spread_suffix}"))
+            if start_with == "evens":
+                if i < len(evens_indices) and evens_doc is not None:
+                    p_even = evens_indices[i]
+                    pages.append(_make_entry(evens_doc[p_even], "evens", p_even, f"Evens Sheet {p_even+1}{spread_suffix}"))
+                if i < len(odds_indices) and odds_doc is not None:
+                    p_odd = odds_indices[i]
+                    pages.append(_make_entry(odds_doc[p_odd], "odds", p_odd, f"Odds Sheet {p_odd+1}{spread_suffix}"))
+            else:
+                if i < len(odds_indices) and odds_doc is not None:
+                    p_odd = odds_indices[i]
+                    pages.append(_make_entry(odds_doc[p_odd], "odds", p_odd, f"Odds Sheet {p_odd+1}{spread_suffix}"))
+                if i < len(evens_indices) and evens_doc is not None:
+                    p_even = evens_indices[i]
+                    pages.append(_make_entry(evens_doc[p_even], "evens", p_even, f"Evens Sheet {p_even+1}{spread_suffix}"))
 
         return pages
 
@@ -365,14 +388,16 @@ class BookScanEngine:
         return extracted
 
     @staticmethod
-    def detect_book_crop_and_seam(image: np.ndarray) -> Dict[str, Any]:
+    def detect_book_crop_and_seam(image: np.ndarray, mode: str = "paper") -> Dict[str, Any]:
         """
-        Auto-detects the physical book boundary (cropping away empty scanner glass/margins)
-        and locates the central spine fold seam:
-        - Downscales to proxy for rapid analysis
-        - Computes edge gradient and ink presence across the scanner bed
-        - Finds active paper/content bounding rectangle
-        - Searches the central gutter zone for spine shadow / vertical margin minimum
+        Auto-detects the physical book boundary (cropping away empty scanner glass/margins,
+        black lid voids, and dark spine gutter edges) and locates the central spine fold seam:
+        - Stage 1 (mode='paper'): Isolates the bright physical paper sheet by stripping outer
+          synthetic white padding and marching past dark scanner bed/lid voids and black border lines,
+          preserving headers, footers, colored stamps, and edge signatures.
+        - Stage 2 (mode='content'): Crops tightly around the active ink/text bounding box inside
+          the detected paper sheet with a clean safety margin.
+        - Searches the central gutter zone for spine shadow / vertical margin minimum.
         """
         try:
             h, w = image.shape[:2]
@@ -391,35 +416,102 @@ class BookScanEngine:
             else:
                 gray = proxy
 
-            # 1. Detect content/paper boundaries
-            bg = cv2.medianBlur(gray, 31)
-            diff = cv2.subtract(bg, gray)
-            edges = cv2.Canny(gray, 30, 100)
-            combined = cv2.max(diff, edges)
-            _, thresh = cv2.threshold(combined, 15, 255, cv2.THRESH_BINARY)
+            # 1a. Trim synthetic pure-white PDF wrapper padding (std < 1.8 and mean >= 254.2)
+            y0, y1 = 0, ph - 1
+            x0, x1 = 0, pw - 1
+            while y0 < ph // 6 and float(np.mean(gray[y0, :])) >= 254.2 and float(np.std(gray[y0, :])) < 1.8:
+                y0 += 1
+            while y1 > ph * 5 // 6 and float(np.mean(gray[y1, :])) >= 254.2 and float(np.std(gray[y1, :])) < 1.8:
+                y1 -= 1
+            while x0 < pw // 6 and float(np.mean(gray[:, x0])) >= 254.2 and float(np.std(gray[:, x0])) < 1.8:
+                x0 += 1
+            while x1 > pw * 5 // 6 and float(np.mean(gray[:, x1])) >= 254.2 and float(np.std(gray[:, x1])) < 1.8:
+                x1 -= 1
 
-            k = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
-            fused = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, k)
+            cy_s, cy_e = y0 + max(1, (y1 - y0) // 8), y1 - max(1, (y1 - y0) // 8)
+            cx_s, cx_e = x0 + max(1, (x1 - x0) // 8), x1 - max(1, (x1 - x0) // 8)
 
-            pts = np.argwhere(fused > 0)
-            if len(pts) > 50:
-                y1_p, x1_p = pts.min(axis=0)
-                y2_p, x2_p = pts.max(axis=0)
+            # 1b. March inward from each edge past dark scanner void / black lid / dark border lines
+            max_top = y0 + int((y1 - y0) * 0.14)
+            ty = y0
+            for r in range(y0, max_top):
+                strip = gray[r, cx_s:cx_e]
+                if float(np.median(strip)) < 175.0 or float(np.mean(strip < 130)) > 0.35:
+                    ty = r + 1
+                elif r - ty > 5:
+                    break
 
-                pad_x = int(pw * 0.02)
-                pad_y = int(ph * 0.02)
-                x1_p = max(0, x1_p - pad_x)
-                y1_p = max(0, y1_p - pad_y)
-                x2_p = min(pw, x2_p + pad_x)
-                y2_p = min(ph, y2_p + pad_y)
+            min_bot = y1 - int((y1 - y0) * 0.14)
+            by = y1
+            for r in range(y1, min_bot, -1):
+                strip = gray[r, cx_s:cx_e]
+                if float(np.median(strip)) < 175.0 or float(np.mean(strip < 130)) > 0.35:
+                    by = r - 1
+                elif by - r > 5:
+                    break
 
-                x1 = round(float(x1_p / pw), 3)
-                y1 = round(float(y1_p / ph), 3)
-                x2 = round(float(x2_p / pw), 3)
-                y2 = round(float(y2_p / ph), 3)
-            else:
-                x1, y1, x2, y2 = 0.0, 0.0, 1.0, 1.0
-                x1_p, y1_p, x2_p, y2_p = 0, 0, pw, ph
+            max_left = x0 + int((x1 - x0) * 0.24)
+            lx = x0
+            for c in range(x0, max_left):
+                strip = gray[cy_s:cy_e, c]
+                if float(np.median(strip)) < 175.0 or float(np.mean(strip < 130)) > 0.35:
+                    lx = c + 1
+                elif c - lx > 6:
+                    break
+
+            min_right = x1 - int((x1 - x0) * 0.24)
+            rx = x1
+            for c in range(x1, min_right, -1):
+                strip = gray[cy_s:cy_e, c]
+                if float(np.median(strip)) < 160.0 or float(np.mean(strip < 115)) > 0.40:
+                    rx = c - 1
+                elif rx - c > 6:
+                    break
+
+            if ty > y0:
+                ty = min(max_top, ty + 2)
+            if by < y1:
+                by = max(min_bot, by - 2)
+            if lx > x0:
+                lx = min(max_left, lx + 2)
+            if rx < x1:
+                rx = max(min_right, rx - 2)
+
+            x1_p, y1_p, x2_p, y2_p = int(lx), int(ty), int(rx), int(by)
+
+            if (mode or "paper").lower() == "content":
+                # Tight content bounding box inside the safe interior of the detected paper sheet
+                in_pad_x = max(8, int((x2_p - x1_p) * 0.025))
+                in_pad_y = max(8, int((y2_p - y1_p) * 0.02))
+                sx1 = min(x2_p - 10, x1_p + in_pad_x)
+                sy1 = min(y2_p - 10, y1_p + in_pad_y)
+                sx2 = max(sx1 + 10, x2_p - in_pad_x)
+                sy2 = max(sy1 + 10, y2_p - in_pad_y)
+                roi = gray[sy1:sy2, sx1:sx2]
+
+                bg = cv2.medianBlur(roi, 31)
+                diff = cv2.subtract(bg, roi)
+                # Ignore dark shadow zones where background is not paper
+                diff[bg < 170] = 0
+                _, thresh = cv2.threshold(diff, 18, 255, cv2.THRESH_BINARY)
+
+                k = cv2.getStructuringElement(cv2.MORPH_RECT, (19, 19))
+                fused = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, k)
+                pts = np.argwhere(fused > 0)
+                if len(pts) > 50:
+                    cy1_i, cx1_i = pts.min(axis=0)
+                    cy2_i, cx2_i = pts.max(axis=0)
+                    pad_x = int(pw * 0.02)
+                    pad_y = int(ph * 0.02)
+                    x1_p = max(x1_p, int(sx1 + cx1_i - pad_x))
+                    y1_p = max(y1_p, int(sy1 + cy1_i - pad_y))
+                    x2_p = min(x2_p, int(sx1 + cx2_i + pad_x))
+                    y2_p = min(y2_p, int(sy1 + cy2_i + pad_y))
+
+            x1_f = round(float(max(0, x1_p) / pw), 3)
+            y1_f = round(float(max(0, y1_p) / ph), 3)
+            x2_f = round(float(min(pw, x2_p) / pw), 3)
+            y2_f = round(float(min(ph, y2_p) / ph), 3)
 
             # 2. Detect central spine fold inside the cropped book
             crop_w = max(10, x2_p - x1_p)
@@ -427,7 +519,7 @@ class BookScanEngine:
 
             w_start = int(crop_w * 0.35)
             w_end = int(crop_w * 0.65)
-            if w_end > w_start + 5:
+            if w_end > w_start + 5 and book_slice.size > 0:
                 center_slice = book_slice[:, w_start:w_end]
                 col_means = np.mean(center_slice, axis=0)
                 min_col = int(np.argmin(col_means))
@@ -438,7 +530,7 @@ class BookScanEngine:
             spine_rel = max(0.40, min(0.60, spine_rel))
 
             return {
-                "crop_box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                "crop_box": {"x1": x1_f, "y1": y1_f, "x2": x2_f, "y2": y2_f},
                 "split_pos": spine_rel
             }
         except Exception:
@@ -452,9 +544,10 @@ class BookScanEngine:
         fill_color: tuple = (255, 255, 255)
     ) -> np.ndarray:
         """
-        Minimal border cleaning:
-        Cleans only the extreme outer edge zone (where scanner feed marks, shadow lines,
-        and ragged edges occur), leaving the inner artwork and text completely untouched.
+        Chroma-safe border & gutter shadow cleaning:
+        Cleans neutral dark scanner feed marks, shadow lines, and ragged gray borders along the
+        outer perimeter while strictly protecting saturated colored ink (e.g., blue stamps and
+        pen signatures where HSV saturation > 38).
         """
         if margin_px <= 0:
             return image
@@ -462,18 +555,27 @@ class BookScanEngine:
         try:
             cleaned = image.copy()
             h, w = image.shape[:2]
-            m = min(margin_px, h // 10, w // 10)
+            m = min(margin_px, h // 8, w // 8)
             if m <= 0:
                 return image
 
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+                sat = hsv[:, :, 1]
+                # Protect colored ink (stamps, blue signatures) from being wiped
+                is_neutral = sat < 38
+            else:
+                gray = image
+                is_neutral = np.ones((h, w), dtype=bool)
+
             border_mask = np.zeros((h, w), dtype=bool)
             border_mask[:m, :] = True
             border_mask[-m:, :] = True
             border_mask[:, :m] = True
             border_mask[:, -m:] = True
 
-            dirty = border_mask & (gray < threshold)
+            dirty = border_mask & (gray < threshold) & is_neutral
             cleaned[dirty] = fill_color
             return cleaned
         except Exception:
@@ -525,11 +627,13 @@ class BookScanEngine:
         """
         Robustly and accurately detects page skew angle on scanned books:
         - Downscales image to normalized 1000px proxy for sub-25ms analysis
-        - Normalizes non-uniform illumination and spine gutter shadows using adaptive background subtraction
+        - Masks out dark scanner lid voids and spine gutter shadows where background < 175
         - Masks out scanner bed margins and feed roller shadows if ignore_borders is True
-        - Bridges word spaces into continuous text lines using horizontal morphological structuring
-        - Primary method: Analyzes text line contours using minAreaRect with weighted median angle (immune to multi-column misalignment)
-        - Fallback method: Multi-strip vertical projection profiling across 3 interior columns (for sparse text or tables)
+        - Bridges word spaces into continuous text lines using 1px-thin horizontal morphology
+        - Primary method: Fits robust L1 baselines (cv2.fitLine) to text line column centers
+          plus Probabilistic Hough Lines (cv2.HoughLinesP) on Canny edges for table rules,
+          headers, and architectural frames, returning the weighted median angle.
+        - Fallback method: Multi-strip vertical projection profiling across 3 interior columns.
         """
         try:
             h, w = image.shape[:2]
@@ -548,58 +652,84 @@ class BookScanEngine:
             else:
                 gray = proxy
 
-            # 1. Adaptive illumination normalization (removes scanner gradients, spine shadow, yellowing)
-            bg = cv2.medianBlur(gray, 21)
+            # 1. Adaptive illumination normalization & dark void masking
+            bg = cv2.medianBlur(gray, 25)
             diff = cv2.subtract(bg, gray)
-            _, thresh = cv2.threshold(diff, 16, 255, cv2.THRESH_BINARY)
+            # Zero out regions where background itself is dark (scanner lid void or dark spine crease)
+            diff[bg < 175] = 0
 
             # 2. Mask outer margins if requested (scanner platen borders, feed rollers)
             if ignore_borders:
                 m_h = int(ph * 0.06)
                 m_w = int(pw * 0.06)
-                thresh[:m_h, :] = 0
-                thresh[-m_h:, :] = 0
-                thresh[:, :m_w] = 0
-                thresh[:, -m_w:] = 0
+                diff[:m_h, :] = 0
+                diff[-m_h:, :] = 0
+                diff[:, :m_w] = 0
+                diff[:, -m_w:] = 0
 
-            # 3. Horizontal morphological structuring to fuse words into continuous text lines
-            k_w = max(15, int(pw * 0.038))
-            k_h = max(2, int(ph * 0.003))
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_w, k_h))
-            dilated = cv2.dilate(thresh, kernel)
+            _, thresh = cv2.threshold(diff, 18, 255, cv2.THRESH_BINARY)
 
-            # 4. Primary: Contour-based text baseline detection (high precision, immune to multi-column misalignment)
-            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            angles = []
-            weights = []
+            # 3. Horizontal morphological structuring (1px vertical height to avoid vertical blob skew)
+            k_w = max(18, int(pw * 0.045))
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_w, 1))
+            fused = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
-            for c in contours:
-                area = cv2.contourArea(c)
-                if area > 80:
-                    rect = cv2.minAreaRect(c)
-                    (cx, cy), (rw, rh), a = rect
-                    if rw < rh:
-                        rw, rh = rh, rw
-                        a += 90.0
-                    while a > 45.0:
-                        a -= 90.0
-                    while a < -45.0:
-                        a += 90.0
+            # 4. Primary A: Robust L1 line fitting on text line column centers
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fused, connectivity=8)
+            angles: List[float] = []
+            weights: List[float] = []
 
-                    aspect = rw / max(1.0, rh)
-                    # Text line criteria: elongated horizontal aspect ratio
-                    if aspect >= 2.5 and abs(a) <= max_angle:
-                        angles.append(a)
-                        weights.append(rw)
+            for lbl in range(1, num_labels):
+                cw = int(stats[lbl, cv2.CC_STAT_WIDTH])
+                ch = int(stats[lbl, cv2.CC_STAT_HEIGHT])
+                area = int(stats[lbl, cv2.CC_STAT_AREA])
+                if cw >= max(35, int(pw * 0.06)) and ch <= int(ph * 0.08) and cw / max(1, ch) >= 2.5:
+                    x0 = int(stats[lbl, cv2.CC_STAT_LEFT])
+                    y0 = int(stats[lbl, cv2.CC_STAT_TOP])
+                    sub = (labels[y0:y0 + ch, x0:x0 + cw] == lbl)
+                    col_has = np.any(sub, axis=0)
+                    xs = np.where(col_has)[0].astype(np.float32)
+                    if len(xs) >= 25:
+                        ys = (
+                            np.sum(sub * np.arange(ch)[:, None], axis=0)[col_has]
+                            / np.maximum(1, np.sum(sub, axis=0)[col_has])
+                        )
+                        pts = np.column_stack((xs, ys)).astype(np.float32)
+                        fit_res = cv2.fitLine(pts, cv2.DIST_L1, 0, 0.01, 0.01).flatten()
+                        vx, vy = float(fit_res[0]), float(fit_res[1])
+                        angle_deg = math.degrees(math.atan2(vy, vx))
+                        if abs(angle_deg) <= max_angle:
+                            angles.append(angle_deg)
+                            weights.append(float(cw * math.sqrt(area)))
 
-            if len(angles) >= 4:
-                # Weighted median of text line angles
+            # 4. Primary B: Probabilistic Hough Transform on Canny edges (tables, footer rules, drawings)
+            edges = cv2.Canny(thresh, 50, 150)
+            lines = cv2.HoughLinesP(
+                edges, 1, np.pi / 1800, threshold=50,
+                minLineLength=max(40, int(pw * 0.08)), maxLineGap=15
+            )
+            if lines is not None:
+                for ln in lines.reshape(-1, 4):
+                    x1, y1, x2, y2 = int(ln[0]), int(ln[1]), int(ln[2]), int(ln[3])
+                    dx, dy = x2 - x1, y2 - y1
+                    length = math.hypot(dx, dy)
+                    if length >= 40:
+                        ang = math.degrees(math.atan2(dy, dx))
+                        if abs(ang) <= max_angle:
+                            angles.append(ang)
+                            weights.append(length * 1.5)
+                        elif abs(abs(ang) - 90.0) <= max_angle:
+                            v_ang = ang - 90.0 if ang > 0 else ang + 90.0
+                            angles.append(v_ang)
+                            weights.append(length * 1.2)
+
+            if len(angles) >= 3:
                 sorted_indices = np.argsort(angles)
                 sorted_angles = np.array(angles)[sorted_indices]
                 sorted_weights = np.array(weights)[sorted_indices]
                 cum_weights = np.cumsum(sorted_weights)
                 cutoff = cum_weights[-1] / 2.0
-                median_idx = np.where(cum_weights >= cutoff)[0][0]
+                median_idx = int(np.where(cum_weights >= cutoff)[0][0])
                 best_angle = float(sorted_angles[median_idx])
                 return round(best_angle, 2)
 
@@ -612,7 +742,7 @@ class BookScanEngine:
             coarse_angles = np.arange(-max_angle, max_angle + 0.5, 0.5)
             for a in coarse_angles:
                 rot = cv2.getRotationMatrix2D((cx, cy), a, 1.0)
-                warped = cv2.warpAffine(dilated, rot, (pw, ph), flags=cv2.INTER_NEAREST)
+                warped = cv2.warpAffine(fused, rot, (pw, ph), flags=cv2.INTER_NEAREST)
                 v = 0.0
                 for s1, s2 in strips:
                     strip = warped[:, int(pw * s1):int(pw * s2)]
@@ -624,7 +754,7 @@ class BookScanEngine:
             fine_angles = np.arange(best_angle - 0.5, best_angle + 0.6, 0.05)
             for a in fine_angles:
                 rot = cv2.getRotationMatrix2D((cx, cy), a, 1.0)
-                warped = cv2.warpAffine(dilated, rot, (pw, ph), flags=cv2.INTER_NEAREST)
+                warped = cv2.warpAffine(fused, rot, (pw, ph), flags=cv2.INTER_NEAREST)
                 v = 0.0
                 for s1, s2 in strips:
                     strip = warped[:, int(pw * s1):int(pw * s2)]
@@ -707,15 +837,199 @@ class BookScanEngine:
         return True
 
     @staticmethod
+    def apply_spot_masks(image: np.ndarray, masks: Optional[List[Dict[str, Any]]]) -> np.ndarray:
+        """Applies user-drawn whiteout / spot erase boxes onto the page image."""
+        if not masks:
+            return image
+        img = image.copy()
+        h, w = img.shape[:2]
+        for m in masks:
+            try:
+                x1 = int(round(max(0.0, min(1.0, float(m.get("x1", 0.0)))) * w))
+                y1 = int(round(max(0.0, min(1.0, float(m.get("y1", 0.0)))) * h))
+                x2 = int(round(max(0.0, min(1.0, float(m.get("x2", 0.0)))) * w))
+                y2 = int(round(max(0.0, min(1.0, float(m.get("y2", 0.0)))) * h))
+                if x2 < x1:
+                    x1, x2 = x2, x1
+                if y2 < y1:
+                    y1, y2 = y2, y1
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                raw_col = str(m.get("color") or m.get("fill") or "#ffffff").strip()
+                if not raw_col.startswith("#"):
+                    raw_col = "#ffffff"
+                r, g, b = hex_to_rgb(raw_col)
+                bgr_val = (int(round(b * 255)), int(round(g * 255)), int(round(r * 255)))
+                img[y1:y2, x1:x2] = bgr_val
+            except Exception:
+                continue
+        return img
+
+    @staticmethod
+    def flatten_spine_illumination(image: np.ndarray) -> np.ndarray:
+        """
+        Morphological background cleanup (removes curved book-spine gutter shadows,
+        scanner show-through, and uneven gray/yellow lighting across the sheet while
+        strictly preserving colored ink stamps, photos, and crisp dark text).
+        """
+        try:
+            h, w = image.shape[:2]
+            if h < 16 or w < 16:
+                return image
+
+            # Downscale 3x to estimate the background paper illumination envelope
+            sh, sw = max(12, h // 3), max(12, w // 3)
+            small = cv2.resize(image, (sw, sh), interpolation=cv2.INTER_AREA)
+            gray_small = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if len(small.shape) == 3 else small
+
+            ksize = max(15, int(round(min(sh, sw) * 0.12)))
+            if ksize % 2 == 0:
+                ksize += 1
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+            # Dilate + close to bridge across text lines and capture the true local paper brightness
+            bg_small = cv2.dilate(gray_small, kernel, iterations=1)
+            bg_small = cv2.morphologyEx(bg_small, cv2.MORPH_CLOSE, kernel)
+            bg_small = cv2.GaussianBlur(bg_small, (0, 0), max(2.5, ksize * 0.22))
+
+            bg_full = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+            # Clamp envelope floor so large dark illustrations/blocks are not inverted
+            bg_full = np.maximum(bg_full, 95.0)
+
+            if len(image.shape) == 3:
+                hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+                sat = hsv[:, :, 1].astype(np.float32)
+                # Protect saturated colored stamps/illustrations
+                chroma_weight = np.clip((sat - 30.0) / 35.0, 0.0, 1.0)[:, :, None]
+
+                # Divide image by local background envelope to normalize uneven shadows to 255
+                norm = (image.astype(np.float32) / bg_full[:, :, None]) * 255.0
+                # Softly pull normalized background (norm >= 218) to pure 255 white while deepening text contrast
+                leveled = np.clip((norm - 18.0) * (255.0 / (222.0 - 18.0)), 0.0, 255.0)
+
+                out = image.astype(np.float32) * chroma_weight + leveled * (1.0 - chroma_weight)
+                return np.clip(out, 0, 255).astype(np.uint8)
+            else:
+                norm = (image.astype(np.float32) / bg_full) * 255.0
+                leveled = np.clip((norm - 18.0) * (255.0 / (222.0 - 18.0)), 0.0, 255.0)
+                return leveled.astype(np.uint8)
+        except Exception:
+            return image
+
+    @staticmethod
+    def despeckle_image(image: np.ndarray, level: int = 1) -> np.ndarray:
+        """
+        Connected-components pepper-noise & scanner dust removal in background regions.
+        Removes isolated tiny scanner dust specks without erasing text punctuation or diacritics.
+        level: 1 (Light), 2 (Medium), 3 (Strong).
+        """
+        if level <= 0:
+            return image
+        try:
+            h, w = image.shape[:2]
+            area_scale = max(0.35, (min(w, h) / 1000.0) ** 2)
+            base_area = {1: 8, 2: 18, 3: 36}.get(int(level), 12)
+            max_speck_area = max(3, int(round(base_area * area_scale)))
+
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+            # Use local background comparison so specks inside légèrement shaded areas are also caught
+            local_bg = cv2.medianBlur(gray, 21)
+            diff = cv2.subtract(local_bg, gray)
+            dark_mask = ((diff > 15) | (gray < 215)).astype(np.uint8) * 255
+
+            # Group legitimate text characters & nearby dots/diacritics together (3x3 kernel)
+            proximity_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            grouped = cv2.dilate(dark_mask, proximity_kernel, iterations=1)
+
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(dark_mask, connectivity=8)
+            if num_labels <= 1:
+                return image
+
+            _, group_labels, group_stats, _ = cv2.connectedComponentsWithStats(grouped, connectivity=8)
+
+            remove_labels = np.zeros(num_labels, dtype=bool)
+            for lbl in range(1, num_labels):
+                area = int(stats[lbl, cv2.CC_STAT_AREA])
+                if area <= max_speck_area:
+                    sample_y = int(stats[lbl, cv2.CC_STAT_TOP])
+                    sample_x = int(stats[lbl, cv2.CC_STAT_LEFT])
+                    grp_id = int(group_labels[sample_y, sample_x])
+                    grp_area = int(group_stats[grp_id, cv2.CC_STAT_AREA]) if grp_id > 0 else area
+                    if grp_area <= max_speck_area * 3:
+                        remove_labels[lbl] = True
+
+            if not np.any(remove_labels):
+                return image
+
+            # Dilate speck mask by 1px to also clean JPEG ringing halos around dust specks
+            speck_mask = (remove_labels[labels]).astype(np.uint8) * 255
+            speck_mask = cv2.dilate(speck_mask, np.ones((3, 3), np.uint8), iterations=1) > 0
+            out = image.copy()
+            out[speck_mask] = 255
+            return out
+        except Exception:
+            return image
+
+    @staticmethod
+    def apply_smart_auto_color(
+        image: np.ndarray,
+        saturation: float = 1.30,
+        contrast: float = 1.12,
+        whiten_bg: bool = True,
+    ) -> np.ndarray:
+        """
+        Pixel-Level Chroma-Aware Hybrid Compositing ('Smart Auto' Mode):
+        Handles pages that contain a mix of color images/stamps AND black text on the same sheet:
+        1. Chroma Mask (HSV S >= 28): Preserves and boosts color illustrations, blue/red stamps, and signatures.
+        2. Paper Background Mask: Smoothly levels and whitens neutral paper tint to crisp #FFFFFF.
+        3. Neutral Ink/Text Mask: Pulls neutral dark text toward deep, high-contrast black for razor-sharp legibility.
+        """
+        try:
+            if len(image.shape) != 3:
+                return image
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
+            h_ch, s_ch, v_ch = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+            # Smooth chroma weight: 0.0 for neutral text/paper (S <= 24), 1.0 for colored ink/images (S >= 52)
+            chroma_w = np.clip((s_ch - 24.0) / 28.0, 0.0, 1.0)
+            # Soften mask spatially so color anti-aliased fringes blend seamlessly with text/paper
+            chroma_w = cv2.GaussianBlur(chroma_w, (5, 5), 1.2)[:, :, None]
+
+            # Branch A: Rich Color Enhancement for colored regions (stamps, signatures, color photos/diagrams)
+            s_boost = np.clip(s_ch * max(1.05, float(saturation)), 0, 255)
+            v_color = np.clip((v_ch - 128.0) * max(1.0, float(contrast) * 0.96) + 128.0, 0, 255)
+            hsv_enhanced = np.stack([h_ch, s_boost, v_color], axis=2).astype(np.uint8)
+            color_branch = cv2.cvtColor(hsv_enhanced, cv2.COLOR_HSV2BGR).astype(np.float32)
+
+            # Branch B: Crisp Neutral Text & Clean Paper Background
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            # Estimate local paper white point via 85th percentile (typically ~225..245 on scans)
+            paper_p85 = float(np.percentile(gray, 85))
+            white_knee = max(195.0, min(238.0, paper_p85 - 8.0)) if whiten_bg else 242.0
+            black_knee = 72.0
+
+            # S-curve contrast stretch between black_knee and white_knee
+            norm = np.clip((gray - black_knee) / max(10.0, white_knee - black_knee), 0.0, 1.0)
+            # Apply subtle gamma / contrast power
+            gamma = 1.0 / max(0.85, min(1.5, float(contrast)))
+            crisp_gray = np.clip((norm ** gamma) * 255.0, 0.0, 255.0)
+            neutral_branch = np.repeat(crisp_gray[:, :, None], 3, axis=2)
+
+            # Composite Color Branch + Crisp Neutral Branch
+            blended = color_branch * chroma_w + neutral_branch * (1.0 - chroma_w)
+            return np.clip(blended, 0, 255).astype(np.uint8)
+        except Exception:
+            return image
+
+    @staticmethod
     def process_single_page(
         image: np.ndarray,
-        clean_borders: bool = True,
+        clean_borders: bool = False,
         border_margin_px: int = 15,
         border_threshold: int = 210,
         enhance_colors: bool = True,
         saturation: float = 1.30,
         contrast: float = 1.10,
-        color_mode: str = "color",
+        color_mode: str = "auto",
         bw_threshold: int = 180,
         whiten_bg: bool = False,
         deskew: bool = False,
@@ -724,19 +1038,23 @@ class BookScanEngine:
         deskew_mode: str = "auto",
         deskew_angle: float = 0.0,
         deskew_max_angle: float = 10.0,
-        deskew_ignore_borders: bool = True
+        deskew_ignore_borders: bool = True,
+        masks: Optional[List[Dict[str, Any]]] = None,
+        flatten_illumination: bool = False,
+        despeckle_level: int = 0,
     ) -> np.ndarray:
         """
         Runs the refined processing pipeline:
         1. Intelligent Deskew & Alignment module (straightens content first)
-        2. Minimal border cleaning (cleans straight outer edges cleanly)
-        3. Paper whitening (deshadow / remove yellow-gray scan tint)
-        4. Color restoration & Color Mode conversion (Color / Grayscale / B&W)
-        5. Sharpening
+        2. Spot Masking / Whiteout Erase boxes
+        3. Morphological Spine Shadow Illumination Leveling & Despeckle
+        4. Paper whitening (deshadow / remove yellow-gray scan tint)
+        5. Color restoration & Color Mode conversion (Smart Auto / Color / Grayscale / B&W)
+        6. Sharpening
         """
         img = image
 
-        # 1. Deskew Module (priority) or Legacy Deskew — MUST run first so subsequent border clean is axis-aligned
+        # 1. Deskew Module (priority) or Legacy Deskew — MUST run first so subsequent steps are axis-aligned
         if deskew_module_enabled:
             if deskew_mode == "auto":
                 detected_angle = BookScanEngine.detect_skew_angle(
@@ -750,19 +1068,32 @@ class BookScanEngine:
         elif deskew:
             img = BookScanEngine.deskew_image(img)
 
-        # 2. Minimal border cleaning (targets scan feed/glass boundary damage along straightened axes)
+        # 2. Spot Masking / Whiteout Erase Boxes (applied in view coordinates)
+        if masks:
+            img = BookScanEngine.apply_spot_masks(img, masks)
+
+        # 3. Legacy border cleaning (if explicitly enabled)
         if clean_borders and border_margin_px > 0:
             img = BookScanEngine.clean_outer_borders(img, margin_px=border_margin_px, threshold=border_threshold)
 
-        # 3. Paper background whitening (clears yellow/gray paper cast & light bleed-through)
+        # 4. Morphological Spine Illumination Leveling & Despeckle
+        if flatten_illumination:
+            img = BookScanEngine.flatten_spine_illumination(img)
+
+        if despeckle_level and int(despeckle_level) > 0:
+            img = BookScanEngine.despeckle_image(img, level=int(despeckle_level))
+
+        # 5. Paper background whitening (clears yellow/gray paper cast & light bleed-through)
         if whiten_bg:
             try:
                 gray_bg = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-                paper_mask = gray_bg >= 212
+                hsv_bg = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) if len(img.shape) == 3 else None
+                low_sat = (hsv_bg[:, :, 1] < 32) if hsv_bg is not None else np.ones_like(gray_bg, dtype=bool)
+                paper_mask = (gray_bg >= 212) & low_sat
                 whitened = img.copy()
                 whitened[paper_mask] = 255
-                # Smooth transition between 190..212
-                mid_mask = (gray_bg >= 190) & (gray_bg < 212)
+                # Smooth transition between 190..212 on neutral paper
+                mid_mask = (gray_bg >= 190) & (gray_bg < 212) & low_sat
                 if np.any(mid_mask):
                     alpha = ((gray_bg[mid_mask].astype(np.float32) - 190.0) / 22.0)[:, None]
                     whitened[mid_mask] = np.clip(
@@ -773,15 +1104,21 @@ class BookScanEngine:
             except Exception:
                 pass
 
-        # 4. Restore washed-out colors & apply Color Mode (color / grayscale / bw)
-        mode_norm = (color_mode or "color").lower()
-        if mode_norm == "bw":
+        # 6. Restore washed-out colors & apply Color Mode (auto / color / grayscale / bw / original)
+        mode_norm = (color_mode or "original").lower()
+        if mode_norm == "auto" and enhance_colors:
+            img = BookScanEngine.apply_smart_auto_color(
+                img,
+                saturation=saturation,
+                contrast=contrast,
+                whiten_bg=whiten_bg,
+            )
+        elif mode_norm == "bw":
             try:
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
                 if contrast != 1.0:
                     gray = np.clip((gray.astype(np.float32) - 128.0) * contrast + 128.0, 0, 255).astype(np.uint8)
                 thr = max(40, min(250, int(bw_threshold)))
-                # Combine adaptive illumination with global threshold for clean text & solid fills
                 adapt = cv2.adaptiveThreshold(
                     gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 12
                 )
@@ -798,11 +1135,12 @@ class BookScanEngine:
                 img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             except Exception:
                 pass
-        else:
+        elif mode_norm == "color":
             if enhance_colors:
                 img = BookScanEngine.enhance_colors_and_richness(img, saturation=saturation, contrast=contrast)
+        # Note: if mode_norm == "original" or enhance_colors is False, preserve original color levels untouched
 
-        # 5. Sharpen (skip for binary B&W where edges are already 1-bit crisp)
+        # 7. Sharpen (skip for binary B&W where edges are already 1-bit crisp)
         if sharpen and mode_norm != "bw":
             try:
                 gaussian = cv2.GaussianBlur(img, (0, 0), 2.0)
@@ -1372,7 +1710,7 @@ class BookScanEngine:
         return new_pages, new_selected_id
 
     @staticmethod
-    def apply_crop_to_pages(pages, page_id, crop_box, apply_to_all=False, target_page_ids=None):
+    def apply_crop_to_pages(pages, page_id, crop_box, apply_to_all=False, target_page_ids=None, per_page_crops=None):
         """Commit a view-relative crop box onto targeted pages (mutates + returns pages).
 
         The canvas overlay works in coordinates relative to the *rendered* image
@@ -1383,23 +1721,31 @@ class BookScanEngine:
         overlay to full bed afterwards.
         """
         target_ids = set(target_page_ids) if target_page_ids is not None else None
+        per_map = per_page_crops or {}
 
         for p in pages:
-            if target_ids is not None:
-                is_target = p["id"] in target_ids
-            elif apply_to_all:
+            pid = p["id"]
+            if pid in per_map:
                 is_target = True
+                raw_cb = per_map[pid]
+                page_cb_in = raw_cb.dict() if hasattr(raw_cb, "dict") else dict(raw_cb)
             else:
-                is_target = (p["id"] == page_id)
+                if target_ids is not None:
+                    is_target = pid in target_ids
+                elif apply_to_all:
+                    is_target = True
+                else:
+                    is_target = (pid == page_id)
+                page_cb_in = crop_box
 
-            if is_target:
+            if is_target and page_cb_in:
                 is_slice = (
                     p.get("half") in ["left", "right"]
                     or p.get("slice_box") is not None
                     or bool(p.get("parent_page_id"))
                 )
                 if is_slice:
-                    composed = BookScanEngine.compose_crop_boxes(p.get("page_crop_box"), crop_box)
+                    composed = BookScanEngine.compose_crop_boxes(p.get("page_crop_box"), page_cb_in)
                     p["page_crop_box"] = composed
                     base_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
                     base_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
@@ -1408,7 +1754,7 @@ class BookScanEngine:
                     p["width_mm"] = round(base_w * BookScanEngine.box_frac_w(composed), 1)
                     p["height_mm"] = round(base_h * BookScanEngine.box_frac_h(composed), 1)
                 else:
-                    composed = BookScanEngine.compose_crop_boxes(p.get("crop_box"), crop_box)
+                    composed = BookScanEngine.compose_crop_boxes(p.get("crop_box"), page_cb_in)
                     p["crop_box"] = composed
                     orig_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
                     orig_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
@@ -1423,22 +1769,197 @@ class BookScanEngine:
         return pages
 
     @staticmethod
+    def apply_deskew_to_pages(
+        pages: List[Dict[str, Any]],
+        page_id: Optional[str] = None,
+        angle: Optional[float] = None,
+        per_page_angles: Optional[Dict[str, float]] = None,
+        clear_all: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Persist per-page deskew angles onto session pages."""
+        if clear_all:
+            for p in pages:
+                if "deskew_angle" in p:
+                    p.pop("deskew_angle", None)
+                    p["rev"] = int(p.get("rev", 0)) + 1
+            return pages
+
+        if per_page_angles:
+            for p in pages:
+                pid = p["id"]
+                if pid in per_page_angles:
+                    p["deskew_angle"] = round(float(per_page_angles[pid]), 2)
+                    p["rev"] = int(p.get("rev", 0)) + 1
+
+        if page_id and angle is not None:
+            for p in pages:
+                if p["id"] == page_id:
+                    p["deskew_angle"] = round(float(angle), 2)
+                    p["rev"] = int(p.get("rev", 0)) + 1
+                    break
+        return pages
+
+    @staticmethod
+    def apply_masks_to_pages(pages: List[Dict[str, Any]], req: Any) -> List[Dict[str, Any]]:
+        """Add, remove, or clear spot whiteout masks across a target scope of pages."""
+        action = getattr(req, "action", "add") or "add"
+        if action == "clear_all":
+            for p in pages:
+                if p.get("masks"):
+                    p["masks"] = []
+                    p["rev"] = int(p.get("rev", 0)) + 1
+            return pages
+
+        if action == "clear_page":
+            target_set = set(req.target_page_ids) if getattr(req, "target_page_ids", None) else (
+                {req.page_id} if getattr(req, "page_id", None) else set()
+            )
+            for p in pages:
+                if p["id"] in target_set and p.get("masks"):
+                    p["masks"] = []
+                    p["rev"] = int(p.get("rev", 0)) + 1
+            return pages
+
+        if action == "remove":
+            mask_id = getattr(req, "mask_id", None)
+            if not mask_id:
+                return pages
+            for p in pages:
+                existing = p.get("masks") or []
+                filtered = [m for m in existing if m.get("id") != mask_id]
+                if len(filtered) != len(existing):
+                    p["masks"] = filtered
+                    p["rev"] = int(p.get("rev", 0)) + 1
+            return pages
+
+        # action == "add"
+        mask_obj = getattr(req, "mask_box", None) or getattr(req, "mask", None)
+        if not mask_obj:
+            return pages
+        raw_box = mask_obj.dict() if hasattr(mask_obj, "dict") else dict(mask_obj)
+
+        target_set = set(req.target_page_ids) if getattr(req, "target_page_ids", None) else (
+            {req.page_id} if getattr(req, "page_id", None) else set()
+        )
+        color_hex = str(raw_box.get("color") or raw_box.get("fill") or "#ffffff").strip()
+        if not color_hex.startswith("#"):
+            color_hex = "#ffffff"
+        for p in pages:
+            if p["id"] in target_set:
+                existing = list(p.get("masks") or [])
+                box_copy = {
+                    "id": raw_box.get("id") or f"m_{uuid.uuid4().hex[:6]}",
+                    "x1": round(float(raw_box.get("x1", 0.0)), 4),
+                    "y1": round(float(raw_box.get("y1", 0.0)), 4),
+                    "x2": round(float(raw_box.get("x2", 0.0)), 4),
+                    "y2": round(float(raw_box.get("y2", 0.0)), 4),
+                    "color": color_hex,
+                }
+                existing.append(box_copy)
+                p["masks"] = existing
+                p["rev"] = int(p.get("rev", 0)) + 1
+        return pages
+
+    @staticmethod
+    def apply_color_mode_to_pages(
+        pages: List[Dict[str, Any]],
+        page_id: Optional[str] = None,
+        color_mode: Optional[str] = None,
+        target_page_ids: Optional[List[str]] = None,
+        clear_all: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Persist or clear per-page color mode overrides ('auto', 'color', 'grayscale', 'bw')."""
+        if clear_all:
+            for p in pages:
+                if "color_mode" in p:
+                    p.pop("color_mode", None)
+                    p["rev"] = int(p.get("rev", 0)) + 1
+            return pages
+
+        target_set = set(target_page_ids) if target_page_ids else ({page_id} if page_id else set())
+        for p in pages:
+            if p["id"] in target_set:
+                if color_mode is None or color_mode == "":
+                    p.pop("color_mode", None)
+                else:
+                    p["color_mode"] = color_mode
+                p["rev"] = int(p.get("rev", 0)) + 1
+        return pages
+
+    @staticmethod
     def render_export_pages(doc_map, pages, req, progress_callback: Optional[Callable[[int, int, str], None]] = None) -> tuple:
-        """Per-page extract + scope evaluation + processing. Returns (images, bleed_list)."""
+        """Per-page extract + scope evaluation + processing. Returns (images, bleed_list).
+
+        Strictly honors per-page committed crops, uncommitted draft crops (`req.per_page_crops`),
+        per-page deskew angles (`p_info['deskew_angle']` or `req.per_page_deskew_angles`),
+        per-page spot masks (`p_info['masks']`), and per-page color mode overrides
+        so that export never overrides individual page edits.
+        """
         processed_images = []
         per_page_bleed_list = []
         total = len(pages)
+        extra_crops = getattr(req, "per_page_crops", None) or {}
+        extra_angles = getattr(req, "per_page_deskew_angles", None) or {}
+        extra_colors = getattr(req, "per_page_color_modes", None) or {}
+
         for idx, p_info in enumerate(pages):
             page_num = idx + 1
+            pid = p_info["id"]
             if progress_callback:
-                progress_callback(page_num, total, f"Processing page {page_num} of {total} (color, crop, deskew)...")
+                progress_callback(page_num, total, f"Processing page {page_num} of {total} (cleanup, color, crop, deskew)...")
 
-            raw_img = BookScanEngine.extract_page_image(doc_map, p_info, dpi=req.dpi)
+            # If there is an uncommitted draft crop for this page, compose it onto a copy of p_info for export
+            eff_page_info = dict(p_info)
+            if pid in extra_crops:
+                raw_cb = extra_crops[pid]
+                cb_dict = raw_cb.dict() if hasattr(raw_cb, "dict") else dict(raw_cb)
+                if (
+                    cb_dict.get("x1", 0.0) > 0.001
+                    or cb_dict.get("y1", 0.0) > 0.001
+                    or cb_dict.get("x2", 1.0) < 0.999
+                    or cb_dict.get("y2", 1.0) < 0.999
+                ):
+                    is_slice = (
+                        eff_page_info.get("half") in ["left", "right"]
+                        or eff_page_info.get("slice_box") is not None
+                        or bool(eff_page_info.get("parent_page_id"))
+                    )
+                    if is_slice:
+                        eff_page_info["page_crop_box"] = BookScanEngine.compose_crop_boxes(
+                            eff_page_info.get("page_crop_box"), cb_dict
+                        )
+                    else:
+                        eff_page_info["crop_box"] = BookScanEngine.compose_crop_boxes(
+                            eff_page_info.get("crop_box"), cb_dict
+                        )
+
+            raw_img = BookScanEngine.extract_page_image(doc_map, eff_page_info, dpi=req.dpi)
 
             # Evaluate module scope per page
-            apply_deskew = req.deskew_module_enabled and BookScanEngine.is_page_in_scope(
+            in_deskew_scope = BookScanEngine.is_page_in_scope(
                 page_num, req.deskew_scope_mode, req.deskew_custom_range
             )
+            has_page_angle = (pid in extra_angles) or (eff_page_info.get("deskew_angle") is not None)
+            apply_deskew = (req.deskew_module_enabled and in_deskew_scope) or (has_page_angle and in_deskew_scope)
+
+            if pid in extra_angles:
+                eff_deskew_mode = "manual"
+                eff_deskew_angle = float(extra_angles[pid])
+            elif eff_page_info.get("deskew_angle") is not None:
+                eff_deskew_mode = "manual"
+                eff_deskew_angle = float(eff_page_info["deskew_angle"])
+            else:
+                eff_deskew_mode = req.deskew_mode
+                eff_deskew_angle = req.deskew_angle
+
+            apply_cleanup = getattr(req, "cleanup_module_enabled", True) and BookScanEngine.is_page_in_scope(
+                page_num,
+                getattr(req, "cleanup_scope_mode", "all"),
+                getattr(req, "cleanup_custom_range", ""),
+            )
+            do_flatten_illum = apply_cleanup and bool(getattr(req, "flatten_illumination", False))
+            do_despeckle = int(getattr(req, "despeckle_level", 0) or 0) if apply_cleanup else 0
+
             apply_restoration = req.restoration_module_enabled and BookScanEngine.is_page_in_scope(
                 page_num, req.restoration_scope_mode, req.restoration_custom_range
             )
@@ -1446,17 +1967,19 @@ class BookScanEngine:
                 page_num, req.bleed_scope_mode, req.bleed_custom_range
             )
 
+            page_color_override = extra_colors.get(pid) or eff_page_info.get("color_mode")
+
             # Restoration settings
             if req.restoration_module_enabled:
                 do_clean_borders = apply_restoration and req.clean_borders
-                do_enhance_colors = apply_restoration and req.enhance_colors
-                do_color_mode = req.color_mode if apply_restoration else "color"
+                do_enhance_colors = (apply_restoration or bool(page_color_override)) and req.enhance_colors
+                do_color_mode = page_color_override or (req.color_mode if apply_restoration else "original")
                 do_whiten_bg = apply_restoration and req.whiten_bg
             else:
-                do_clean_borders = req.clean_borders
-                do_enhance_colors = req.enhance_colors
-                do_color_mode = req.color_mode
-                do_whiten_bg = req.whiten_bg
+                do_clean_borders = False
+                do_enhance_colors = bool(page_color_override)
+                do_color_mode = page_color_override or "original"
+                do_whiten_bg = False
 
             cleaned = BookScanEngine.process_single_page(
                 raw_img,
@@ -1472,10 +1995,13 @@ class BookScanEngine:
                 deskew=req.deskew if not req.deskew_module_enabled else False,
                 sharpen=req.sharpen,
                 deskew_module_enabled=apply_deskew,
-                deskew_mode=req.deskew_mode,
-                deskew_angle=req.deskew_angle,
+                deskew_mode=eff_deskew_mode,
+                deskew_angle=eff_deskew_angle,
                 deskew_max_angle=req.deskew_max_angle,
                 deskew_ignore_borders=req.deskew_ignore_borders,
+                masks=eff_page_info.get("masks"),
+                flatten_illumination=do_flatten_illum,
+                despeckle_level=do_despeckle,
             )
             processed_images.append(cleaned)
 
@@ -1496,6 +2022,113 @@ class BookScanEngine:
                 "color_mode": do_color_mode,
             })
         return processed_images, per_page_bleed_list
+
+    @staticmethod
+    def export_pages_archive(
+        processed_images: List[np.ndarray],
+        output_zip_path: str,
+        export_format: str = "jpeg",
+        bleed_mm: float = 0.0,
+        bleed_mode: str = "mirror",
+        bleed_color: str = "#ffffff",
+        show_crop_marks: bool = False,
+        dpi: int = 300,
+        quality: int = 92,
+        tiff_compression: str = "lzw",
+        per_page_bleed: Optional[List[Dict[str, Any]]] = None,
+        bleed_placement: str = "outside",
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> bool:
+        """
+        Compiles processed pages into a ZIP archive of separate files:
+        - `pdf_split`: Separate 1-page print-ready PDFs (`page_001.pdf`, ...)
+        - `jpeg`: Separate JPEG files (`page_001.jpg`, ...) with custom quality
+        - `png`: Separate lossless PNG files (`page_001.png`, ...)
+        - `tiff`: Separate archival TIFF files (`page_001.tif`, ...) with LZW/Deflate/None compression
+        """
+        if not processed_images:
+            return False
+
+        fmt = (export_format or "jpeg").lower()
+        total = len(processed_images)
+        q_clamped = max(10, min(100, int(quality or 92)))
+
+        with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for idx, img in enumerate(processed_images):
+                page_num = idx + 1
+                if progress_callback:
+                    progress_callback(page_num, total, f"Packaging {fmt.upper()} page {page_num} of {total}...")
+
+                cur_bleed_mm = bleed_mm
+                cur_bleed_mode = bleed_mode
+                cur_bleed_color = bleed_color
+                cur_show_crop = show_crop_marks
+                cur_placement = bleed_placement
+                cur_color_mode = "color"
+                if per_page_bleed and idx < len(per_page_bleed):
+                    cur_bleed_mm = per_page_bleed[idx].get("bleed_mm", 0.0)
+                    cur_bleed_mode = per_page_bleed[idx].get("bleed_mode", bleed_mode)
+                    cur_bleed_color = per_page_bleed[idx].get("bleed_color", bleed_color)
+                    cur_show_crop = per_page_bleed[idx].get("show_crop_marks", False)
+                    cur_placement = per_page_bleed[idx].get("placement", bleed_placement)
+                    cur_color_mode = per_page_bleed[idx].get("color_mode", "color")
+
+                if fmt == "pdf_split":
+                    single_pdf_path = f"{output_zip_path}_tmp_{page_num}.pdf"
+                    try:
+                        ok = BookScanEngine.add_bleed_and_export_pdf(
+                            processed_images=[img],
+                            output_pdf_path=single_pdf_path,
+                            bleed_mm=cur_bleed_mm,
+                            bleed_mode=cur_bleed_mode,
+                            bleed_color=cur_bleed_color,
+                            show_crop_marks=cur_show_crop,
+                            dpi=dpi,
+                            jpeg_quality=q_clamped,
+                            per_page_bleed=[{
+                                "bleed_mm": cur_bleed_mm,
+                                "bleed_mode": cur_bleed_mode,
+                                "bleed_color": cur_bleed_color,
+                                "show_crop_marks": cur_show_crop,
+                                "placement": cur_placement,
+                                "color_mode": cur_color_mode,
+                            }],
+                            bleed_placement=cur_placement,
+                        )
+                        if ok and os.path.exists(single_pdf_path):
+                            zf.write(single_pdf_path, arcname=f"page_{page_num:03d}.pdf")
+                    finally:
+                        if os.path.exists(single_pdf_path):
+                            os.remove(single_pdf_path)
+                    continue
+
+                bleed_px = int(round(max(0.0, float(cur_bleed_mm)) * (dpi / 25.4)))
+                extended_img = BookScanEngine.apply_bleed_to_image(
+                    img,
+                    bleed_px=bleed_px,
+                    bleed_mode=cur_bleed_mode,
+                    bleed_color=cur_bleed_color,
+                    draw_crop_marks=cur_show_crop,
+                    placement=cur_placement,
+                )
+
+                if fmt in ["jpeg", "jpg"]:
+                    ok, enc = cv2.imencode(".jpg", extended_img, [int(cv2.IMWRITE_JPEG_QUALITY), q_clamped])
+                    if ok:
+                        zf.writestr(f"page_{page_num:03d}.jpg", enc.tobytes())
+                elif fmt == "png":
+                    png_level = max(0, min(9, int(round((100 - q_clamped) / 10.0))))
+                    ok, enc = cv2.imencode(".png", extended_img, [int(cv2.IMWRITE_PNG_COMPRESSION), png_level])
+                    if ok:
+                        zf.writestr(f"page_{page_num:03d}.png", enc.tobytes())
+                elif fmt in ["tiff", "tif"]:
+                    comp_map = {"none": 1, "lzw": 5, "deflate": 8}
+                    comp_val = comp_map.get((tiff_compression or "lzw").lower(), 5)
+                    ok, enc = cv2.imencode(".tif", extended_img, [int(cv2.IMWRITE_TIFF_COMPRESSION), comp_val])
+                    if ok:
+                        zf.writestr(f"page_{page_num:03d}.tif", enc.tobytes())
+
+        return os.path.exists(output_zip_path)
 
     @staticmethod
     def duplicate_page(pages: List[Dict[str, Any]], target_page_id: str, position: str = "after") -> tuple[List[Dict[str, Any]], str]:

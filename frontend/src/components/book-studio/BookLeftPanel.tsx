@@ -6,7 +6,7 @@ import {
   IconBookStudio,
   IconImposingStudio,
 } from "@/components/shared/StudioIcons";
-import { BookIntakeMode, BookStudioPage } from "@/types/book_studio";
+import { BookIntakeMode, MultiFileStrategy, BookStudioPage } from "@/types/book_studio";
 import { LengthUnit } from "@/lib/units";
 import { parsePageRange } from "@/lib/pageScope";
 import { DeckCard } from "./DeckCard";
@@ -14,6 +14,8 @@ import { DeckListView } from "./DeckListView";
 import { PageContextMenu } from "./PageContextMenu";
 import { PagePropertiesModal } from "./PagePropertiesModal";
 import { DeckGrid } from "@/components/shared/DeckGrid";
+import { FileUploadQueue } from "./FileUploadQueue";
+import { ArrowLeftRight } from "lucide-react";
 
 interface BookLeftPanelProps {
   intakeMode: BookIntakeMode;
@@ -28,6 +30,18 @@ interface BookLeftPanelProps {
   setOddsOrder: (order: "forward" | "reverse") => void;
   evensOrder: "reverse" | "forward";
   setEvensOrder: (order: "reverse" | "forward") => void;
+  startWith?: "odds" | "evens";
+  setStartWith?: (startWith: "odds" | "evens") => void;
+  multiFileStrategy?: MultiFileStrategy;
+  setMultiFileStrategy?: (strategy: MultiFileStrategy) => void;
+  reverseFileIndices?: number[];
+  swapOddsEvens?: () => void;
+  files?: File[];
+  addFiles?: (newFiles: FileList | File[]) => void;
+  removeFile?: (index: number) => void;
+  moveFile?: (fromIdx: number, toIdx: number) => void;
+  toggleReverseFile?: (index: number) => void;
+  clearFiles?: () => void;
   splitPos: number;
   setSplitPos: (pos: number) => void;
   sessionId: string | null;
@@ -59,7 +73,10 @@ interface BookLeftPanelProps {
 
 export function BookLeftPanel({
   intakeMode, setIntakeMode, fileSingle, setFileSingle, fileOdds, setFileOdds, fileEvens, setFileEvens,
-  oddsOrder, setOddsOrder, evensOrder, setEvensOrder, sessionId, pages, selectedPageId, setSelectedPageId,
+  oddsOrder, setOddsOrder, evensOrder, setEvensOrder, startWith = "odds", setStartWith,
+  multiFileStrategy = "duplex", setMultiFileStrategy, reverseFileIndices = [], swapOddsEvens,
+  files = [], addFiles, removeFile, moveFile, toggleReverseFile, clearFiles,
+  sessionId, pages, selectedPageId, setSelectedPageId,
   selectedPageIds = [], setSelectedPageIds, isInitializing, initSession, resetJob, rotatePage, rotatePages,
   deletePage, deletePages, reorderPages, duplicatePage, duplicatePages, insertBlankPage, copyPage, pastePage,
   canPaste = false, extractPage, getThumbnailUrl, viewMode = "grid", unit = "mm", onCollapse,
@@ -194,8 +211,8 @@ export function BookLeftPanel({
     });
   };
   const intakeModes: { id: BookIntakeMode; title: string; tooltip: string; icon: React.ReactNode }[] = [
-    { id: "single_page", title: "Standard Book PDF", tooltip: "Single pages or 2-up spreads to split in studio", icon: <IconBookStudio size={15} /> },
-    { id: "dual_pass", title: "Dual Pass (Odds / Evens)", tooltip: "Collate separate odd and even duplex scan batches", icon: <IconImposingStudio size={15} /> },
+    { id: "single_page", title: "Standard Book PDF", tooltip: "Single document or 2-up spreads loaded into studio", icon: <IconBookStudio size={15} /> },
+    { id: "dual_pass", title: "Multi-File & Collation", tooltip: "Interleave odd/even duplex scans or combine split parts", icon: <IconImposingStudio size={15} /> },
   ];
   return (
     <div className="flex flex-col h-full bg-[#181D27] rounded-xl border border-[#242A38] overflow-hidden select-none">
@@ -349,56 +366,184 @@ export function BookLeftPanel({
             </div>
           </div>
           <div className="space-y-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">2. Source File</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              {intakeMode === "dual_pass" ? "2. Multi-File Configuration" : "2. Source File"}
+            </span>
+
             {intakeMode === "dual_pass" ? (
-              <div className="space-y-2">
-                <div onClick={() => oddsInputRef.current?.click()}
-                  title="Select PDF containing odd pages (1, 3, 5...)"
-                  className={`p-2.5 rounded-lg border border-dashed cursor-pointer text-center transition-colors ${fileOdds ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"}`}>
-                  <input ref={oddsInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileOdds(e.target.files?.[0] || null)} />
-                  <div className="text-xs font-medium text-slate-200 truncate">{fileOdds ? fileOdds.name : "Odds PDF (1, 3, 5...)"}</div>
+              <div className="space-y-2.5">
+                {/* Strategy Segmented Control */}
+                <div className="grid grid-cols-2 p-0.5 bg-[#131720] rounded-lg border border-[#242A38] text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setMultiFileStrategy?.("duplex")}
+                    className={`py-1 px-1.5 rounded-md font-medium transition-all text-center cursor-pointer ${
+                      multiFileStrategy === "duplex"
+                        ? "bg-[#181D27] text-white shadow-sm border border-[#2E3648]"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                    style={multiFileStrategy === "duplex" ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+                  >
+                    Duplex (Odds / Evens)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMultiFileStrategy?.("sequential")}
+                    className={`py-1 px-1.5 rounded-md font-medium transition-all text-center cursor-pointer ${
+                      multiFileStrategy === "sequential"
+                        ? "bg-[#181D27] text-white shadow-sm border border-[#2E3648]"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                    style={multiFileStrategy === "sequential" ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+                  >
+                    Combine Parts
+                  </button>
                 </div>
-                <div className="flex items-center justify-between text-[11px] px-0.5">
-                  <span className="text-slate-400">Odds:</span>
-                  <select value={oddsOrder} onChange={(e) => setOddsOrder(e.target.value as "forward" | "reverse")} className="bg-[#131720] border border-[#242A38] text-slate-200 rounded px-2 py-0.5 text-[11px]">
-                    <option value="forward">Forward (1, 3, 5)</option>
-                    <option value="reverse">Reverse (5, 3, 1)</option>
-                  </select>
-                </div>
-                <div onClick={() => evensInputRef.current?.click()}
-                  title="Select PDF containing even pages (2, 4, 6...)"
-                  className={`p-2.5 rounded-lg border border-dashed cursor-pointer text-center transition-colors ${fileEvens ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"}`}>
-                  <input ref={evensInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileEvens(e.target.files?.[0] || null)} />
-                  <div className="text-xs font-medium text-slate-200 truncate">{fileEvens ? fileEvens.name : "Evens PDF (6, 4, 2...)"}</div>
-                </div>
-                <div className="flex items-center justify-between text-[11px] px-0.5">
-                  <span className="text-slate-400">Evens:</span>
-                  <select value={evensOrder} onChange={(e) => setEvensOrder(e.target.value as "reverse" | "forward")} className="bg-[#131720] border border-[#242A38] text-slate-200 rounded px-2 py-0.5 text-[11px]">
-                    <option value="reverse">Reverse (...6, 4, 2)</option>
-                    <option value="forward">Forward (2, 4, 6...)</option>
-                  </select>
-                </div>
+
+                {multiFileStrategy === "duplex" ? (
+                  <div className="space-y-2">
+                    {/* Odds File */}
+                    <div
+                      onClick={() => oddsInputRef.current?.click()}
+                      title="Select PDF containing odd pages (1, 3, 5...)"
+                      className={`p-2.5 rounded-lg border border-dashed cursor-pointer text-center transition-colors ${
+                        fileOdds ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"
+                      }`}
+                    >
+                      <input ref={oddsInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileOdds(e.target.files?.[0] || null)} />
+                      <div className="text-xs font-medium text-slate-200 truncate">{fileOdds ? fileOdds.name : "Odds PDF (1, 3, 5...)"}</div>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] px-0.5">
+                      <span className="text-slate-400">Odds Order:</span>
+                      <select
+                        value={oddsOrder}
+                        onChange={(e) => setOddsOrder(e.target.value as "forward" | "reverse")}
+                        className="bg-[#131720] border border-[#242A38] text-slate-200 rounded px-2 py-0.5 text-[11px] cursor-pointer"
+                      >
+                        <option value="forward">Forward (1, 3, 5)</option>
+                        <option value="reverse">Reverse (5, 3, 1)</option>
+                      </select>
+                    </div>
+
+                    {/* Quick Swap & Starts With */}
+                    <div className="flex items-center justify-between py-1 px-0.5 border-y border-[#242A38]/60 my-0.5">
+                      <button
+                        type="button"
+                        onClick={swapOddsEvens}
+                        disabled={!fileOdds && !fileEvens}
+                        className="flex items-center space-x-1 px-2 py-0.5 text-[10px] text-slate-300 hover:text-white bg-[#181D27] hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-[#181D27] rounded border border-[#2E3648] transition-colors cursor-pointer disabled:cursor-not-allowed"
+                        title="Swap Odds and Evens files"
+                      >
+                        <ArrowLeftRight size={11} style={{ color: "var(--app-accent, #f59e0b)" }} />
+                        <span>Swap (⇄)</span>
+                      </button>
+
+                      <div className="flex items-center space-x-1 text-[11px]">
+                        <span className="text-slate-400 text-[10px]">Start with:</span>
+                        <select
+                          value={startWith}
+                          onChange={(e) => setStartWith?.(e.target.value as "odds" | "evens")}
+                          className="bg-[#131720] border border-[#242A38] text-slate-200 rounded px-1.5 py-0.5 text-[10px] cursor-pointer"
+                        >
+                          <option value="odds">Odd (1, 2...)</option>
+                          <option value="evens">Even (2, 1...)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Evens File */}
+                    <div
+                      onClick={() => evensInputRef.current?.click()}
+                      title="Select PDF containing even pages (2, 4, 6...)"
+                      className={`p-2.5 rounded-lg border border-dashed cursor-pointer text-center transition-colors ${
+                        fileEvens ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"
+                      }`}
+                    >
+                      <input ref={evensInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileEvens(e.target.files?.[0] || null)} />
+                      <div className="text-xs font-medium text-slate-200 truncate">{fileEvens ? fileEvens.name : "Evens PDF (6, 4, 2...)"}</div>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] px-0.5">
+                      <span className="text-slate-400">Evens Order:</span>
+                      <select
+                        value={evensOrder}
+                        onChange={(e) => setEvensOrder(e.target.value as "reverse" | "forward")}
+                        className="bg-[#131720] border border-[#242A38] text-slate-200 rounded px-2 py-0.5 text-[11px] cursor-pointer"
+                      >
+                        <option value="reverse">Reverse (...6, 4, 2)</option>
+                        <option value="forward">Forward (2, 4, 6...)</option>
+                      </select>
+                    </div>
+
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={initSession}
+                        disabled={isInitializing || !fileOdds || !fileEvens}
+                        className="w-full flex items-center justify-center space-x-1.5 py-2 px-3 disabled:bg-slate-800 disabled:text-slate-600 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:cursor-not-allowed"
+                        style={
+                          !(isInitializing || !fileOdds || !fileEvens)
+                            ? { backgroundColor: "var(--app-accent, #f59e0b)", color: "var(--app-accent-fg, #0f172a)" }
+                            : undefined
+                        }
+                      >
+                        {isInitializing ? (
+                          <><RefreshCw className="animate-spin" size={13} /><span>Collation in Progress...</span></>
+                        ) : (
+                          <><IconBookStudio size={14} /><span>Collate & Open in Studio</span></>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <FileUploadQueue
+                    files={files}
+                    onAddFiles={addFiles || (() => {})}
+                    onRemoveFile={removeFile || (() => {})}
+                    onMoveUp={(idx) => moveFile?.(idx, idx - 1)}
+                    onMoveDown={(idx) => moveFile?.(idx, idx + 1)}
+                    reverseFileIndices={reverseFileIndices}
+                    onToggleReverse={toggleReverseFile}
+                    onClear={clearFiles || (() => {})}
+                    onCombineAndOpen={initSession}
+                    isInitializing={isInitializing}
+                  />
+                )}
               </div>
             ) : (
-              <div onClick={() => singleInputRef.current?.click()}
-                title="Single pages or 2-up spreads loaded directly into the studio workspace"
-                className={`p-4 rounded-lg border border-dashed cursor-pointer text-center transition-colors ${fileSingle ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"}`}>
-                <input ref={singleInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileSingle(e.target.files?.[0] || null)} />
-                <Upload size={18} className="mx-auto mb-1.5" style={{ color: "var(--app-accent, #f59e0b)" }} />
-                <div className="text-xs font-medium text-slate-200 truncate">{fileSingle ? fileSingle.name : "Browse Book PDF"}</div>
+              <div className="space-y-2">
+                <div
+                  onClick={() => singleInputRef.current?.click()}
+                  title="Single pages or 2-up spreads loaded directly into the studio workspace"
+                  className={`p-4 rounded-lg border border-dashed cursor-pointer text-center transition-colors ${
+                    fileSingle ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"
+                  }`}
+                >
+                  <input ref={singleInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileSingle(e.target.files?.[0] || null)} />
+                  <Upload size={18} className="mx-auto mb-1.5" style={{ color: "var(--app-accent, #f59e0b)" }} />
+                  <div className="text-xs font-medium text-slate-200 truncate">{fileSingle ? fileSingle.name : "Browse Book PDF"}</div>
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={initSession}
+                    disabled={isInitializing || !fileSingle}
+                    className="w-full flex items-center justify-center space-x-1.5 py-2 px-3 disabled:bg-slate-800 disabled:text-slate-600 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:cursor-not-allowed"
+                    style={
+                      !(isInitializing || !fileSingle)
+                        ? { backgroundColor: "var(--app-accent, #f59e0b)", color: "var(--app-accent-fg, #0f172a)" }
+                        : undefined
+                    }
+                  >
+                    {isInitializing ? (
+                      <><RefreshCw className="animate-spin" size={13} /><span>Loading...</span></>
+                    ) : (
+                      <><IconBookStudio size={14} /><span>Open in Studio</span></>
+                    )}
+                  </button>
+                </div>
               </div>
             )}
-          </div>
-          <div className="pt-1">
-            <button
-              onClick={initSession}
-              disabled={isInitializing || (intakeMode === "dual_pass" ? (!fileOdds || !fileEvens) : !fileSingle)}
-              className="w-full flex items-center justify-center space-x-1.5 py-2 px-3 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:cursor-not-allowed"
-              style={!(isInitializing || (intakeMode === "dual_pass" ? (!fileOdds || !fileEvens) : !fileSingle)) ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined}
-            >
-              {isInitializing ? (<><RefreshCw className="animate-spin" size={13} /><span>Loading...</span></>)
-                : (<><IconBookStudio size={14} /><span>Open in Studio</span></>)}
-            </button>
           </div>
         </div>
       ) : (
@@ -427,7 +572,7 @@ export function BookLeftPanel({
                     isSelected={selectedPageIds ? selectedPageIds.includes(p.id) : p.id === selectedPageId}
                     isDragTarget={drag.dragOverIdx === idx}
                     isSelfDragging={drag.draggedIdx === idx}
-                    thumbnailUrl={getThumbnailUrl(p.id, false, 80)}
+                    thumbnailUrl={getThumbnailUrl(p.id, true, 80)}
                     onSelect={handleSelectPage}
                     onDragStart={handlers.onDragStart}
                     onDragOver={handlers.onDragOver}

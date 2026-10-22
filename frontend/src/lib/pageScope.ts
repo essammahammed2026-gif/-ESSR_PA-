@@ -1,4 +1,4 @@
-import type { BookStudioPage, CropTarget, ModulePageScope } from "@/types/book_studio";
+import type { BookStudioPage, CropTarget, ModulePageScope, MaskApplyScopeMode } from "@/types/book_studio";
 
 export interface ResolvedCropTarget {
   /** True when the backend should hit every page (pure all/both). */
@@ -36,10 +36,18 @@ export function parsePageRange(raw: string | undefined): Set<number> {
 
 /**
  * Evaluates whether a 1-based page number falls within a ModulePageScope configuration.
+ * When `scope.mode === "current"`, compares against `activePageNum` (1-based).
  */
-export function isPageInScope(pageNum: number, scope: ModulePageScope): boolean {
+export function isPageInScope(
+  pageNum: number,
+  scope: ModulePageScope,
+  activePageNum?: number
+): boolean {
   if (scope.mode === "all") {
     return true;
+  }
+  if (scope.mode === "current") {
+    return activePageNum !== undefined ? pageNum === activePageNum : true;
   }
   if (scope.mode === "odds") {
     return pageNum % 2 !== 0;
@@ -96,4 +104,46 @@ export function resolveCropTarget(
     ? (target.customRange.trim() ? `Pages ${target.customRange.trim()}${parityLabel ? ` (${parityLabel})` : ""}` : `All${parityLabel ? ` ${parityLabel}` : ""}`)
     : (parityLabel || "All");
   return { applyToAll: false, ids, label };
+}
+
+/**
+ * Resolves a ModulePageScopeMode ("current" | "all" | "odds" | "evens" | "range")
+ * into explicit target page IDs and a human-readable summary label.
+ */
+export function resolveMaskTargetIds(
+  pages: BookStudioPage[],
+  selectedPageId: string | null | undefined,
+  selectedPageIds: string[],
+  scopeMode: MaskApplyScopeMode,
+  customRange: string = ""
+): { ids: string[]; label: string } {
+  if (scopeMode === "current") {
+    return {
+      ids: selectedPageId ? [selectedPageId] : [],
+      label: "Current Page",
+    };
+  }
+  if (scopeMode === "all") {
+    return {
+      ids: pages.map((p) => p.id),
+      label: `All Pages (${pages.length})`,
+    };
+  }
+  if (scopeMode === "odds") {
+    const ids = pages.filter((_, i) => (i + 1) % 2 !== 0).map((p) => p.id);
+    return { ids, label: `Odd Pages (${ids.length})` };
+  }
+  if (scopeMode === "evens") {
+    const ids = pages.filter((_, i) => (i + 1) % 2 === 0).map((p) => p.id);
+    return { ids, label: `Even Pages (${ids.length})` };
+  }
+  // range
+  const wanted = parsePageRange(customRange);
+  const ids = wanted.size > 0
+    ? pages.filter((_, i) => wanted.has(i + 1)).map((p) => p.id)
+    : (selectedPageId ? [selectedPageId] : []);
+  return {
+    ids,
+    label: customRange.trim() ? `Range (${customRange.trim()})` : "Range",
+  };
 }

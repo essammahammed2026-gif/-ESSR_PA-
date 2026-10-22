@@ -1,203 +1,604 @@
 "use client";
 
 import React from "react";
-import { ChevronDown } from "lucide-react";
+import { Eraser, Trash2, Sun, Square, Pipette, Check } from "lucide-react";
 import { IconToolCleanup } from "@/components/shared/StudioIcons";
-import { RestorationModuleConfig, CleanupColorMode } from "@/types/book_studio";
-import { PageScopeSelector } from "./PageScopeSelector";
+import {
+  CleanupModuleConfig,
+  RestorationModuleConfig,
+  CleanupColorMode,
+  ModuleTaskProgress,
+} from "@/types/book_studio";
+import { PageScopeSelector, ModuleProgressBar, AppliedEntriesList, formatScopeLabel } from "./PageScopeSelector";
+
+export interface CleanupPanelProps {
+  cleanupModule: CleanupModuleConfig;
+  setCleanupModule: React.Dispatch<React.SetStateAction<CleanupModuleConfig>>;
+  maskToolActive: boolean;
+  onToggleMaskTool: () => void;
+  onActivateMaskEyedropper?: () => void;
+  pageMasksCount: number;
+  totalMasksCount: number;
+  onClearPageMasks: () => void;
+  onClearAllMasks: () => void;
+  taskProgress?: ModuleTaskProgress;
+}
+
+export function CleanupPanel({
+  cleanupModule,
+  setCleanupModule,
+  maskToolActive,
+  onToggleMaskTool,
+  onActivateMaskEyedropper,
+  pageMasksCount,
+  totalMasksCount,
+  onClearPageMasks,
+  onClearAllMasks,
+  taskProgress,
+}: CleanupPanelProps) {
+  const handleNativeMaskEyedropper = async () => {
+    if (typeof window !== "undefined" && "EyeDropper" in window) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const eyeDropper = new (window as any).EyeDropper();
+        const result = await eyeDropper.open();
+        if (result?.sRGBHex) {
+          setCleanupModule((prev) => ({ ...prev, maskColor: result.sRGBHex }));
+          return;
+        }
+      } catch {
+        // Fallback to canvas click sampling
+      }
+    }
+    if (onActivateMaskEyedropper) {
+      onActivateMaskEyedropper();
+    }
+  };
+
+  const handleApply = () => {
+    const scopeLbl = formatScopeLabel(cleanupModule.scope);
+    const parts: string[] = [];
+    if (cleanupModule.flattenIllumination) parts.push("Spine Shadow");
+    if (cleanupModule.despeckleLevel > 0) parts.push(`Despeckle L${cleanupModule.despeckleLevel}`);
+    const label = parts.length > 0 ? parts.join(" & ") : "Clean BG";
+
+    setCleanupModule((prev) => ({
+      ...prev,
+      enabled: true,
+      appliedEntries: [
+        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== scopeLbl),
+        {
+          id: `cleanup_${Date.now()}`,
+          label,
+          scopeLabel: scopeLbl,
+        },
+      ],
+    }));
+  };
+
+  const handleDeleteApplied = (entryId: string) => {
+    setCleanupModule((prev) => {
+      const remaining = (prev.appliedEntries || []).filter((e) => e.id !== entryId);
+      return {
+        ...prev,
+        enabled: remaining.length > 0,
+        flattenIllumination: remaining.length > 0 ? prev.flattenIllumination : false,
+        despeckleLevel: remaining.length > 0 ? prev.despeckleLevel : 0,
+        appliedEntries: remaining,
+      };
+    });
+  };
+
+  return (
+    <div className="space-y-3 select-none">
+      {/* Module Header Banner */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start space-x-2.5">
+            <div
+              className="p-2 rounded-lg bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] shrink-0 mt-0.5"
+              style={cleanupModule.enabled ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+            >
+              <Eraser size={16} className={cleanupModule.enabled ? "" : "text-slate-400"} />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Cleanup</h3>
+                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
+                  Key 3
+                </span>
+                {totalMasksCount > 0 && (
+                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    {totalMasksCount} box{totalMasksCount > 1 ? "es" : ""}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                Erase boxes, shadows & dust.
+              </p>
+            </div>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Cleanup & Masking">
+            <input
+              type="checkbox"
+              checked={cleanupModule.enabled}
+              onChange={(e) => setCleanupModule((prev) => ({ ...prev, enabled: e.target.checked }))}
+              className="sr-only peer"
+            />
+            <div
+              className="w-8 h-4.5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-3.5 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all"
+              style={cleanupModule.enabled ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined}
+            />
+          </label>
+        </div>
+
+        <ModuleProgressBar task={taskProgress} />
+      </div>
+
+      {/* Section 1: Spot Erase / Whiteout Box */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Erase Box
+          </span>
+          <span className="text-[10px] font-mono text-slate-400">
+            Page: <strong className="text-[var(--text-primary,#e2e8f0)]">{pageMasksCount}</strong> • All:{" "}
+            <strong className="text-[var(--text-primary,#e2e8f0)]">{totalMasksCount}</strong>
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={onToggleMaskTool}
+          className={`w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+            maskToolActive
+              ? "bg-amber-500 text-slate-950 border-amber-400 shadow-xs"
+              : "bg-[var(--surface-inset,#131720)] hover:bg-slate-800 text-[var(--text-primary,#e2e8f0)] border-[var(--border-subtle,#242A38)]"
+          }`}
+          title="Drag a rectangle on the canvas to mask out scanner fingers, staples, or punch holes (Shortcut: M)"
+        >
+          <Square size={13} className="stroke-[2.2]" style={!maskToolActive ? { color: "var(--app-accent, #f59e0b)" } : undefined} />
+          <span>{maskToolActive ? "Drag on Canvas..." : "Draw Box (M)"}</span>
+        </button>
+
+        {/* Fill Color Picker */}
+        <div className="flex items-center justify-between p-2 bg-[var(--surface-inset,#131720)] rounded-lg border border-[var(--border-subtle,#242A38)] text-[11px]">
+          <span className="text-slate-400">Fill Color</span>
+          <div className="flex items-center space-x-1.5">
+            <input
+              type="color"
+              value={cleanupModule.maskColor || "#ffffff"}
+              onChange={(e) => setCleanupModule((prev) => ({ ...prev, maskColor: e.target.value }))}
+              className="w-5 h-5 rounded border border-white/20 bg-transparent cursor-pointer p-0"
+              title="Choose erase box fill color (Default: #FFFFFF)"
+            />
+            {onActivateMaskEyedropper && (
+              <button
+                type="button"
+                onClick={handleNativeMaskEyedropper}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition-colors cursor-pointer"
+                title="Sample paper color directly from page (Eyedropper)"
+              >
+                <Pipette size={13} />
+              </button>
+            )}
+            <span className="font-mono text-[10px] text-slate-300 uppercase">
+              {(cleanupModule.maskColor || "#ffffff").slice(0, 7)}
+            </span>
+            {(cleanupModule.maskColor || "#ffffff").toLowerCase() !== "#ffffff" && (
+              <button
+                type="button"
+                onClick={() => setCleanupModule((prev) => ({ ...prev, maskColor: "#ffffff" }))}
+                className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer ml-1"
+                title="Reset fill color to pure white (#FFFFFF)"
+              >
+                White
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Clear Page / Clear All Masks */}
+        <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+          <button
+            type="button"
+            onClick={onClearPageMasks}
+            disabled={pageMasksCount === 0}
+            className="py-1.5 px-2 rounded-lg text-[11px] font-medium bg-[var(--surface-inset,#131720)] hover:bg-slate-800 disabled:opacity-35 text-slate-300 border border-[var(--border-subtle,#242A38)] transition-colors cursor-pointer disabled:cursor-not-allowed"
+            title="Remove all erase boxes on the current page"
+          >
+            Clear Page ({pageMasksCount})
+          </button>
+
+          <button
+            type="button"
+            onClick={onClearAllMasks}
+            disabled={totalMasksCount === 0}
+            className="flex items-center justify-center space-x-1 py-1.5 px-2 rounded-lg text-[11px] font-medium bg-[var(--surface-inset,#131720)] hover:bg-red-950/50 disabled:opacity-35 text-red-400 border border-[var(--border-subtle,#242A38)] transition-colors cursor-pointer disabled:cursor-not-allowed"
+            title="Clear all erase boxes across the entire book"
+          >
+            <Trash2 size={12} />
+            <span>Clear All ({totalMasksCount})</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Section 2: Background Cleanup (Spine Shadows & Despeckle) */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          Filters
+        </span>
+
+        <label
+          className="flex items-center justify-between gap-2 p-2 bg-[var(--surface-inset,#131720)] rounded-lg border border-[var(--border-subtle,#242A38)] cursor-pointer text-[11px]"
+          title="Morphological background cleanup: flattens dark book-spine gutter shadows and uneven scan lighting"
+        >
+          <div className="flex items-center space-x-2">
+            <Sun size={14} className="text-amber-400 shrink-0" />
+            <span className="font-semibold text-[var(--text-primary,#e2e8f0)]">
+              Spine Shadow
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={cleanupModule.flattenIllumination}
+            onChange={(e) =>
+              setCleanupModule((prev) => ({ ...prev, flattenIllumination: e.target.checked }))
+            }
+            className="rounded accent-amber-500 shrink-0"
+          />
+        </label>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Despeckle</span>
+            <span className="font-mono text-[10px] text-slate-300">
+              {cleanupModule.despeckleLevel === 0
+                ? "Off"
+                : cleanupModule.despeckleLevel === 1
+                  ? "Light"
+                  : cleanupModule.despeckleLevel === 2
+                    ? "Medium"
+                    : "Strong"}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-1 p-0.5 bg-[var(--surface-inset,#131720)] rounded-lg border border-[var(--border-subtle,#242A38)] text-[11px]">
+            {([
+              { lvl: 0, label: "Off" },
+              { lvl: 1, label: "Light" },
+              { lvl: 2, label: "Med" },
+              { lvl: 3, label: "Strong" },
+            ] as const).map((item) => {
+              const active = cleanupModule.despeckleLevel === item.lvl;
+              return (
+                <button
+                  key={item.lvl}
+                  type="button"
+                  onClick={() => setCleanupModule((prev) => ({ ...prev, despeckleLevel: item.lvl }))}
+                  className={`py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                    active ? "bg-slate-800 text-amber-400 font-semibold" : "text-slate-400 hover:text-slate-200"
+                  }`}
+                  style={active ? { color: "var(--app-accent-text, var(--app-accent, #f59e0b))" } : undefined}
+                  title="Connected-component dust filter"
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <PageScopeSelector
+          scope={cleanupModule.scope}
+          onChange={(sc) => setCleanupModule((prev) => ({ ...prev, scope: sc }))}
+        />
+
+        <button
+          type="button"
+          onClick={handleApply}
+          className="w-full py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
+          style={{
+            backgroundColor: "var(--app-accent, #f59e0b)",
+            color: "var(--app-accent-fg, #0f172a)",
+          }}
+        >
+          <span>Apply ({formatScopeLabel(cleanupModule.scope)})</span>
+        </button>
+      </div>
+
+      {/* Applied Entries List */}
+      <AppliedEntriesList
+        entries={cleanupModule.appliedEntries}
+        onDelete={handleDeleteApplied}
+      />
+    </div>
+  );
+}
 
 export interface RestorePanelProps {
   restorationModule: RestorationModuleConfig;
   setRestorationModule: React.Dispatch<React.SetStateAction<RestorationModuleConfig>>;
-  open: boolean;
-  onToggle: () => void;
+  pageColorMode?: CleanupColorMode | null;
+  onSetPageColorMode?: (mode: CleanupColorMode | null, clearAll?: boolean) => void;
+  colorOverridePagesCount?: number;
+  taskProgress?: ModuleTaskProgress;
 }
 
-const COLOR_MODES: { id: CleanupColorMode; label: string; tooltip: string }[] = [
-  { id: "color", label: "Color", tooltip: "Restore rich colors, contrast, and levels" },
-  { id: "grayscale", label: "Grayscale", tooltip: "Clean 8-bit neutral grayscale for black & white scans" },
-  { id: "bw", label: "B & W", tooltip: "Crisp adaptive binary black & white for text scans and line art" },
+const COLOR_MODES: { id: CleanupColorMode; label: string; desc: string }[] = [
+  { id: "auto", label: "Auto", desc: "Color + crisp text" },
+  { id: "color", label: "Color", desc: "Tone boost" },
+  { id: "grayscale", label: "Gray", desc: "8-bit monochrome" },
+  { id: "bw", label: "B&W", desc: "Line art" },
 ];
 
-export function RestorePanel({ restorationModule, setRestorationModule, open, onToggle }: RestorePanelProps) {
-  const colorMode = restorationModule.colorMode || "color";
+export function RestorePanel({
+  restorationModule,
+  setRestorationModule,
+  onSetPageColorMode,
+  colorOverridePagesCount = 0,
+  taskProgress,
+}: RestorePanelProps) {
+  const colorMode = restorationModule.colorMode || "auto";
+
+  const handleApply = () => {
+    const scopeLbl = formatScopeLabel(restorationModule.scope);
+    const modeName = colorMode === "bw" ? "B&W" : colorMode === "grayscale" ? "Gray" : colorMode === "color" ? "Color" : "Auto";
+    const label = `${modeName} Mode`;
+
+    setRestorationModule((prev) => ({
+      ...prev,
+      enabled: true,
+      appliedEntries: [
+        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== scopeLbl),
+        {
+          id: `color_${Date.now()}`,
+          label,
+          scopeLabel: scopeLbl,
+        },
+      ],
+    }));
+
+    if (restorationModule.scope.mode === "current" && onSetPageColorMode) {
+      onSetPageColorMode(colorMode);
+    }
+  };
+
+  const handleDeleteApplied = (entryId: string) => {
+    setRestorationModule((prev) => {
+      const remaining = (prev.appliedEntries || []).filter((e) => e.id !== entryId);
+      return {
+        ...prev,
+        enabled: remaining.length > 0,
+        whitenBg: remaining.length > 0 ? prev.whitenBg : false,
+        appliedEntries: remaining,
+      };
+    });
+    if ((restorationModule.appliedEntries || []).length <= 1 && onSetPageColorMode) {
+      onSetPageColorMode(null, true);
+    }
+  };
 
   return (
-    <div
-      className={`rounded-lg border transition-colors ${
-        restorationModule.enabled ? "bg-[#181D27] border-[#333D52]" : "bg-[#181D27] border-[#242A38]"
-      } px-2.5 py-2 space-y-2 select-none`}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex items-center space-x-2 text-left hover:opacity-90 transition-opacity cursor-pointer"
-          title="Remove dirty scanner borders, whiten paper background, and convert/enhance scan colors"
-        >
-          <ChevronDown
-            size={13}
-            className={`transition-transform duration-150 text-slate-400 ${open ? "rotate-0" : "-rotate-90"}`}
-          />
-          <IconToolCleanup
-            size={14}
-            className={restorationModule.enabled ? "" : "text-slate-400"}
-            style={restorationModule.enabled ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-          />
-          <span className="text-xs font-semibold text-slate-200">Cleanup & Colors</span>
-        </button>
+    <div className="space-y-3 select-none">
+      {/* Module Header Banner */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start space-x-2.5">
+            <div
+              className="p-2 rounded-lg bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] shrink-0 mt-0.5"
+              style={restorationModule.enabled ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+            >
+              <IconToolCleanup size={16} className={restorationModule.enabled ? "" : "text-slate-400"} />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Colors</h3>
+                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
+                  Key 4
+                </span>
+                {colorOverridePagesCount > 0 && (
+                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    {colorOverridePagesCount}p
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                Color mode, paper & contrast.
+              </p>
+            </div>
+          </div>
 
-        <label className="relative inline-flex items-center cursor-pointer" title="Toggle Cleanup">
-          <input
-            type="checkbox"
-            checked={restorationModule.enabled}
-            onChange={(e) => setRestorationModule((prev) => ({ ...prev, enabled: e.target.checked }))}
-            className="sr-only peer"
-          />
-          <div
-            className="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"
-            style={restorationModule.enabled ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined}
-          />
-        </label>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Colors">
+            <input
+              type="checkbox"
+              checked={restorationModule.enabled}
+              onChange={(e) => setRestorationModule((prev) => ({ ...prev, enabled: e.target.checked }))}
+              className="sr-only peer"
+            />
+            <div
+              className="w-8 h-4.5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-3.5 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all"
+              style={restorationModule.enabled ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined}
+            />
+          </label>
+        </div>
+
+        <ModuleProgressBar task={taskProgress} />
       </div>
 
-      {/* Body */}
-      {open && (
-        <div className={`pt-2 border-t border-[#242A38] space-y-2.5 ${!restorationModule.enabled ? "opacity-60 pointer-events-none" : ""}`}>
-          {/* Color Mode Tabs */}
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Color Mode</span>
-            <div className="grid grid-cols-3 gap-1 p-0.5 bg-[#131720] rounded-md border border-[#242A38] text-[11px]">
-              {COLOR_MODES.map((m) => {
-                const isActive = colorMode === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setRestorationModule((prev) => ({ ...prev, colorMode: m.id }))}
-                    className={`py-1 rounded font-medium transition-colors cursor-pointer text-center ${
-                      isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200"
-                    }`}
-                    style={isActive ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-                    title={m.tooltip}
+      {/* Section 1: Color Mode */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          Mode
+        </span>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          {COLOR_MODES.map((m) => {
+            const isActive = colorMode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setRestorationModule((prev) => ({ ...prev, colorMode: m.id }))}
+                className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                  isActive
+                    ? "bg-[var(--surface-inset,#131720)] border-amber-500/60 shadow-2xs"
+                    : "bg-[var(--surface-inset,#131720)]/60 border-[var(--border-subtle,#242A38)] hover:border-slate-600"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`text-[11px] font-semibold ${isActive ? "text-[var(--text-primary,#fff)]" : "text-slate-300"}`}
+                    style={isActive ? { color: "var(--app-accent-text, var(--app-accent, #f59e0b))" } : undefined}
                   >
                     {m.label}
+                  </span>
+                  {isActive && <Check size={11} style={{ color: "var(--app-accent, #f59e0b)" }} />}
+                </div>
+                <p className="text-[9px] text-slate-400 leading-tight mt-0.5">{m.desc}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Section 2: Paper & Contrast */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-3">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          Tone
+        </span>
+
+        {/* Paper Whitening Toggle */}
+        <label
+          className="flex items-center justify-between p-2 bg-[var(--surface-inset,#131720)] rounded-lg border border-[var(--border-subtle,#242A38)] cursor-pointer text-[11px] text-[var(--text-secondary,#cbd5e1)]"
+          title="Eliminates yellow/gray paper background tint & scanner bleed-through"
+        >
+          <span>Whiten BG</span>
+          <input
+            type="checkbox"
+            checked={restorationModule.whitenBg}
+            onChange={(e) => setRestorationModule((prev) => ({ ...prev, whitenBg: e.target.checked }))}
+            className="rounded accent-amber-500"
+          />
+        </label>
+
+        {/* Mode-specific Sliders */}
+        {colorMode === "bw" ? (
+          <div className="space-y-1.5 p-2 bg-[var(--surface-inset,#131720)] rounded-lg border border-[var(--border-subtle,#242A38)]">
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-slate-400">Threshold</span>
+              <div className="flex items-center space-x-2">
+                <span className="font-mono font-semibold text-[var(--text-primary,#e2e8f0)]">
+                  {restorationModule.bwThreshold ?? 180}
+                </span>
+                {(restorationModule.bwThreshold ?? 180) !== 180 && (
+                  <button
+                    type="button"
+                    onClick={() => setRestorationModule((prev) => ({ ...prev, bwThreshold: 180 }))}
+                    className="text-[9px] text-slate-400 hover:text-white underline cursor-pointer"
+                  >
+                    reset
                   </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Paper Whitening Toggle */}
-          <div className="flex items-center justify-between text-[11px] p-1.5 bg-[#131720] rounded-md border border-[#242A38]">
-            <label className="flex items-center space-x-1.5 cursor-pointer text-slate-300" title="Eliminates yellow/gray paper background tint & scanner bleed-through">
-              <input
-                type="checkbox"
-                checked={restorationModule.whitenBg}
-                onChange={(e) => setRestorationModule((prev) => ({ ...prev, whitenBg: e.target.checked }))}
-                className="rounded accent-amber-500"
-              />
-              <span>Whiten Paper Background</span>
-            </label>
-          </div>
-
-          {/* Mode-specific Controls */}
-          {colorMode === "bw" ? (
-            <div className="space-y-1 p-1.5 bg-[#131720] rounded-md border border-[#242A38]" title="Adjust black & white threshold sensitivity">
-              <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400">B&W Threshold</span>
-                <span className="font-mono font-semibold text-slate-200">{restorationModule.bwThreshold ?? 180}</span>
+                )}
               </div>
-              <input
-                type="range"
-                min="60"
-                max="240"
-                step="2"
-                value={restorationModule.bwThreshold ?? 180}
-                onChange={(e) => setRestorationModule((prev) => ({ ...prev, bwThreshold: parseInt(e.target.value, 10) }))}
-                className="w-full h-1 accent-amber-500 cursor-pointer"
-              />
             </div>
-          ) : (
-            <div className="space-y-1.5 pt-0.5">
-              {colorMode === "color" && (
-                <div className="space-y-0.5" title="Color saturation boost">
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-slate-400">Saturation</span>
-                    <span className="font-mono font-semibold text-slate-200">
+            <input
+              type="range"
+              min="60"
+              max="240"
+              step="2"
+              value={restorationModule.bwThreshold ?? 180}
+              onChange={(e) => setRestorationModule((prev) => ({ ...prev, bwThreshold: parseInt(e.target.value, 10) }))}
+              className="w-full h-1.5 accent-amber-500 cursor-pointer"
+            />
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {(colorMode === "color" || colorMode === "auto") && (
+              <div className="space-y-1 p-2 bg-[var(--surface-inset,#131720)] rounded-lg border border-[var(--border-subtle,#242A38)]">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-slate-400">Vibrance</span>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-mono font-semibold text-[var(--text-primary,#e2e8f0)]">
                       +{Math.round((restorationModule.saturation - 1.0) * 100)}%
                     </span>
+                    {Math.abs(restorationModule.saturation - 1.2) > 0.01 && (
+                      <button
+                        type="button"
+                        onClick={() => setRestorationModule((prev) => ({ ...prev, saturation: 1.2 }))}
+                        className="text-[9px] text-slate-400 hover:text-white underline cursor-pointer"
+                      >
+                        reset
+                      </button>
+                    )}
                   </div>
-                  <input
-                    type="range"
-                    min="1.0"
-                    max="1.8"
-                    step="0.05"
-                    value={restorationModule.saturation}
-                    onChange={(e) => setRestorationModule((prev) => ({ ...prev, saturation: parseFloat(e.target.value) }))}
-                    className="w-full h-1 accent-amber-500 cursor-pointer"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-0.5" title="Contrast multiplier">
-                <div className="flex justify-between text-[10px]">
-                  <span className="text-slate-400">Contrast</span>
-                  <span className="font-mono font-semibold text-slate-200">{restorationModule.contrast.toFixed(2)}x</span>
                 </div>
                 <input
                   type="range"
                   min="1.0"
-                  max="1.4"
-                  step="0.02"
-                  value={restorationModule.contrast}
-                  onChange={(e) => setRestorationModule((prev) => ({ ...prev, contrast: parseFloat(e.target.value) }))}
-                  className="w-full h-1 accent-amber-500 cursor-pointer"
+                  max="1.8"
+                  step="0.05"
+                  value={restorationModule.saturation}
+                  onChange={(e) => setRestorationModule((prev) => ({ ...prev, saturation: parseFloat(e.target.value) }))}
+                  className="w-full h-1.5 accent-amber-500 cursor-pointer"
                 />
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Border Clean */}
-          <div
-            className="space-y-1 pt-1 border-t border-[#242A38]/60"
-            title="Removes dirty glass scanner edges and feed roller shadows along outer borders"
-          >
-            <div className="flex items-center justify-between text-[11px]">
-              <label className="flex items-center space-x-1.5 cursor-pointer text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={restorationModule.cleanBorders}
-                  onChange={(e) => setRestorationModule((prev) => ({ ...prev, cleanBorders: e.target.checked }))}
-                  className="rounded accent-amber-500"
-                />
-                <span>Border Clean</span>
-              </label>
-              {restorationModule.cleanBorders && (
-                <span className="font-mono text-slate-200 font-semibold">{restorationModule.borderMarginPx} px</span>
-              )}
-            </div>
-
-            {restorationModule.cleanBorders && (
+            <div className="space-y-1 p-2 bg-[var(--surface-inset,#131720)] rounded-lg border border-[var(--border-subtle,#242A38)]">
+              <div className="flex justify-between items-center text-[11px]">
+                <span className="text-slate-400">Contrast</span>
+                <div className="flex items-center space-x-2">
+                  <span className="font-mono font-semibold text-[var(--text-primary,#e2e8f0)]">
+                    {restorationModule.contrast.toFixed(2)}x
+                  </span>
+                  {Math.abs(restorationModule.contrast - 1.15) > 0.01 && (
+                    <button
+                      type="button"
+                      onClick={() => setRestorationModule((prev) => ({ ...prev, contrast: 1.15 }))}
+                      className="text-[9px] text-slate-400 hover:text-white underline cursor-pointer"
+                    >
+                      reset
+                    </button>
+                  )}
+                </div>
+              </div>
               <input
                 type="range"
-                min="5"
-                max="40"
-                step="1"
-                value={restorationModule.borderMarginPx}
-                onChange={(e) => setRestorationModule((prev) => ({ ...prev, borderMarginPx: parseInt(e.target.value, 10) }))}
-                className="w-full h-1 accent-amber-500 cursor-pointer"
+                min="1.0"
+                max="1.4"
+                step="0.02"
+                value={restorationModule.contrast}
+                onChange={(e) => setRestorationModule((prev) => ({ ...prev, contrast: parseFloat(e.target.value) }))}
+                className="w-full h-1.5 accent-amber-500 cursor-pointer"
               />
-            )}
+            </div>
           </div>
+        )}
 
-          <PageScopeSelector
-            scope={restorationModule.scope}
-            onChange={(sc) => setRestorationModule((prev) => ({ ...prev, scope: sc }))}
-          />
-        </div>
-      )}
+        <PageScopeSelector
+          scope={restorationModule.scope}
+          onChange={(sc) => setRestorationModule((prev) => ({ ...prev, scope: sc }))}
+        />
+
+        <button
+          type="button"
+          onClick={handleApply}
+          className="w-full py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
+          style={{
+            backgroundColor: "var(--app-accent, #f59e0b)",
+            color: "var(--app-accent-fg, #0f172a)",
+          }}
+        >
+          <span>Apply ({formatScopeLabel(restorationModule.scope)})</span>
+        </button>
+      </div>
+
+      {/* Applied Entries List */}
+      <AppliedEntriesList
+        entries={restorationModule.appliedEntries}
+        onDelete={handleDeleteApplied}
+      />
     </div>
   );
 }

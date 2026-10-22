@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Settings, Layers, Scissors, BookOpen, RotateCcw, Save, CheckCircle2, AlertCircle, Sliders, HardDrive, Palette, Keyboard } from "lucide-react";
+import { Layers, Scissors, BookOpen, RotateCcw, Save, CheckCircle2, AlertCircle, Sliders, HardDrive, Palette, Keyboard } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import SheetsSection from "@/components/settings/SheetsSection";
 import RollsSection from "@/components/settings/RollsSection";
@@ -60,29 +60,29 @@ export default function SettingsPage() {
   return (
     <div className="h-full flex flex-col overflow-y-auto bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 p-2 md:p-3">
       <div className="w-full mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-gray-200 dark:border-gray-800">
-        <div className="flex items-center space-x-3 text-sm text-slate-300">
+        <div className="flex items-center space-x-3 text-sm text-slate-600 dark:text-slate-300">
           <nav className="flex items-center space-x-2" aria-label="Breadcrumb">
             <Link
               href="/"
-              className="font-medium hover:underline transition-all"
-              style={{ color: "var(--app-accent, #9333ea)" }}
+              className="font-semibold hover:underline transition-all"
+              style={{ color: "var(--app-accent-text, var(--app-accent))" }}
             >
               Home
             </Link>
-            <span className="text-slate-500">/</span>
-            <span className="text-slate-400 font-medium">Settings</span>
-            <span className="text-slate-500">/</span>
-            <span className="font-semibold text-slate-100 flex items-center space-x-1.5">
+            <span className="text-slate-400 dark:text-slate-500">/</span>
+            <span className="text-slate-600 dark:text-slate-400 font-medium">Settings</span>
+            <span className="text-slate-400 dark:text-slate-500">/</span>
+            <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center space-x-1.5">
               <span>{TABS.find((t) => t.id === activeTab)?.label || "Preferences"}</span>
             </span>
           </nav>
         </div>
         <div className="flex items-center space-x-2 self-start sm:self-auto shrink-0">
           <button onClick={handleResetDefaults} disabled={saving} className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition cursor-pointer"><RotateCcw size={13} /><span>Reset Defaults</span></button>
-          <button onClick={handleSaveAll} disabled={saving} className="flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg text-white shadow-sm transition disabled:opacity-50 cursor-pointer" style={{ backgroundColor: "var(--app-accent, #9333ea)" }}><Save size={14} /><span>{saving ? "Saving..." : "Save Settings"}</span></button>
+          <button onClick={handleSaveAll} disabled={saving} className="flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg shadow-sm transition disabled:opacity-50 cursor-pointer" style={{ backgroundColor: "var(--app-accent, #9333ea)", color: "var(--app-accent-fg, #ffffff)" }}><Save size={14} /><span>{saving ? "Saving..." : "Save Settings"}</span></button>
         </div>
       </div>
-      {loading && (<div className="max-w-6xl w-full mx-auto mb-4 p-3 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded-xl flex items-center space-x-2 text-sm" style={{ color: "var(--app-accent, #9333ea)", borderColor: "var(--app-accent-30, rgba(147, 51, 234, 0.3))" }}><div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "var(--app-accent, #9333ea)", borderTopColor: "transparent" }} /><span>Loading system preferences...</span></div>)}
+      {loading && (<div className="max-w-6xl w-full mx-auto mb-4 p-3 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded-xl flex items-center space-x-2 text-sm" style={{ color: "var(--app-accent-text, var(--app-accent))", borderColor: "var(--app-accent-30, rgba(147, 51, 234, 0.3))" }}><div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "var(--app-accent, #9333ea)", borderTopColor: "transparent" }} /><span>Loading system preferences...</span></div>)}
       {successMsg && (<div className="max-w-6xl w-full mx-auto mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl flex items-center space-x-2 text-sm"><CheckCircle2 size={18} /><span>{successMsg}</span></div>)}
       {errorMsg && (<div className="max-w-6xl w-full mx-auto mb-4 p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 rounded-xl flex items-center space-x-2 text-sm"><AlertCircle size={18} /><span>{errorMsg}</span></div>)}
       <div className="max-w-6xl w-full mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -95,10 +95,10 @@ export default function SettingsPage() {
                 onClick={() => setActiveTab(id)}
                 className={`w-full flex items-center space-x-3 px-3.5 py-2.5 text-sm font-medium rounded-xl transition cursor-pointer ${
                   isTabActive
-                    ? "text-white shadow-sm font-semibold"
-                    : "text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-800"
+                    ? "shadow-sm font-semibold"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-200/70 dark:hover:bg-gray-800"
                 }`}
-                style={isTabActive ? { backgroundColor: "var(--app-accent, #9333ea)" } : undefined}
+                style={isTabActive ? { backgroundColor: "var(--app-accent, #9333ea)", color: "var(--app-accent-fg, #ffffff)" } : undefined}
               >
                 <Icon size={18} />
                 <span>{label}</span>

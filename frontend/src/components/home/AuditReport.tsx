@@ -57,8 +57,11 @@ export function AuditReport({
         <button
           onClick={onExportPdf}
           disabled={isExportingPdf}
-          className="px-3.5 py-1.5 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all shadow-sm self-start sm:self-auto shrink-0 cursor-pointer hover:brightness-110"
-          style={{ backgroundColor: "var(--app-accent, #06b6d4)" }}
+          className="px-3.5 py-1.5 disabled:opacity-50 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all shadow-sm self-start sm:self-auto shrink-0 cursor-pointer hover:brightness-110"
+          style={{
+            backgroundColor: "var(--app-accent, #06b6d4)",
+            color: "var(--app-accent-fg, #ffffff)",
+          }}
           title="Download printable A4 Prepress Quality Audit Report"
         >
           {isExportingPdf ? (

@@ -21,6 +21,15 @@ interface BookWorkspaceProps {
   gridColor?: string;
   eyedropperActive?: boolean;
   onPickColor?: (hex: string) => void;
+  straightenActive?: boolean;
+  onApplyStraightenAngle?: (deltaAngle: number) => void;
+  onToggleStraighten?: () => void;
+  maskToolActive?: boolean;
+  onToggleMaskTool?: () => void;
+  onToggleCropTool?: () => void;
+  onApplyMaskBox?: (box: CropBox) => void;
+  onRemoveMaskBox?: (maskId: string) => void;
+  onToggleGrid?: () => void;
   cropModule?: CropModuleConfig;
   bleedModule?: BleedModuleConfig;
   setCropModule?: React.Dispatch<React.SetStateAction<CropModuleConfig>>;
@@ -40,6 +49,9 @@ export function BookWorkspace({
   pages, selectedPageId, setSelectedPageId, getThumbnailUrl, rotatePage,
   sessionId, unit = "mm", showGrid = false, gridColor = "#06b6d4",
   eyedropperActive = false, onPickColor,
+  straightenActive = false, onApplyStraightenAngle, onToggleStraighten,
+  maskToolActive = false, onToggleMaskTool, onToggleCropTool, onApplyMaskBox, onRemoveMaskBox,
+  onToggleGrid,
   cropModule, bleedModule, setCropModule,
   onUndo, canUndo, onRedo, canRedo, onRestoreOriginal,
   history, currentHistoryIndex, onSelectHistoryStep, shortcuts = {}, shortcutLabels = {},
@@ -153,6 +165,7 @@ export function BookWorkspace({
   }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (straightenActive || maskToolActive) return;
     if (e.button === 1 || (e.button === 0 && (isPanMode || zoom > 1.0 || e.altKey))) {
       e.preventDefault();
       setIsPanning(true);
@@ -369,10 +382,23 @@ export function BookWorkspace({
         totalPages={pages.length}
         isViewingOriginal={isViewingOriginal}
         showSplitSizes={showSplitSizes}
+        cropEnabled={Boolean(cropModule?.enabled)}
+        straightenActive={straightenActive}
+        maskToolActive={maskToolActive}
+        showGrid={showGrid}
         onPrev={goToPrevPage}
         onNext={goToNextPage}
         onToggleOriginal={() => setIsLockedOriginal((p) => !p)}
         onToggleSplitSizes={() => setShowSplitSizes((p) => !p)}
+        onToggleCropTool={
+          onToggleCropTool ??
+          (setCropModule
+            ? () => setCropModule((prev) => ({ ...prev, enabled: !prev.enabled }))
+            : undefined)
+        }
+        onToggleStraighten={onToggleStraighten}
+        onToggleMaskTool={onToggleMaskTool}
+        onToggleGrid={onToggleGrid}
         onRotate={(d) => rotatePage(selectedPage.id, d)}
         onUndo={onUndo}
         canUndo={canUndo}
@@ -400,6 +426,12 @@ export function BookWorkspace({
         showSplitSizes={showSplitSizes}
         eyedropperActive={eyedropperActive}
         onPickColor={onPickColor}
+        straightenActive={straightenActive}
+        onApplyStraightenAngle={onApplyStraightenAngle}
+        maskToolActive={maskToolActive}
+        pageMasks={isViewingOriginal ? [] : (selectedPage.masks || [])}
+        onApplyMaskBox={onApplyMaskBox}
+        onRemoveMaskBox={onRemoveMaskBox}
         cropModule={cropModule}
         bleedModule={bleedModule}
         splitLines={splitLines}

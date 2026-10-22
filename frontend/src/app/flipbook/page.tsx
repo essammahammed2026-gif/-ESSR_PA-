@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Layers, Download } from "lucide-react";
+import { Download } from "lucide-react";
 import { apiFetch, getApiUrl, downloadBlob } from "@/lib/api";
 import { FlipbookControls } from "@/components/flipbook/FlipbookControls";
 import { FlipbookViewport } from "@/components/flipbook/FlipbookViewport";
@@ -204,6 +204,9 @@ function FlipbookStudioContent() {
           setIsGenerating(false);
           lastApplied.current = { direction, bindingStyle, magPadChoice, addFlyleaves };
           prevBindingRef.current = bindingStyle;
+          if (j.result?.total_pages) {
+            setNumPages(j.result.total_pages);
+          }
           const relPath = (j.result.output as string).replace("public_flipbooks/", "");
           setResultUrl(getApiUrl(`/flipbooks/${relPath}`));
         } else if (j.state === "FAILURE") {

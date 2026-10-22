@@ -1,10 +1,10 @@
 "use client";
 
 import React from "react";
-import { ChevronDown, RefreshCw, RotateCcw } from "lucide-react";
+import { RefreshCw, RotateCcw, Sparkles, Ruler, Grid } from "lucide-react";
 import { IconToolDeskew } from "@/components/shared/StudioIcons";
-import { DeskewModuleConfig } from "@/types/book_studio";
-import { PageScopeSelector } from "./PageScopeSelector";
+import { DeskewModuleConfig, ModuleTaskProgress } from "@/types/book_studio";
+import { PageScopeSelector, ModuleProgressBar, AppliedEntriesList, formatScopeLabel } from "./PageScopeSelector";
 
 export interface DeskewPanelProps {
   deskewModule: DeskewModuleConfig;
@@ -12,10 +12,16 @@ export interface DeskewPanelProps {
   isDetectingAngle?: boolean;
   detectedAngle?: number | null;
   detectPageAngle?: (pageId?: string) => Promise<number | null>;
+  detectAllPageAngles?: () => Promise<Record<string, number> | null>;
+  pageDeskewAngle?: number | null;
+  onChangePageAngle?: (angle: number) => void;
+  onClearAllAngles?: () => void;
+  straightenActive?: boolean;
+  onToggleStraighten?: () => void;
+  deskewedPagesCount?: number;
+  taskProgress?: ModuleTaskProgress;
   selectedPageId?: string | null;
   sessionId: string | null;
-  open: boolean;
-  onToggle: () => void;
 }
 
 export function DeskewPanel({
@@ -24,234 +30,330 @@ export function DeskewPanel({
   isDetectingAngle,
   detectedAngle,
   detectPageAngle,
+  detectAllPageAngles,
+  pageDeskewAngle,
+  onChangePageAngle,
+  onClearAllAngles,
+  straightenActive = false,
+  onToggleStraighten,
+  deskewedPagesCount = 0,
+  taskProgress,
   selectedPageId,
   sessionId,
-  open,
-  onToggle,
 }: DeskewPanelProps) {
-  return (
-    <div
-      className={`rounded-lg border transition-colors ${
-        deskewModule.enabled ? "bg-[#181D27] border-[#333D52]" : "bg-[#181D27] border-[#242A38]"
-      } px-2.5 py-2 space-y-2 select-none`}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex items-center space-x-2 text-left hover:opacity-90 transition-opacity cursor-pointer"
-          title="Straighten skewed page scans using automatic baseline detection or manual angle adjustment"
-        >
-          <ChevronDown
-            size={13}
-            className={`transition-transform duration-150 text-slate-400 ${open ? "rotate-0" : "-rotate-90"}`}
-          />
-          <IconToolDeskew
-            size={14}
-            className={deskewModule.enabled ? "" : "text-slate-400"}
-            style={deskewModule.enabled ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-          />
-          <span className="text-xs font-semibold text-slate-200">Deskew</span>
-        </button>
+  const effectiveAngle =
+    pageDeskewAngle !== null && pageDeskewAngle !== undefined
+      ? pageDeskewAngle
+      : detectedAngle !== null && detectedAngle !== undefined
+        ? detectedAngle
+        : deskewModule.angle;
 
-        <label className="relative inline-flex items-center cursor-pointer" title="Toggle Deskew">
+  const applyAngle = (nextAngle: number) => {
+    const clamped = Math.max(-15, Math.min(15, Math.round(nextAngle * 100) / 100));
+    if (selectedPageId && onChangePageAngle) {
+      onChangePageAngle(clamped);
+    } else {
+      setDeskewModule((prev) => ({ ...prev, mode: "manual", angle: clamped }));
+    }
+  };
+
+  const handleApply = () => {
+    const scopeLbl = formatScopeLabel(deskewModule.scope);
+    const angleText = `${effectiveAngle > 0 ? "+" : ""}${effectiveAngle.toFixed(2)}°`;
+    const label = Math.abs(effectiveAngle) > 0.01 ? `Tilt ${angleText}` : "Auto Deskew";
+
+    setDeskewModule((prev) => ({
+      ...prev,
+      enabled: true,
+      appliedEntries: [
+        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== scopeLbl),
+        {
+          id: `deskew_${Date.now()}`,
+          label,
+          scopeLabel: scopeLbl,
+        },
+      ],
+    }));
+  };
+
+  const handleDeleteApplied = (entryId: string) => {
+    setDeskewModule((prev) => {
+      const remaining = (prev.appliedEntries || []).filter((e) => e.id !== entryId);
+      return {
+        ...prev,
+        enabled: remaining.length > 0,
+        appliedEntries: remaining,
+      };
+    });
+    if ((deskewModule.appliedEntries || []).length <= 1) {
+      onClearAllAngles?.();
+    }
+  };
+
+  return (
+    <div className="space-y-3 select-none">
+      {/* Module Header Banner */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start space-x-2.5">
+            <div
+              className="p-2 rounded-lg bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] shrink-0 mt-0.5"
+              style={deskewModule.enabled ? { color: "var(--app-accent, #f59e0b)" } : undefined}
+            >
+              <IconToolDeskew size={16} className={deskewModule.enabled ? "" : "text-slate-400"} />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Deskew</h3>
+                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
+                  Key 2
+                </span>
+                {deskewedPagesCount > 0 && (
+                  <span
+                    className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                    title={`${deskewedPagesCount} page(s) have individual tilt corrections`}
+                  >
+                    {deskewedPagesCount}p
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                Straighten tilted pages.
+              </p>
+            </div>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Deskew Layer">
+            <input
+              type="checkbox"
+              checked={deskewModule.enabled}
+              onChange={(e) => setDeskewModule((prev) => ({ ...prev, enabled: e.target.checked }))}
+              className="sr-only peer"
+            />
+            <div
+              className="w-8 h-4.5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-3.5 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all"
+              style={deskewModule.enabled ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined}
+            />
+          </label>
+        </div>
+
+        <ModuleProgressBar task={taskProgress} />
+      </div>
+
+      {/* Section 1: Auto Baseline Detection */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          Auto Detect
+        </span>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => detectPageAngle && void detectPageAngle(selectedPageId || undefined)}
+            disabled={isDetectingAngle || !sessionId}
+            className="flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] rounded-lg text-[11px] font-medium transition-colors disabled:opacity-50 cursor-pointer"
+            title="Detect tilt angle for the current page (Shortcut: A)"
+          >
+            {isDetectingAngle ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" style={{ color: "var(--app-accent, #f59e0b)" }} />
+                <span>Scanning...</span>
+              </>
+            ) : (
+              <>
+                <RotateCcw size={12} style={{ color: "var(--app-accent, #f59e0b)" }} />
+                <span>Detect</span>
+              </>
+            )}
+          </button>
+
+          {detectAllPageAngles && (
+            <button
+              type="button"
+              onClick={() => void detectAllPageAngles()}
+              disabled={isDetectingAngle || !sessionId}
+              className="flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] rounded-lg text-[11px] font-medium transition-colors disabled:opacity-50 cursor-pointer"
+              title="Auto-detect individual tilt angle for every page in the book (Shortcut: Shift+A)"
+            >
+              {isDetectingAngle ? (
+                <>
+                  <RefreshCw size={12} className="animate-spin" style={{ color: "var(--app-accent, #f59e0b)" }} />
+                  <span>Scanning...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={12} style={{ color: "var(--app-accent, #f59e0b)" }} />
+                  <span>Detect All</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between pt-0.5">
+          <span className="text-[11px] text-slate-400">Range</span>
+          <div className="flex items-center bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] rounded-md p-0.5" title="Maximum angle search range">
+            {[5, 10, 15].map((deg) => (
+              <button
+                key={deg}
+                type="button"
+                onClick={() => setDeskewModule((prev) => ({ ...prev, maxAngle: deg }))}
+                className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition-colors ${
+                  deskewModule.maxAngle === deg
+                    ? "bg-slate-800 text-white font-semibold"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+                style={deskewModule.maxAngle === deg ? { color: "var(--app-accent-text, var(--app-accent, #f59e0b))" } : undefined}
+                title={`Limit angle detection to ±${deg}°`}
+              >
+                ±{deg}°
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label
+          className="flex items-center justify-between p-2 rounded-lg bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] cursor-pointer text-[11px] text-[var(--text-secondary,#cbd5e1)]"
+          title="Masks outer 6% edges so scanner bed borders and lid shadows do not distort angle measurement"
+        >
+          <span>Ignore Margins (6%)</span>
           <input
             type="checkbox"
-            checked={deskewModule.enabled}
-            onChange={(e) => setDeskewModule((prev) => ({ ...prev, enabled: e.target.checked }))}
-            className="sr-only peer"
-          />
-          <div
-            className="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"
-            style={deskewModule.enabled ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined}
+            checked={deskewModule.ignoreBorders}
+            onChange={(e) => setDeskewModule((prev) => ({ ...prev, ignoreBorders: e.target.checked }))}
+            className="rounded accent-amber-500"
           />
         </label>
       </div>
 
-      {/* Body */}
-      {open && (
-        <div className={`pt-2 border-t border-[#242A38] space-y-2 ${!deskewModule.enabled ? "opacity-60 pointer-events-none" : ""}`}>
-          {/* Mode Selector: Auto vs Manual */}
-          <div className="grid grid-cols-2 gap-1 p-0.5 bg-[#131720] rounded-md border border-[#242A38] text-[11px]">
+      {/* Section 2: Current Page Angle & Precision Fine-Tuning */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Angle
+          </span>
+          <span
+            className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)]"
+            style={{ color: effectiveAngle !== 0 ? "var(--app-accent-text, var(--app-accent, #f59e0b))" : undefined }}
+          >
+            {effectiveAngle > 0 ? "+" : ""}{effectiveAngle.toFixed(2)}°
+          </span>
+        </div>
+
+        <input
+          type="range"
+          min="-10.0"
+          max="10.0"
+          step="0.05"
+          value={effectiveAngle}
+          onChange={(e) => applyAngle(parseFloat(e.target.value))}
+          className="w-full h-1.5 accent-amber-500 cursor-pointer"
+          title="Drag slider to micro-rotate current page (-10° to +10°)"
+        />
+
+        {/* Quick Micro-Nudge Bar */}
+        <div className="grid grid-cols-5 gap-1 text-[10px] font-mono">
+          {([
+            { label: "-0.5°", delta: -0.5 },
+            { label: "-0.1°", delta: -0.1 },
+            { label: "0°", reset: true },
+            { label: "+0.1°", delta: 0.1 },
+            { label: "+0.5°", delta: 0.5 },
+          ] as const).map((btn) => (
             <button
+              key={btn.label}
               type="button"
-              onClick={() => setDeskewModule((prev) => ({ ...prev, mode: "auto" }))}
-              className={`py-1 rounded font-medium transition-colors cursor-pointer ${
-                deskewModule.mode === "auto"
-                  ? "bg-slate-800 text-white"
-                  : "text-slate-400 hover:text-slate-200"
+              onClick={() => ("reset" in btn ? applyAngle(0) : applyAngle(effectiveAngle + btn.delta))}
+              className={`py-1 rounded border transition-colors cursor-pointer ${
+                "reset" in btn
+                  ? "bg-[var(--surface-inset,#131720)] border-[var(--border-subtle,#242A38)] text-slate-400 hover:text-white font-sans font-medium"
+                  : "bg-[var(--surface-inset,#131720)] border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] hover:bg-slate-800"
               }`}
-              style={deskewModule.mode === "auto" ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-              title="Automatically detect text baseline tilt using projection profiles"
+              title={"reset" in btn ? "Reset current page angle to 0.00°" : `Nudge page angle by ${btn.label}`}
             >
-              Auto
+              {"reset" in btn ? "Reset" : btn.label}
             </button>
-            <button
-              type="button"
-              onClick={() => setDeskewModule((prev) => ({ ...prev, mode: "manual" }))}
-              className={`py-1 rounded font-medium transition-colors cursor-pointer ${
-                deskewModule.mode === "manual"
-                  ? "bg-slate-800 text-white"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-              style={deskewModule.mode === "manual" ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-              title="Manually adjust page rotation angle with a fine slider"
-            >
-              Manual
-            </button>
-          </div>
+          ))}
+        </div>
+      </div>
 
-          {/* Auto Mode Controls */}
-          {deskewModule.mode === "auto" ? (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-400" title="Measured baseline skew angle on current page">Tilt</span>
-                <div className="flex items-center space-x-1.5">
-                  <span className="font-mono font-semibold text-slate-200">
-                    {detectedAngle !== null && detectedAngle !== undefined
-                      ? `${-detectedAngle > 0 ? "+" : ""}${(-detectedAngle).toFixed(1)}°`
-                      : "—"}
-                  </span>
-                  {detectedAngle !== null && detectedAngle !== undefined && (
-                    <button
-                      type="button"
-                      onClick={() => setDeskewModule((prev) => ({ ...prev, mode: "manual", angle: detectedAngle }))}
-                      className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
-                      title="Open this detected angle in Manual mode for fine adjustment"
-                    >
-                      edit
-                    </button>
-                  )}
-                </div>
-              </div>
+      {/* Section 3: Reference Tools & Scope & Apply */}
+      <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-3 space-y-2.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          Tools
+        </span>
 
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => detectPageAngle && detectPageAngle(selectedPageId || undefined)}
-                  disabled={isDetectingAngle || !sessionId}
-                  className="flex-1 flex items-center justify-center space-x-1.5 py-1 px-2 bg-[#131720] hover:bg-slate-800 border border-[#283040] text-slate-200 rounded text-[11px] font-medium transition-colors disabled:opacity-50 cursor-pointer"
-                  title="Scan current page text lines to measure tilt angle"
-                >
-                  {isDetectingAngle ? (
-                    <>
-                      <RefreshCw size={11} className="animate-spin" style={{ color: "var(--app-accent, #f59e0b)" }} />
-                      <span>Scanning...</span>
-                    </>
-                  ) : (
-                    <>
-                      <RotateCcw size={11} style={{ color: "var(--app-accent, #f59e0b)" }} />
-                      <span>Detect Tilt</span>
-                    </>
-                  )}
-                </button>
+        {onToggleStraighten && (
+          <button
+            type="button"
+            onClick={onToggleStraighten}
+            disabled={!sessionId || !selectedPageId}
+            className={`w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 ${
+              straightenActive
+                ? "bg-amber-500 text-slate-950 border-amber-400 shadow-xs"
+                : "bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)]"
+            }`}
+            title="Drag a 2-point line along any horizontal text baseline or vertical table border on the canvas (Shortcut: S)"
+          >
+            <Ruler size={14} style={!straightenActive ? { color: "var(--app-accent, #f59e0b)" } : undefined} />
+            <span>{straightenActive ? "Drag on Canvas..." : "Straighten (S)"}</span>
+          </button>
+        )}
 
-                <div className="flex items-center bg-[#131720] border border-[#242A38] rounded p-0.5" title="Maximum angle search range">
-                  {[5, 10, 15].map((deg) => (
-                    <button
-                      key={deg}
-                      type="button"
-                      onClick={() => setDeskewModule((prev) => ({ ...prev, maxAngle: deg }))}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition-colors ${
-                        deskewModule.maxAngle === deg
-                          ? "bg-slate-800 text-white font-semibold"
-                          : "text-slate-500 hover:text-slate-300"
-                      }`}
-                      style={deskewModule.maxAngle === deg ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-                      title={`Limit angle detection to ±${deg}°`}
-                    >
-                      ±{deg}°
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Manual Mode Controls */
-            <div className="space-y-1" title="Drag slider to micro-rotate page (-10° CW to +10° CCW)">
-              <div className="flex justify-between items-center text-[11px]">
-                <span className="text-slate-400">Angle</span>
-                <div className="flex items-center space-x-1.5">
-                  <span className="font-mono font-semibold text-slate-200">
-                    {deskewModule.angle > 0 ? "+" : ""}{deskewModule.angle.toFixed(1)}°
-                  </span>
-                  {deskewModule.angle !== 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setDeskewModule((prev) => ({ ...prev, angle: 0.0 }))}
-                      className="text-[10px] text-slate-500 hover:text-slate-300 underline cursor-pointer"
-                      title="Reset angle to 0.0°"
-                    >
-                      reset
-                    </button>
-                  )}
-                </div>
-              </div>
+        <div className="flex items-center justify-between p-2 rounded-lg bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] text-[11px]">
+          <label
+            className="flex items-center space-x-2 cursor-pointer text-[var(--text-secondary,#cbd5e1)]"
+            title="Overlays horizontal and vertical alignment lines across the preview canvas (Shortcut: G)"
+          >
+            <input
+              type="checkbox"
+              checked={deskewModule.showGrid}
+              onChange={(e) => setDeskewModule((prev) => ({ ...prev, showGrid: e.target.checked }))}
+              className="rounded accent-amber-500"
+            />
+            <Grid size={12} className="text-slate-400" />
+            <span>Grid (G)</span>
+          </label>
+
+          {deskewModule.showGrid && (
+            <div className="flex items-center space-x-1.5">
               <input
-                type="range"
-                min="-10.0"
-                max="10.0"
-                step="0.1"
-                value={deskewModule.angle}
-                onChange={(e) => setDeskewModule((prev) => ({ ...prev, angle: parseFloat(e.target.value) }))}
-                className="w-full h-1 accent-amber-500 cursor-pointer"
+                type="color"
+                value={deskewModule.gridColor || "#06b6d4"}
+                onChange={(e) => setDeskewModule((prev) => ({ ...prev, gridColor: e.target.value }))}
+                className="w-5 h-5 rounded border border-white/20 bg-transparent cursor-pointer p-0 shrink-0"
+                title="Change alignment grid line color"
               />
+              <span className="text-[10px] font-mono text-slate-400 uppercase">
+                {(deskewModule.gridColor || "#06b6d4").slice(0, 7)}
+              </span>
             </div>
           )}
-
-          {/* Compact Checkboxes with Hover Tooltips */}
-          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-            <label
-              className="flex items-center space-x-1.5 cursor-pointer text-[11px] text-slate-300 truncate"
-              title="Masks outer 6% edges so scanner bed borders and lid shadows do not distort angle measurement"
-            >
-              <input
-                type="checkbox"
-                checked={deskewModule.ignoreBorders}
-                onChange={(e) => setDeskewModule((prev) => ({ ...prev, ignoreBorders: e.target.checked }))}
-                className="rounded accent-amber-500"
-              />
-              <span className="truncate">Ignore Margins</span>
-            </label>
-
-            <div className="flex items-center justify-between text-[11px] text-slate-300">
-              <label
-                className="flex items-center space-x-1.5 cursor-pointer truncate"
-                title="Overlays horizontal alignment lines across the preview canvas to verify text levelness"
-              >
-                <input
-                  type="checkbox"
-                  checked={deskewModule.showGrid}
-                  onChange={(e) => setDeskewModule((prev) => ({ ...prev, showGrid: e.target.checked }))}
-                  className="rounded accent-amber-500"
-                />
-                <span className="truncate">Grid</span>
-              </label>
-
-              {deskewModule.showGrid && (
-                <div className="flex items-center space-x-1 pl-1">
-                  <input
-                    type="color"
-                    value={deskewModule.gridColor || "#06b6d4"}
-                    onChange={(e) => setDeskewModule((prev) => ({ ...prev, gridColor: e.target.value }))}
-                    className="w-4 h-4 rounded border border-white/20 bg-transparent cursor-pointer p-0 shrink-0"
-                    title="Change grid line color"
-                  />
-                  <span className="text-[9px] font-mono text-slate-400 uppercase">
-                    {(deskewModule.gridColor || "#06b6d4").slice(0, 7)}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <PageScopeSelector
-            scope={deskewModule.scope}
-            onChange={(sc) => setDeskewModule((prev) => ({ ...prev, scope: sc }))}
-          />
         </div>
-      )}
+
+        <PageScopeSelector
+          scope={deskewModule.scope}
+          onChange={(sc) => setDeskewModule((prev) => ({ ...prev, scope: sc }))}
+        />
+
+        <button
+          type="button"
+          onClick={handleApply}
+          className="w-full py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
+          style={{
+            backgroundColor: "var(--app-accent, #f59e0b)",
+            color: "var(--app-accent-fg, #0f172a)",
+          }}
+        >
+          <span>Apply ({formatScopeLabel(deskewModule.scope)})</span>
+        </button>
+      </div>
+
+      {/* Applied Entries List */}
+      <AppliedEntriesList
+        entries={deskewModule.appliedEntries}
+        onDelete={handleDeleteApplied}
+      />
     </div>
   );
 }
