@@ -1,5 +1,58 @@
 # Session Log
 
+## Date: 2026-10-23
+
+### Multi-Machine App Logo Missing Root Cause & Git Asset Exemption
+- **Objective**: Diagnose why opening the app on other computers failed to display the application logo.
+- **Rules Followed**: Consulted `AGENTS.md` strictly: zero autonomous git check-ins (user-only git permissions), verified navigation map, verified runtime storage zero-retention (`backend/temp_uploads/` clean).
+- **Root Cause & Resolution**:
+  1. **Global Image Ignore Rule**: Root `.gitignore` contained a blanket `*.png` rule intended for ad-hoc test files. This rule silently ignored `frontend/public/flint_mark.png`, `frontend/public/flint_icon.png`, and Tauri icons (`frontend/src-tauri/icons/*.png`).
+  2. **Missing Remote Assets**: Because `frontend/public/` was never tracked or pushed to Git, any other computer that cloned or pulled the repository had an empty `public/` directory. Next.js returned HTTP 404 for `/flint_mark.png`, resulting in an empty logo container.
+  3. **Fix**: Updated `.gitignore` to explicitly whitelist `!frontend/public/**` and `!frontend/src-tauri/icons/**`.
+  4. **Verification**: Checked `git status` confirming `flint_mark.png`, `flint_icon.png`, and Tauri icon assets are now tracked. Verified TypeScript health (`tsc --noEmit`) passes with 0 errors.
+
+---
+
+## Date: 2026-10-22
+
+### Frontend Stale Cache Recovery & Node/Next Runtime Clarification
+- **Objective**: Clarify runtime environment versions (Node.js 20 LTS vs. Next.js 14.2) and diagnose/resolve UI loading failure on `localhost:3000`.
+- **Rules Followed**: Consulted `AGENTS.md` rules strictly: verified centralized navigation map, verified runtime storage zero-retention policy (`backend/temp_uploads/` clean), user-only git permissions honored.
+- **Root Cause & Resolution**:
+  1. **Runtime Clarification**:
+     - Verified system Node.js version is `v20.20.2` LTS (matching CI workflow) and frontend framework is `Next.js 14.2.35` on React 18.
+     - Advised retaining Next.js 14.2 for desktop stability, Tauri v2 compatibility, and React 18 canvas rendering predictability.
+  2. **UI Loading 404 Chunk Diagnostics**:
+     - Investigated UI failure reports; checked systemd user unit `flint-frontend.service` and discovered the server had been running stale for 36+ hours.
+     - Found all static chunk requests (`layout.css`, `main-app.js`, `app-pages-internals.js`, `page.js`) were returning HTTP 404 due to desynchronized in-memory manifests after earlier multi-machine git merges.
+     - Purged stale `.next` directory and restarted `flint-frontend.service`.
+  3. **Verification**:
+     - Verified all static assets return HTTP 200.
+     - Verified `/`, `/book-studio`, `/imposing`, and `/settings` compile cleanly and load without errors.
+     - Purged temporary storage via `storage_cleaner.py` (0 lingering files).
+
+---
+
+### Multi-Machine Git Push Conflict Resolution & Root Stray Cleanup
+- **Objective**: Troubleshoot and resolve rejected git push to remote origin on `main` caused by uncoordinated commits from a secondary work PC, assess root directory stray folders (`temp_uploads`, `public_flipbooks`), and synchronize the repository cleanly.
+- **Rules Followed**: Consulted `AGENTS.md` rules strictly: user-only git check-ins and pushes, zero autonomous git history modifications, zero-retention storage policy verified (`backend/temp_uploads` and `backend/public_flipbooks` completely clean).
+- **Changes Completed**:
+  1. **Git Root Cause & Multi-Machine Workflow Education**:
+     - Analyzed the non-fast-forward push rejection; explained divergence caused by working across two machines without syncing.
+     - Documented the difference between destructive `--force` vs. safe `--force-with-lease` (lease validation checks before overwriting).
+     - Outlined the "Sit Down (`git pull`) / Stand Up (`git push`)" prevention protocol for multi-device workflows.
+  2. **Root Workspace Directory Cleanup**:
+     - Investigated stray `temp_uploads` and `public_flipbooks` folders at repository root; verified they were historical ad-hoc artifacts from running commands outside `backend/`.
+     - Confirmed legitimate application runtime directories are safely maintained under `backend/temp_uploads/` and `backend/public_flipbooks/`.
+     - Safely purged stray root directories `temp_uploads/` and `public_flipbooks/`.
+     - Updated root `.gitignore` to explicitly ignore `/temp_uploads/` and `/public_flipbooks/` to prevent recurrence.
+  3. **Repository Alignment & Verification**:
+     - User committed `.gitignore` and executed `git push --force-with-lease origin main`.
+     - Confirmed `git status` reports working tree completely clean and up to date with `origin/main`.
+     - Runtime storage confirmed 0 lingering files in `backend/temp_uploads/` and `backend/public_flipbooks/`.
+
+---
+
 ## Date: 2026-10-21
 
 ### Book Studio Explicit Apply, Reversible Applied History & High-Density UI Polish
