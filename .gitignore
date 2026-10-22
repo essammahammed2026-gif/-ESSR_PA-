@@ -18,6 +18,8 @@ frontend/build/
 next-env.d.ts
 
 # Temporary uploads & output generated flipbooks
+/temp_uploads/
+/public_flipbooks/
 backend/temp_uploads/*
 !backend/temp_uploads/.gitkeep
 !backend/temp_uploads/book_scans/.gitkeep
