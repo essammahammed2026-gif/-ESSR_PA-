@@ -140,6 +140,9 @@ export default function RootLayout({
 
   return (
     <html lang="en" className={`dark ${font.variable} ${fontMono.variable}`}>
+      <head>
+        <title>Flint Prepress Studio</title>
+      </head>
       <body className={`font-sans flex h-screen bg-[#12151B] text-slate-200 overflow-hidden antialiased`}>
         <AppearanceProvider>
           {/* Left Sidebar */}
@@ -172,7 +175,7 @@ export default function RootLayout({
               ) : (
                 <div className="w-full flex items-center justify-center relative group">
                   <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center group-hover/logo:ring-2 group-hover/logo:ring-cyan-500/40 transition-all">
-                    <Image src="/flint_mark.png" alt="Flint" width={26} height={26} className="object-contain" priority />
+                    <Image src="/flint_mark.png" alt="Flint" width={30} height={30} className="object-contain" priority />
                   </div>
                   <div className="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-[#1B212D] text-slate-100 text-xs font-medium rounded-md shadow-2xl border border-[#2E374A] whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-150 z-50 flex items-center shadow-black/80">
                     <span className="font-semibold text-cyan-400">Expand Sidebar</span>

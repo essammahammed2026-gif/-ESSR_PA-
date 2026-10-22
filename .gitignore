@@ -45,6 +45,10 @@ Thumbs.db
 *.png
 *.pdf
 *.avif
+!frontend/public/**
+!frontend/src-tauri/icons/**
+!frontend/src/app/icon.png
+!frontend/src/app/apple-icon.png
 dump.rdb
 .run/
 test_material/

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Smart Window/Tab Launch & Single-Instance Reuse (`start.sh`)**:
+  - Removed `--new-window` flag from browser opening logic, ensuring Flint opens in the already-active browser window/tab instead of creating an unwanted new window.
+  - Added `is_flint_tab_open` detector combining Hyprland client title queries and Zen Browser live sessionstore inspection (`recovery.jsonlz4`).
+  - When the app is launched while already open in a tab, Flint focuses the active window, triggers an OS notification ("Flint Prepress Studio is already running"), and cleanly exits without creating duplicate tabs or windows.
+  - Added `<title>Flint Prepress Studio</title>` to `frontend/src/app/layout.tsx` for proper tab and window title reporting.
+- **New Flint Logo & Full-Size Icon Set (Concept 3 — faceted flame "F")**:
+  - Replaced old `favicon.ico`, `flint_mark.png`, `flint_icon.png` (removed) and Tauri placeholder icons.
+  - Favicon / `icon.png`: transparent, tightly-cropped glyph filling ~96% of the canvas height so it reads at full size in browser tabs and the Zen sidebar (old icon had heavy padding). Multi-size ICO: 16, 24, 32, 48, 64, 128, 256; small sizes are unsharp-masked.
+  - Added `src/app/manifest.ts` + `public/icons/` (192/512 dark tile `#181D27`, 512 maskable) and `apple-icon.png` for installed-app / OS taskbar use.
+  - Regenerated OS launcher icons (`hicolor` 16–512) and Tauri `32x32`, `128x128`, `128x128@2x`, `icon.png`, real `icon.ico`/`icon.icns` (previously 0-byte).
+  - Collapsed sidebar logo enlarged from 26px to 30px.
 - **Book Studio Explicit Apply, Reversible Applied History & High-Density UI Polish**:
   - **Explicit Apply & No Auto-Apply on Entry**:
     - Removed auto-enabling side-effects on module entry (`openModule`). Entering `Crop & Split`, `Deskew`, `Cleanup`, `Colors`, or `Bleed` never activates the effect automatically; only explicit clicks on **Apply** commit the module's effect.

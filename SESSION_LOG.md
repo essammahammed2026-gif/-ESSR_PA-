@@ -2,6 +2,35 @@
 
 ## Date: 2026-10-23
 
+### Browser Window Reuse & Single-Tab Launch Notification
+- **Problem**: Running Flint opened a new browser window every time instead of reusing the already-open window, and clicking the launcher when Flint was already open in a tab caused redundant windows to spawn.
+- **Root Cause**:
+  1. `start.sh`'s `open_app_window` explicitly ran `zen-browser --new-window "http://localhost:3000"`.
+  2. `focus_window` was failing because the page lacked a `<title>` tag (and Hyprland Lua syntax differed from legacy `dispatch focuswindow address:...`).
+  3. No tab detection existed to prevent re-opening when Flint was already loaded.
+- **Changes Delivered**:
+  - `start.sh`: Replaced `--new-window` with standard invocation `zen-browser "http://localhost:3000"` (and fallback `xdg-open`), which opens a tab in the already-active browser window.
+  - `start.sh`: Added `is_flint_tab_open` which queries Hyprland client titles and Zen's live `recovery.jsonlz4` sessionstore.
+  - `start.sh`: Updated `launch` case so if Flint is already open in a tab, it focuses the window, triggers `notify-send -i flint "Flint" "Flint Prepress Studio is already running"`, and exits immediately without spawning anything new.
+  - `start.sh`: Updated `focus_window` to support Omarchy's Hyprland Lua dispatch (`hl.dsp.window.bring_to_top(w)`).
+  - `frontend/src/app/layout.tsx`: Added `<head><title>Flint Prepress Studio</title></head>` so browser tabs and window managers display the proper title.
+- **Verification**:
+  - Executed `./start.sh launch` with Zen running; verified console output: `Flint services are running. Flint tab is already opened.` and confirmation of `notify-send` notification without creating duplicate windows or tabs.
+  - `npx tsc --noEmit` passed with 0 errors.
+  - Checked `backend/temp_uploads` is clean.
+
+### New Logo (Concept 3) Rollout & Icon Sizing Fix
+- **Context**: IDE crashed mid-task; recovered from previous conversation. User approved concept 3 (faceted cyan→amber flame "F") as-is (raster, not yet redrawn as SVG).
+- **Problem**: Old icon looked tiny in the Zen browser sidebar because the favicon had large padding around a small mark.
+- **Changes**:
+  - All sizes generated from one 1024px master mark (tight alpha-bbox crop, 2px alpha erosion to remove white halo from the sticker extraction).
+  - Browser: transparent glyph (`favicon.ico` multi-size, `icon.png`), `apple-icon.png`, `manifest.ts` + `public/icons/*` (dark `#181D27` tile + maskable).
+  - App: `public/flint_mark.png` (sidebar + PDF report header); collapsed sidebar logo 26→30px. Removed `public/flint_icon.png`.
+  - OS: `~/.local/share/icons/hicolor/{16..512}/apps/flint.png` + `gtk-update-icon-cache`. Tauri icons regenerated (ico/icns were 0-byte).
+  - Generator script kept outside repo (agent scratch `build_icons.py`).
+- **Verification**: `tsc --noEmit` OK; `/favicon.ico`, `/icon.png`, `/apple-icon.png`, `/manifest.webmanifest`, `/icons/icon-192.png`, `/flint_mark.png` all 200 and linked in `<head>`.
+- **Follow-up**: Optional clean SVG redraw of the mark for large-format/vinyl-cutter use.
+
 ### Multi-Machine App Logo Missing Root Cause & Git Asset Exemption
 - **Objective**: Diagnose why opening the app on other computers failed to display the application logo.
 - **Rules Followed**: Consulted `AGENTS.md` strictly: zero autonomous git check-ins (user-only git permissions), verified navigation map, verified runtime storage zero-retention (`backend/temp_uploads/` clean).

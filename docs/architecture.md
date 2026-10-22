@@ -29,6 +29,7 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 | **`/flipbook`** (3D Virtual Proofing)<br>`src/app/flipbook/page.tsx` | `src/components/flipbook/` | `FlipbookViewport.tsx`, `FlipbookControls.tsx` |
 | **`/settings`** (System & Presets Config)<br>`src/app/settings/page.tsx` | `src/components/settings/` | `SheetsSection.tsx`, `RollsSection.tsx`, `DefaultsSection.tsx`, `StorageSection.tsx`, `AppearanceSection.tsx`, `ShortcutsSection.tsx`, `types.ts` |
 | *Shared Shell, Context & Core Libs* | `src/components/layout/`<br>`src/components/shared/`<br>`src/components/ui/` | `StudioLayout.tsx`, `DeckGrid.tsx`, `NumberControl.tsx`, `StudioIcons.tsx`, `button.tsx`<br>**Context:** `src/context/AppearanceContext.tsx`<br>**Core Libs (`src/lib/`):** `api.ts`, `useDebounce.ts`, `units.ts`, `utils.ts`<br>**Design System Docs:** `docs/design_system.md` |
+| *Brand & App Icons* | `src/app/` (Next file conventions)<br>`public/`<br>`src-tauri/icons/` | `favicon.ico` (16–256 transparent glyph), `icon.png`, `apple-icon.png`, `manifest.ts`<br>**Public:** `flint_mark.png` (sidebar + PDF report logo), `icons/icon-192.png`, `icons/icon-512.png`, `icons/icon-maskable-512.png`<br>**OS launcher:** `~/.local/share/icons/hicolor/*/apps/flint.png` |
 
 ---
 

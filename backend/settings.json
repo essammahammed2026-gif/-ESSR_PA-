@@ -88,7 +88,7 @@
         "eco_mode": true
     },
     "book_studio": {
-        "history_limit": 50,
+        "history_limit": 10,
         "shortcuts": {
             "undo": "ctrl+z",
             "redo": "ctrl+y",
@@ -96,7 +96,9 @@
             "prev_page": "[",
             "next_page": "]",
             "toggle_original": "o",
-            "rotate": "r"
+            "rotate": "r",
+            "zoom_in": "ctrl+shift++",
+            "zoom_out": "ctrl+shift+-"
         }
     }
 }

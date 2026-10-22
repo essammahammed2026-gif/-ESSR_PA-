@@ -26,10 +26,30 @@ is_frontend_running() {
 
 focus_window() {
     if command -v hyprctl >/dev/null 2>&1; then
-        # Check if Zen Browser window with Flint / 3000 is open and focus it
+        # 1. Omarchy Hyprland Lua repl: bring Zen / Flint window to top
+        hyprctl repl 'for _, w in ipairs(hl.get_windows()) do if (w.class == "zen" or string.find(w.title or "", "Flint")) then hl.dispatch(hl.dsp.window.bring_to_top(w)); break end end' >/dev/null 2>&1 && return 0
+        # 2. Standard Hyprland fallback
+        local ADDR
         ADDR=$(hyprctl clients -j 2>/dev/null | grep -B 5 -iE "Flint|3000|Prepress" | grep '"address":' | head -n 1 | awk -F'"' '{print $4}')
         if [ -n "$ADDR" ]; then
-            hyprctl dispatch focuswindow "address:$ADDR" >/dev/null 2>&1
+            hyprctl dispatch focuswindow "address:$ADDR" >/dev/null 2>&1 && return 0
+        fi
+    fi
+    return 1
+}
+
+is_flint_tab_open() {
+    # 1. Check if Hyprland has a window with Flint / 3000 in title
+    if command -v hyprctl >/dev/null 2>&1; then
+        if hyprctl clients -j 2>/dev/null | grep -iE '"title":.*(Flint|localhost:3000|127\.0\.0\.1:3000)' >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    # 2. Check Zen Browser live sessionstore for an open tab pointing to port 3000
+    local ZEN_REC
+    ZEN_REC=$(find ~/.config/zen -name "recovery.jsonlz4" 2>/dev/null | head -n 1)
+    if [ -n "$ZEN_REC" ] && [ -f "$ZEN_REC" ]; then
+        if strings "$ZEN_REC" 2>/dev/null | grep -iE 'http://(localhost|127\.0\.0\.1):3000' >/dev/null 2>&1; then
             return 0
         fi
     fi
@@ -37,13 +57,16 @@ focus_window() {
 }
 
 open_app_window() {
-    echo "Opening Flint app window..."
+    echo "Opening Flint in existing browser window..."
     if command -v zen-browser >/dev/null 2>&1; then
-        zen-browser --new-window "http://localhost:3000" >/dev/null 2>&1 &
+        # Open in already opened browser window/tab (never pass --new-window)
+        zen-browser "http://localhost:3000" >/dev/null 2>&1 &
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "http://localhost:3000" >/dev/null 2>&1 &
     elif command -v google-chrome >/dev/null 2>&1; then
-        google-chrome --app="http://localhost:3000" >/dev/null 2>&1 &
+        google-chrome "http://localhost:3000" >/dev/null 2>&1 &
     elif command -v chromium >/dev/null 2>&1; then
-        chromium --app="http://localhost:3000" >/dev/null 2>&1 &
+        chromium "http://localhost:3000" >/dev/null 2>&1 &
     else
         xdg-open "http://localhost:3000" >/dev/null 2>&1 &
     fi
@@ -105,14 +128,20 @@ stop_services() {
 case "$1" in
     launch)
         if is_frontend_running; then
-            echo "Flint is already running."
-            if ! focus_window; then
-                open_app_window
+            echo "Flint services are running."
+            if is_flint_tab_open; then
+                echo "Flint tab is already opened."
+                focus_window
+                command -v notify-send >/dev/null 2>&1 && notify-send -i flint "Flint" "Flint Prepress Studio is already running" || true
+                exit 0
             fi
-            command -v notify-send >/dev/null 2>&1 && notify-send -i flint "Flint" "Focused active Flint window" || true
+            # Services are running but no tab was found: open in existing browser window
+            open_app_window
+            focus_window
         else
             start_services
             open_app_window
+            focus_window
         fi
         ;;
     start)
