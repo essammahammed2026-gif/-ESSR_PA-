@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Pipette, Plus, Check, Pencil, Trash2 } from "lucide-react";
+import { Pipette, Plus, Check } from "lucide-react";
 import { IconToolBleed } from "@/components/shared/StudioIcons";
-import { BleedModuleConfig, BleedEntry, ModuleTaskProgress } from "@/types/book_studio";
+import { BleedModuleConfig, BleedEntry, ModuleTaskProgress, BookStudioPage } from "@/types/book_studio";
 import { type LengthUnit, mmToUnit, unitToMm, UNIT_OPTIONS } from "@/lib/units";
-import { PageScopeSelector, ModuleProgressBar, formatScopeLabel } from "./PageScopeSelector";
+import { PageScopeSelector, ModuleProgressBar, formatScopeLabel, LayerEntryStack } from "./PageScopeSelector";
+import { resolveConcretePageNumbers } from "@/lib/pageScope";
 
 export interface BleedPanelProps {
   bleedModule: BleedModuleConfig;
@@ -13,6 +14,10 @@ export interface BleedPanelProps {
   unit?: LengthUnit;
   onActivateEyedropper?: () => void;
   taskProgress?: ModuleTaskProgress;
+  pages?: BookStudioPage[];
+  selectedPageId?: string | null;
+  activePageNum?: number;
+  shortcutLabels?: Record<string, string>;
 }
 
 const BLEED_PRESETS_MM = [0, 2, 3, 5];
@@ -23,6 +28,10 @@ export function BleedPanel({
   unit = "mm",
   onActivateEyedropper,
   taskProgress,
+  pages = [],
+  selectedPageId,
+  activePageNum,
+  shortcutLabels = {},
 }: BleedPanelProps) {
   const unitShort = UNIT_OPTIONS.find((o) => o.value === unit)?.short || "mm";
   const displayVal = mmToUnit(bleedModule.bleedMm, unit);
@@ -44,7 +53,13 @@ export function BleedPanel({
   };
 
   const handleApplyBleed = () => {
-    const scopeLbl = formatScopeLabel(bleedModule.scope);
+    const concrete = resolveConcretePageNumbers(pages, bleedModule.scope, selectedPageId);
+    const modeName = bleedModule.mode === "solid" ? "Solid" : "Mirror";
+    const placementName = (bleedModule.placement || "outside") === "inside" ? "Inside" : "Outside";
+    const marksName = bleedModule.showCropMarks ? "Marks On" : "Marks Off";
+    const label = `${mmToUnit(bleedModule.bleedMm, unit)} ${unitShort} Bleed`;
+    const details = `${modeName} • ${placementName} • ${marksName}`;
+
     const currentEntry: BleedEntry = {
       id: editingId || `bleed_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       bleedMm: bleedModule.bleedMm,
@@ -52,14 +67,27 @@ export function BleedPanel({
       solidColor: bleedModule.solidColor,
       placement: bleedModule.placement || "outside",
       showCropMarks: bleedModule.showCropMarks,
-      scopeLabel: scopeLbl,
+      scopeLabel: concrete.scopeLabel,
+      targetPages: concrete.pageNumbers,
+      targetPageIds: concrete.pageIds,
+      visible: true,
+      label,
+      details,
+      params: {
+        bleedMm: bleedModule.bleedMm,
+        mode: bleedModule.mode,
+        solidColor: bleedModule.solidColor,
+        placement: bleedModule.placement,
+        showCropMarks: bleedModule.showCropMarks,
+        scope: bleedModule.scope,
+      },
     };
 
     setBleedModule((prev) => {
       const existing = prev.appliedBleeds || [];
       const updated = editingId
         ? existing.map((b) => (b.id === editingId ? currentEntry : b))
-        : [...existing, currentEntry];
+        : [...existing.filter((b) => b.scopeLabel !== concrete.scopeLabel), currentEntry];
       return {
         ...prev,
         enabled: true,
@@ -71,6 +99,10 @@ export function BleedPanel({
   };
 
   const handleEditEntry = (entry: BleedEntry) => {
+    if (editingId === entry.id) {
+      setEditingId(null);
+      return;
+    }
     setEditingId(entry.id);
     setBleedModule((prev) => ({
       ...prev,
@@ -79,6 +111,7 @@ export function BleedPanel({
       solidColor: entry.solidColor || prev.solidColor,
       placement: entry.placement,
       showCropMarks: entry.showCropMarks,
+      scope: entry.params?.scope || prev.scope,
     }));
   };
 
@@ -96,11 +129,63 @@ export function BleedPanel({
     }
   };
 
+  const handleDeleteFromCurrentPage = (entryId: string) => {
+    if (!selectedPageId) return;
+    setBleedModule((prev) => {
+      const remaining = (prev.appliedBleeds || [])
+        .map((b) => {
+          if (b.id !== entryId) return b;
+          const nextIds = (b.targetPageIds || []).filter((id) => id !== selectedPageId);
+          const nextPages = activePageNum !== undefined
+            ? (b.targetPages || []).filter((n) => n !== activePageNum)
+            : (b.targetPages || []);
+          return {
+            ...b,
+            targetPageIds: nextIds,
+            targetPages: nextPages,
+            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+          };
+        })
+        .filter((b) => (b.targetPageIds && b.targetPageIds.length > 0) || (b.targetPages && b.targetPages.length > 0));
+
+      return {
+        ...prev,
+        enabled: remaining.length > 0,
+        appliedBleeds: remaining,
+      };
+    });
+    if (editingId === entryId) {
+      setEditingId(null);
+    }
+  };
+
+  const handleToggleVisibility = (id: string, visible: boolean) => {
+    setBleedModule((prev) => ({
+      ...prev,
+      appliedBleeds: (prev.appliedBleeds || []).map((b) => (b.id === id ? { ...b, visible } : b)),
+    }));
+  };
+
+  const handleToggleAllVisibility = (visible: boolean) => {
+    setBleedModule((prev) => ({
+      ...prev,
+      appliedBleeds: (prev.appliedBleeds || []).map((b) => ({ ...b, visible })),
+    }));
+  };
+
+  const handleDeleteAll = () => {
+    setBleedModule((prev) => ({
+      ...prev,
+      enabled: false,
+      appliedBleeds: [],
+    }));
+    setEditingId(null);
+  };
+
   const handleNativeEyedropper = async () => {
-    if (typeof window !== "undefined" && "EyeDropper" in window) {
+    if (typeof window !== "undefined" && window.EyeDropper) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const eyeDropper = new (window as any).EyeDropper();
+        const eyeDropper = new window.EyeDropper();
         const result = await eyeDropper.open();
         if (result?.sRGBHex) {
           setBleedModule((prev) => ({ ...prev, enabled: true, solidColor: result.sRGBHex, mode: "solid" }));
@@ -133,9 +218,6 @@ export function BleedPanel({
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Print Bleed & Marks</h3>
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
-                  Key 5
-                </span>
               </div>
               <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
                 Synthesize mirrored or solid bleed margins and vector corner crop marks.
@@ -143,7 +225,10 @@ export function BleedPanel({
             </div>
           </div>
 
-          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Print Bleed">
+          <label
+            className="relative inline-flex items-center cursor-pointer shrink-0 mt-1"
+            title={`Toggle Print Bleed (${shortcutLabels.module_bleed || "5"})`}
+          >
             <input
               type="checkbox"
               checked={bleedModule.enabled}
@@ -252,8 +337,8 @@ export function BleedPanel({
               <button
                 type="button"
                 onClick={handleNativeEyedropper}
-                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition-colors cursor-pointer"
-                title="Pick color directly from page (Shortcut: I)"
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-[var(--app-accent,#f59e0b)] transition-colors cursor-pointer"
+                title={`Pick color directly from page (${shortcutLabels.eyedropper || "I"})`}
               >
                 <Pipette size={13} />
               </button>
@@ -342,7 +427,7 @@ export function BleedPanel({
               type="checkbox"
               checked={bleedModule.showCropMarks}
               onChange={(e) => setBleedModule((prev) => ({ ...prev, showCropMarks: e.target.checked }))}
-              className="rounded accent-amber-500"
+              className="rounded accent-[var(--app-accent,#f59e0b)]"
             />
             <span>Crop Marks</span>
           </label>
@@ -364,6 +449,7 @@ export function BleedPanel({
         <PageScopeSelector
           scope={bleedModule.scope}
           onChange={(sc) => setBleedModule((prev) => ({ ...prev, scope: sc }))}
+          activePageNum={activePageNum}
         />
 
         {/* Apply / Update Bleed Button */}
@@ -376,10 +462,14 @@ export function BleedPanel({
               backgroundColor: "var(--app-accent, #f59e0b)",
               color: "var(--app-accent-fg, #0f172a)",
             }}
-            title={editingId ? "Save changes to this bleed entry" : "Commit current bleed configuration"}
+            title={
+              editingId
+                ? `Save changes to this bleed entry (${shortcutLabels.apply_action || "Enter"})`
+                : `Commit bleed to ${formatScopeLabel(bleedModule.scope, activePageNum)} (${shortcutLabels.apply_action || "Enter"})`
+            }
           >
             {editingId ? <Check size={13} /> : <Plus size={13} />}
-            <span>{editingId ? "Update Entry" : `Apply (${formatScopeLabel(bleedModule.scope)})`}</span>
+            <span>{editingId ? "Update Entry" : `Apply (${formatScopeLabel(bleedModule.scope, activePageNum)})`}</span>
           </button>
           {editingId && (
             <button
@@ -394,73 +484,20 @@ export function BleedPanel({
         </div>
       </div>
 
-      {/* Applied Bleeds List */}
-      {appliedList.length > 0 && (
-        <div className="rounded-xl border border-[var(--border-subtle,#242A38)] bg-[var(--surface-card,#181D27)] p-2.5 space-y-1.5">
-          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            <span>Applied</span>
-            <span className="font-mono text-slate-500">{appliedList.length}</span>
-          </div>
-          <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5">
-            {appliedList.map((entry, idx) => (
-              <div
-                key={entry.id || idx}
-                className={`flex items-center justify-between p-1.5 rounded-lg border text-[11px] transition-colors ${
-                  editingId === entry.id
-                    ? "bg-amber-500/10 border-amber-500/50 text-amber-200"
-                    : "bg-[var(--surface-inset,#131720)] border-[var(--border-subtle,#242A38)] text-slate-300 hover:border-slate-600"
-                }`}
-              >
-                <div className="flex items-center space-x-1.5 min-w-0">
-                  <span
-                    className={`px-1 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                      entry.placement === "inside"
-                        ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
-                        : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                    }`}
-                  >
-                    {entry.placement || "outside"}
-                  </span>
-                  <span className="font-mono font-semibold">
-                    {mmToUnit(entry.bleedMm, unit)} {unitShort}
-                  </span>
-                  <span className="text-[10px] text-slate-400 flex items-center gap-1 truncate">
-                    {entry.mode === "solid" ? (
-                      <>
-                        <span
-                          className="w-2.5 h-2.5 rounded-full inline-block border border-white/20 shrink-0"
-                          style={{ backgroundColor: entry.solidColor || "#fff" }}
-                        />
-                        <span>Solid</span>
-                      </>
-                    ) : (
-                      <span>Mirror</span>
-                    )}
-                  </span>
-                </div>
-                <div className="flex items-center space-x-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleEditEntry(entry)}
-                    className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                    title="Edit this bleed entry"
-                  >
-                    <Pencil size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteEntry(entry.id)}
-                    className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
-                    title="Delete this bleed entry"
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Universal Layer Stack — TCK-02 */}
+      <LayerEntryStack
+        title="Applied Bleeds"
+        entries={appliedList}
+        editingId={editingId}
+        activePageNum={activePageNum}
+        activePageId={selectedPageId}
+        onEdit={handleEditEntry}
+        onDelete={handleDeleteEntry}
+        onDeleteFromCurrentPage={handleDeleteFromCurrentPage}
+        onToggleVisibility={handleToggleVisibility}
+        onToggleAllVisibility={handleToggleAllVisibility}
+        onDeleteAll={handleDeleteAll}
+      />
     </div>
   );
 }

@@ -55,6 +55,12 @@ export const DEFAULT_BOOK_SHORTCUTS: Record<string, string> = {
   detect_page: "a",
   detect_all: "shift+a",
   apply_action: "enter",
+  module_crop: "1",
+  module_deskew: "2",
+  module_cleanup: "3",
+  module_restore: "4",
+  module_bleed: "5",
+  exit_module: "escape",
 };
 
 export function useBookShortcuts({
@@ -72,7 +78,11 @@ export function useBookShortcuts({
     if (!raw) return "";
     return raw
       .split("+")
-      .map((p) => (p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1)))
+      .map((p) => {
+        const lower = p.toLowerCase();
+        if (lower === "escape" || lower === "esc") return "Esc";
+        return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
+      })
       .join("+");
   }, [activeShortcuts]);
 
@@ -159,10 +169,40 @@ export function useBookShortcuts({
       } else if (combo === activeShortcuts.apply_action && handlers.applyAction) {
         e.preventDefault();
         handlers.applyAction();
-      } else if (["1", "2", "3", "4", "5"].includes(combo) && handlers.focusModule) {
+      } else if (
+        (combo === activeShortcuts.module_crop || combo === "1") &&
+        handlers.focusModule
+      ) {
         e.preventDefault();
-        handlers.focusModule(Number(combo));
-      } else if (combo === "escape" && handlers.exitModule) {
+        handlers.focusModule(1);
+      } else if (
+        (combo === activeShortcuts.module_deskew || combo === "2") &&
+        handlers.focusModule
+      ) {
+        e.preventDefault();
+        handlers.focusModule(2);
+      } else if (
+        (combo === activeShortcuts.module_cleanup || combo === "3") &&
+        handlers.focusModule
+      ) {
+        e.preventDefault();
+        handlers.focusModule(3);
+      } else if (
+        (combo === activeShortcuts.module_restore || combo === "4") &&
+        handlers.focusModule
+      ) {
+        e.preventDefault();
+        handlers.focusModule(4);
+      } else if (
+        (combo === activeShortcuts.module_bleed || combo === "5") &&
+        handlers.focusModule
+      ) {
+        e.preventDefault();
+        handlers.focusModule(5);
+      } else if (
+        (combo === activeShortcuts.exit_module || combo === "escape" || combo === "esc") &&
+        handlers.exitModule
+      ) {
         handlers.exitModule();
       }
     };

@@ -12,10 +12,12 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 
 | Primary Router File | API Prefix / Scope | Matching Engine Twin(s) (`backend/engines/`) |
 | :--- | :--- | :--- |
-| `backend/book_scan_api.py` | `/api/book-scan/*` (Sessions, Crop, Split, Deskew, Page Ops, History, Export) | `book_scan_engine.py`, `schemas.py` |
+| `backend/book_scan_api.py` | `/api/book-scan/*` (Sessions, Crop, Split, Deskew, Page Ops, History, Export, Locks) | `book_scan_engine.py`, `schemas.py`, `backend/db/repository.py`, `backend/storage/asset_store.py` |
 | `backend/imposing_api.py` | `/api/imposing/*` (Upload, Book & Gang Preview, Nesting, PDF/SVG Export) | `imposing_prep.py`, `sheet_packer.py`, `roll_packer.py`, `sheet_gang_exporter.py`, `thumbnails.py`, `schemas.py` |
 | `backend/settings_api.py` | `/api/settings/*` (Presets CRUD, Defaults, Runtime Storage Cleanup) | `storage_cleaner.py` *(persists config to `backend/settings.json`)* |
 | `backend/main.py` | `/api/inspect`, `/api/inspect/thumbnail/*`, `/api/contour/*`, `/api/flipbook/*`, `/api/report/*` | `asset_inspector.py`, `contour_engine.py`, `flipbook_worker.py`, `report_generator.py`, `thumbnails.py`, `units.py` |
+| `backend/db/` | SQLite WAL ACID Metadata Persistence (`session.py`, `models.py`, `repository.py`) | Transactional CRUD for sessions, pages, applied layers, session locks, and export jobs |
+| `backend/storage/` | Structured Asset Store (`asset_store.py`) | Deterministic session storage (`data/storage/{session_id}/raw|thumb|exports/`) |
 | *Shared Engine Utilities* | Cross-engine helpers, geometry/unit math, Pydantic models | `schemas.py`, `units.py`, `thumbnails.py` |
 
 ### 2. Frontend: Studio Page Routes (`frontend/src/app/`) $\leftrightarrow$ Component Folders (`frontend/src/components/`)
@@ -23,12 +25,12 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 | Studio Route & Page File | Component Folder (`frontend/src/components/`) | Key Components, Hooks & Utilities |
 | :--- | :--- | :--- |
 | **`/`** (Command Center & Triage)<br>`src/app/page.tsx` | `src/components/home/` | `DropzonePanel.tsx`, `AssetPanel.tsx`, `AuditReport.tsx`, `types.ts`<br>**Types & Lib:** `src/lib/units.ts`, `src/lib/api.ts` |
-| **`/book-studio`** (Scanned Book Studio)<br>`src/app/book-studio/page.tsx` | `src/components/book-studio/`<br>`src/components/book-studio/modules/` | **Views:** `BookWorkspace.tsx`, `PageCanvas.tsx`, `BookLeftPanel.tsx`, `BookRightPanel.tsx`, `WorkspaceToolbar.tsx`, `DeckCard.tsx`, `DeckListView.tsx`, `PageContextMenu.tsx`, `PagePropertiesModal.tsx`, `HistoryPopover.tsx`, `RestoreOriginalModal.tsx`, `RotateDropdown.tsx`, `FileUploadQueue.tsx`, `ExportProgressModal.tsx`<br>**Modules:** `CropSplitPanel.tsx`, `SplitLinesEditor.tsx`, `DeskewPanel.tsx`, `BleedPanel.tsx`, `RestorePanel.tsx` *(hosts both `CleanupPanel` & `RestorePanel`)*, `PageScopeSelector.tsx`<br>**Hooks (`src/hooks/`):** `useBookStudioState.ts`, `useBookSession.ts`, `useBookModules.ts`, `useBookPageOps.ts`, `useBookHistory.ts`, `useBookShortcuts.ts`<br>**Types & Lib:** `src/types/book_studio.ts`, `src/lib/splitLines.ts`, `src/lib/pageScope.ts`, `src/lib/units.ts` |
+| **`/book-studio`** (Scanned Book Studio)<br>`src/app/book-studio/page.tsx` | `src/components/book-studio/`<br>`src/components/book-studio/modules/` | **Views:** `BookWorkspace.tsx`, `PageCanvas.tsx`, `BookLeftPanel.tsx`, `BookRightPanel.tsx`, `WorkspaceToolbar.tsx`, `DeckCard.tsx`, `DeckListView.tsx`, `PageContextMenu.tsx`, `PagePropertiesModal.tsx`, `HistoryPopover.tsx`, `RestoreOriginalModal.tsx`, `RotateDropdown.tsx`, `FileUploadQueue.tsx`, `ExportProgressModal.tsx`<br>**Modules:** `CropSplitPanel.tsx`, `SplitLinesEditor.tsx`, `DeskewPanel.tsx`, `BleedPanel.tsx`, `RestorePanel.tsx` *(hosts both `CleanupPanel` & `RestorePanel`)*, `PageScopeSelector.tsx` *(hosts `PageScopeSelector` & `LayerEntryStack`)*<br>**Hooks (`src/hooks/`):** `useBookStudioState.ts`, `useBookSession.ts`, `useBookModules.ts`, `useBookPageOps.ts`, `useBookHistory.ts`, `useBookShortcuts.ts`<br>**Types & Lib:** `src/types/book_studio.ts`, `src/lib/splitLines.ts`, `src/lib/pageScope.ts`, `src/lib/units.ts` |
 | **`/imposing`** (Book & Gang Imposition)<br>`src/app/imposing/page.tsx` | `src/components/imposing/` | `LeftAssetPanel.tsx`, `PreviewViewport.tsx`, `SheetCanvas.tsx`, `RightControlPanel.tsx`<br>**Hooks (`src/hooks/`):** `useImpositionStudio.ts`<br>**Types:** `src/types/prepress.ts` |
 | **`/contour`** (Die-Cut Vectorization)<br>`src/app/contour/page.tsx` | `src/components/contour/` | `ContourViewport.tsx`, `ContourControls.tsx` |
 | **`/flipbook`** (3D Virtual Proofing)<br>`src/app/flipbook/page.tsx` | `src/components/flipbook/` | `FlipbookViewport.tsx`, `FlipbookControls.tsx` |
 | **`/settings`** (System & Presets Config)<br>`src/app/settings/page.tsx` | `src/components/settings/` | `SheetsSection.tsx`, `RollsSection.tsx`, `DefaultsSection.tsx`, `StorageSection.tsx`, `AppearanceSection.tsx`, `ShortcutsSection.tsx`, `types.ts` |
-| *Shared Shell, Context & Core Libs* | `src/components/layout/`<br>`src/components/shared/`<br>`src/components/ui/` | `StudioLayout.tsx`, `DeckGrid.tsx`, `NumberControl.tsx`, `StudioIcons.tsx`, `button.tsx`<br>**Context:** `src/context/AppearanceContext.tsx`<br>**Core Libs (`src/lib/`):** `api.ts`, `useDebounce.ts`, `units.ts`, `utils.ts`<br>**Design System Docs:** `docs/design_system.md` |
+| *Shared Shell, Context & Core Libs* | `src/components/layout/`<br>`src/components/shared/`<br>`src/components/ui/` | `StudioLayout.tsx`, `DeckGrid.tsx`, `NumberControl.tsx`, `StudioIcons.tsx`, `ClientOnly.tsx`, `button.tsx`<br>**Context:** `src/context/AppearanceContext.tsx`<br>**Core Libs (`src/lib/`):** `api.ts`, `useDebounce.ts`, `units.ts`, `pageScope.ts`, `splitLines.ts`<br>**Design System Docs:** `docs/design_system.md` |
 | *Brand & App Icons* | `src/app/` (Next file conventions)<br>`public/`<br>`src-tauri/icons/` | `favicon.ico` (16–256 transparent glyph), `icon.png`, `apple-icon.png`, `manifest.ts`<br>**Public:** `flint_mark.png` (sidebar + PDF report logo), `icons/icon-192.png`, `icons/icon-512.png`, `icons/icon-maskable-512.png`<br>**OS launcher:** `~/.local/share/icons/hicolor/*/apps/flint.png` |
 
 ---
@@ -95,13 +97,12 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 
 ## Data Flow & Storage Lifecycle
 
-### Ephemeral Storage Policy & Memory Safety
-ESSR_PA follows a strict **zero-retention / ephemeral storage policy**:
-* Files uploaded to `/temp_uploads/` are processed immediately.
-* Endpoints like `/api/preflight` automatically clean up temporary files in a `finally` block upon completion.
-* **In-Memory TTL Cache Eviction:** On low-memory systems (4GB–8GB RAM), prolonged usage can accumulate stale file references and preview objects. `backend/main.py` and `backend/book_scan_api.py` run automated TTL eviction (`CACHE_TTL_SECONDS = 7200` / 2 hours) on `PROJECT_CACHE`, `CONTOUR_CACHE`, `CONTOUR_PREVIEWS`, and `SESSIONS`, unlinking expired disk assets and purging dictionaries.
-* Generated export files (such as flipbook HTML assets or imposing PDFs) are stored temporarily in runtime directories (`backend/temp_uploads/` and `backend/public_flipbooks/`), which are ignored by version control.
-* *Roadmap Goal:* Transition file processing to purely in-memory buffers or client-side storage to eliminate local disk reliance entirely.
+### Dual-Tier Architecture: SQLite WAL Metadata & Structured Asset Store
+ESSR_PA utilizes a robust hybrid persistence layer combining an ACID relational metadata engine with deterministic filesystem asset storage:
+* **SQLite WAL Database (`backend/data/flint.db`):** All session states, page inventories, applied processing layers (crop, split, deskew, cleanup, mask), multi-user edit locks, and background export jobs are transactionally persisted via SQLAlchemy with Write-Ahead Logging (`PRAGMA journal_mode=WAL`) and non-blocking concurrent readers.
+* **Structured Asset Store (`backend/storage/asset_store.py`):** Heavy binary files (original PDF inputs, page raster thumbnails, and exported documents) reside in deterministic paths under `backend/data/storage/{session_id}/raw|thumb|exports/`. This isolates large binaries from database bloat and memory footprint.
+* **Process Recovery & Multi-Worker Resiliency:** If Uvicorn restarts or multiple workers are spawned across a local network, session metadata and layer history are automatically rehydrated from the SQLite WAL without data loss.
+* **Zero-Retention Ephemeral Storage:** Ephemeral inspect/contour working files in `/temp_uploads/` are processed immediately or purged via the automated TTL eviction / storage manager. Active sessions in `data/storage/` are isolated and protected during user workflows.
 
 ### Persistent Application State
 * Preset sizes (standard sheet sizes: SRA3, A3, A4, B2; continuous roll widths: 600mm, 1000mm, 1600mm; and studio defaults) are stored in `backend/settings.json`.

@@ -70,7 +70,7 @@ function CutLineRow({
         step={0.5}
         value={Math.min(99, Math.max(1, pct))}
         onChange={(e) => onChange({ ...line, pos: clampCut(Number(e.target.value) / 100) })}
-        className="flex-1 min-w-[36px] h-1 accent-amber-500 cursor-pointer"
+        className="flex-1 min-w-[36px] h-1 accent-[var(--app-accent,#f59e0b)] cursor-pointer"
         title={`Cut line ${index + 1} position (${pct}%)`}
       />
       <div className="flex items-center bg-[#131720] border border-[#283040] rounded px-1 py-0.5 shrink-0">

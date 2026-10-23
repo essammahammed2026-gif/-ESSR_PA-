@@ -6,7 +6,19 @@ import { useSearchParams } from "next/navigation";
 import { Download } from "lucide-react";
 import { apiFetch, getApiUrl, downloadBlob } from "@/lib/api";
 import { FlipbookControls } from "@/components/flipbook/FlipbookControls";
-import { FlipbookViewport } from "@/components/flipbook/FlipbookViewport";
+import dynamic from "next/dynamic";
+
+const FlipbookViewport = dynamic(
+  () => import("@/components/flipbook/FlipbookViewport").then((mod) => mod.FlipbookViewport),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex-1 flex items-center justify-center bg-[#0d1017] text-slate-500 text-xs font-mono">
+        Loading 3D proofing viewport...
+      </div>
+    ),
+  }
+);
 
 interface InstantSettings {
   direction: string;
@@ -369,7 +381,13 @@ function FlipbookStudioContent() {
 
 export default function FlipbookStudio() {
   return (
-    <Suspense fallback={<div className="p-6 text-xs text-slate-400">Loading Flipbook Studio...</div>}>
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-[#12151B] text-slate-400 text-xs font-mono">
+          Loading Flipbook Studio...
+        </div>
+      }
+    >
       <FlipbookStudioContent />
     </Suspense>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   RefreshCw,
   Plus,
@@ -22,9 +22,11 @@ import {
   CropTargetBase,
   CropParity,
   ModuleTaskProgress,
+  BookStudioPage,
+  AppliedModuleEntry,
 } from "@/types/book_studio";
 import { SplitLinesEditor } from "./SplitLinesEditor";
-import { ModuleProgressBar, AppliedEntriesList } from "./PageScopeSelector";
+import { ModuleProgressBar, LayerEntryStack } from "./PageScopeSelector";
 import { getNextCutLine, cutPageCount } from "@/lib/splitLines";
 
 export interface CropSplitPanelProps {
@@ -39,10 +41,14 @@ export interface CropSplitPanelProps {
   splitSpread?: () => Promise<void>;
   revertSpread?: (mode?: "current" | "all", pageId?: string) => Promise<void>;
   applyCrop?: () => Promise<void>;
-  removeAppliedCrop?: (id: string) => Promise<void> | void;
+  removeAppliedCrop?: (id: string, onlyTargetPageId?: string) => Promise<void> | void;
+  removeAllAppliedCrops?: () => Promise<void> | void;
   taskProgress?: ModuleTaskProgress;
   selectedPageId?: string | null;
   sessionId: string | null;
+  pages?: BookStudioPage[];
+  activePageNum?: number;
+  shortcutLabels?: Record<string, string>;
 }
 
 const TARGET_PRESETS: {
@@ -71,13 +77,59 @@ export function CropSplitPanel({
   splitSpread,
   applyCrop,
   removeAppliedCrop,
+  removeAllAppliedCrops,
   taskProgress,
   selectedPageId,
   sessionId,
+  activePageNum,
+  shortcutLabels = {},
 }: CropSplitPanelProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
   const splitLines = cropModule.splitLines;
   const hasCutLines = splitLines.length > 0;
   const piecesPerSheet = cutPageCount(splitLines);
+
+  const handleEditEntry = (entry: AppliedModuleEntry) => {
+    if (editingId === entry.id) {
+      setEditingId(null);
+      return;
+    }
+    setEditingId(entry.id);
+    if (entry.params) {
+      setCropModule((prev) => ({
+        ...prev,
+        enabled: true,
+        cropBox: entry.params?.cropBox ?? prev.cropBox,
+        splitLines: entry.params?.splitLines ?? prev.splitLines,
+        target: entry.params?.target ?? prev.target,
+        detectMode: entry.params?.detectMode ?? prev.detectMode,
+      }));
+    }
+  };
+
+  const handleToggleVisibility = (id: string, visible: boolean) => {
+    setCropModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => (e.id === id ? { ...e, visible } : e)),
+    }));
+  };
+
+  const handleToggleAllVisibility = (visible: boolean) => {
+    setCropModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => ({ ...e, visible })),
+    }));
+  };
+
+  const handleDeleteAll = () => {
+    if (removeAllAppliedCrops) {
+      void removeAllAppliedCrops();
+    } else {
+      const entries = [...(cropModule.appliedEntries || [])].reverse();
+      entries.forEach((e) => removeAppliedCrop?.(e.id));
+    }
+    setEditingId(null);
+  };
 
   const setLines = (lines: SplitLine[]) => {
     setCropModule((prev) => ({ ...prev, enabled: true, splitLines: lines }));
@@ -109,14 +161,19 @@ export function CropSplitPanel({
 
   const targetLabel = useMemo(() => {
     const t = cropModule.target;
-    if (t.base === "current") return "Current Page";
+    if (t.base === "current") return activePageNum !== undefined ? `Page ${activePageNum}` : "Current Page";
     if (t.base === "range") return `Range (${t.customRange || "..."})`;
     if (t.parity === "odds") return "Odd Pages";
     if (t.parity === "evens") return "Even Pages";
     return "All Pages";
-  }, [cropModule.target]);
+  }, [cropModule.target, activePageNum]);
 
-  const handleApplyAction = () => {
+  const handleApplyAction = async () => {
+    if (editingId) {
+      const idToUpdate = editingId;
+      setEditingId(null);
+      await removeAppliedCrop?.(idToUpdate);
+    }
     if (hasCutLines) {
       if (splitSpread) void splitSpread();
     } else {
@@ -149,9 +206,6 @@ export function CropSplitPanel({
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Crop & Split</h3>
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
-                  Key 1
-                </span>
               </div>
               <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
                 Trim margins or slice spreads.
@@ -159,7 +213,10 @@ export function CropSplitPanel({
             </div>
           </div>
 
-          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Crop & Split Overlay (C)">
+          <label
+            className="relative inline-flex items-center cursor-pointer shrink-0 mt-1"
+            title={`Toggle Crop & Split Overlay (${shortcutLabels.crop_toggle || "C"})`}
+          >
             <input
               type="checkbox"
               checked={cropModule.enabled}
@@ -245,7 +302,7 @@ export function CropSplitPanel({
             onClick={() => detectCrop && void detectCrop(selectedPageId || undefined)}
             disabled={isDetectingCrop || !sessionId || !cropModule.enabled}
             className="flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] rounded-lg text-[11px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
-            title="Auto-detect crop box on current page (Shortcut: A)"
+            title={`Auto-detect crop box on current page (${shortcutLabels.detect_page || "A"})`}
           >
             {isDetectingCrop ? (
               <>
@@ -265,7 +322,7 @@ export function CropSplitPanel({
             onClick={() => detectAllCrops && void detectAllCrops()}
             disabled={isDetectingCrop || !sessionId || !cropModule.enabled}
             className="flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] rounded-lg text-[11px] font-medium transition-colors disabled:opacity-40 cursor-pointer"
-            title="Auto-detect individual crop boxes for every page in scope (Shortcut: Shift+A)"
+            title={`Auto-detect individual crop boxes for every page in scope (${shortcutLabels.detect_all || "Shift+A"})`}
           >
             {isDetectingCrop ? (
               <>
@@ -352,7 +409,7 @@ export function CropSplitPanel({
             onClick={() => handleAddCutLine("vertical")}
             disabled={!cropModule.enabled}
             className="flex items-center justify-center space-x-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium text-[var(--text-primary,#e2e8f0)] bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] transition-colors cursor-pointer"
-            title="Add vertical cut line for left/right spread splitting (Shortcut: X)"
+            title={`Add vertical cut line for left/right spread splitting (${shortcutLabels.add_cut || "X"})`}
           >
             <Plus size={11} style={{ color: "var(--app-accent, #f59e0b)" }} />
             <IconSplitVertical size={12} style={{ color: "var(--app-accent, #f59e0b)" }} />
@@ -396,6 +453,8 @@ export function CropSplitPanel({
           <div className="inline-flex items-center gap-0.5 bg-[var(--surface-inset,#131720)] p-0.5 rounded-md border border-[var(--border-subtle,#242A38)]">
             {TARGET_PRESETS.map((opt) => {
               const active = activeTargetId === opt.id;
+              const displayLabel = opt.id === "current" && activePageNum !== undefined ? `P.${activePageNum}` : opt.label;
+              const displayTip = opt.id === "current" && activePageNum !== undefined ? `Current Page (${activePageNum})` : opt.tip;
               return (
                 <button
                   key={opt.id}
@@ -407,9 +466,9 @@ export function CropSplitPanel({
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                   style={active ? { color: "var(--app-accent-text, var(--app-accent, #f59e0b))" } : undefined}
-                  title={opt.tip}
+                  title={displayTip}
                 >
-                  {opt.label}
+                  {displayLabel}
                 </button>
               );
             })}
@@ -422,31 +481,53 @@ export function CropSplitPanel({
             placeholder="e.g. 1-5, 8, 11-14"
             value={cropModule.target.customRange}
             onChange={(e) => setTarget("range", "both", e.target.value)}
-            className="w-full bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] text-[11px] font-mono px-2.5 py-1.5 rounded-lg outline-none focus:border-amber-500 placeholder:text-slate-500"
+            className="w-full bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] text-[11px] font-mono px-2.5 py-1.5 rounded-lg outline-none focus:border-[var(--app-accent,#f59e0b)] placeholder:text-slate-500"
             title="Type page numbers or ranges separated by commas"
           />
         )}
 
-        <button
-          type="button"
-          onClick={handleApplyAction}
-          disabled={!sessionId || !cropModule.enabled}
-          className="w-full py-2 px-3 rounded-lg disabled:bg-slate-800 disabled:text-slate-500 text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-sm hover:opacity-95"
-          style={{
-            backgroundColor: "var(--app-accent, #f59e0b)",
-            color: "var(--app-accent-fg, #0f172a)",
-          }}
-          title={hasCutLines ? `Commit split & crop to ${targetLabel} (Shortcut: Enter)` : `Commit crop to ${targetLabel} (Shortcut: Enter)`}
-        >
-          <span>{hasCutLines ? `Split (${targetLabel})` : `Apply (${targetLabel})`}</span>
-          <span className="text-[10px] font-mono opacity-80 px-1 py-0.2 rounded bg-black/15">↵</span>
-        </button>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={handleApplyAction}
+            disabled={!sessionId || !cropModule.enabled}
+            className="flex-1 py-2 px-3 rounded-lg disabled:bg-slate-800 disabled:text-slate-500 text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-sm hover:opacity-95"
+            style={{
+              backgroundColor: "var(--app-accent, #f59e0b)",
+              color: "var(--app-accent-fg, #0f172a)",
+            }}
+            title={hasCutLines ? `Commit split & crop to ${targetLabel} (${shortcutLabels.apply_action || "Enter"})` : `Commit crop to ${targetLabel} (${shortcutLabels.apply_action || "Enter"})`}
+          >
+            <span>{editingId ? "Update Crop" : hasCutLines ? `Split (${targetLabel})` : `Apply (${targetLabel})`}</span>
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              onClick={() => setEditingId(null)}
+              className="px-3 py-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-slate-300 text-xs rounded-lg transition-colors cursor-pointer"
+              title="Cancel editing"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Applied Entries List */}
-      <AppliedEntriesList
+      {/* Universal Layer Stack — TCK-02 */}
+      <LayerEntryStack
+        title="Applied Crops"
         entries={cropModule.appliedEntries}
+        editingId={editingId}
+        activePageNum={activePageNum}
+        activePageId={selectedPageId}
+        onEdit={handleEditEntry}
         onDelete={(id) => removeAppliedCrop?.(id)}
+        onDeleteFromCurrentPage={(id) => {
+          if (selectedPageId) removeAppliedCrop?.(id, selectedPageId);
+        }}
+        onToggleVisibility={handleToggleVisibility}
+        onToggleAllVisibility={handleToggleAllVisibility}
+        onDeleteAll={handleDeleteAll}
       />
     </div>
   );

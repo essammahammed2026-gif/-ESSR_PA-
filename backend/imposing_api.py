@@ -1,13 +1,13 @@
 import os
 import uuid
 import threading
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
-from typing import List, Optional
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
+from typing import Optional
 from engines.sheet_packer import MaxRectsSheetPacker, SingleSheetResult, PlacedSheetItem
 from engines.roll_packer import MeterSegmentPacker
 from engines.sheet_gang_exporter import SheetGangExporter
-from engines.schemas import ImposingItem, ImposingRequest
+from engines.schemas import ImposingRequest
 from engines.imposing_prep import (
     apply_alignment,
     build_imposing_pages_meta,

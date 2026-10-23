@@ -1,13 +1,17 @@
 import os
 import uuid
 import shutil
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
 from typing import List, Optional, Dict, Any
+from sqlalchemy.orm import Session as DBSession
+from db.session import get_db, db_session
+from db.repository import SessionRepository
 from engines.book_scan_engine import BookScanEngine, PageOpError
+from engines.units import mm_to_px
 from engines.schemas import (
-    SessionInitResponse, ReorderRequest, PageRotateRequest, ProcessPageRequest,
-    CropBoxModel, SplitSpreadRequest, RevertSpreadRequest, CropPageRequest,
+    ReorderRequest, PageRotateRequest,
+    SplitSpreadRequest, RevertSpreadRequest, CropPageRequest,
     BatchDetectCropRequest, BatchDetectAngleRequest, PageDeskewRequest,
     MaskPageRequest, PageColorModeRequest,
     ExportRequest, DuplicatePageRequest, InsertBlankPageRequest, RestorePagesRequest,
@@ -20,13 +24,44 @@ router = APIRouter(prefix="/api/book-scan", tags=["Book Scan Studio"])
 TEMP_DIR = "temp_uploads/book_scans"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# In-memory session store & TTL tracking
+# In-memory L1 session store & TTL tracking
 SESSIONS: Dict[str, Dict[str, Any]] = {}
 SESSION_TIMESTAMPS: Dict[str, float] = {}
 SESSION_TTL_SECONDS = 7200  # 2 hours
 
 # Export jobs tracking
 EXPORT_JOBS: Dict[str, Dict[str, Any]] = {}
+
+def get_or_load_session(session_id: str, db: Optional[DBSession] = None) -> Dict[str, Any]:
+    """Resolves session from memory cache, or loads from database upon restart/multi-worker."""
+    if session_id in SESSIONS:
+        SESSION_TIMESTAMPS[session_id] = time.time()
+        return SESSIONS[session_id]
+
+    if db is not None:
+        model = SessionRepository.get_session(db, session_id)
+        if model:
+            settings_dict = model.settings or {}
+            session_data = {
+                "id": model.id,
+                "mode": model.intake_mode,
+                "is_spread": model.is_spread,
+                "odds_order": settings_dict.get("odds_order", "forward"),
+                "evens_order": settings_dict.get("evens_order", "reverse"),
+                "start_with": settings_dict.get("start_with", "odds"),
+                "spread_split_pos": settings_dict.get("spread_split_pos", 0.5),
+                "odds_path": settings_dict.get("odds_path"),
+                "evens_path": settings_dict.get("evens_path"),
+                "single_path": settings_dict.get("single_path"),
+                "pages": [p.to_dict() for p in model.pages],
+                "session_dir": model.session_dir,
+                "rev": model.rev,
+            }
+            SESSIONS[session_id] = session_data
+            SESSION_TIMESTAMPS[session_id] = time.time()
+            return session_data
+
+    raise HTTPException(status_code=404, detail="Session not found or expired.")
 
 def evict_stale_sessions():
     now = time.time()
@@ -58,10 +93,36 @@ async def init_book_scan_session(
     files: Optional[List[UploadFile]] = File(None),
     reverse_file_indices: Optional[str] = Form(None),
     existing_file_path: Optional[str] = Form(None),
+    db: DBSession = Depends(get_db),
 ):
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(TEMP_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
+
+    if not (hasattr(file_single, "file") and hasattr(file_single, "filename")):
+        file_single = None
+    if not (hasattr(file_odds, "file") and hasattr(file_odds, "filename")):
+        file_odds = None
+    if not (hasattr(file_evens, "file") and hasattr(file_evens, "filename")):
+        file_evens = None
+    if not isinstance(files, list):
+        files = None
+    if not isinstance(existing_file_path, str):
+        existing_file_path = None
+    if not isinstance(reverse_file_indices, str):
+        reverse_file_indices = None
+    if not isinstance(mode, str):
+        mode = "single"
+    if not isinstance(is_spread, bool):
+        is_spread = False
+    if not isinstance(odds_order, str):
+        odds_order = "forward"
+    if not isinstance(evens_order, str):
+        evens_order = "reverse"
+    if not isinstance(spread_split_pos, (int, float)):
+        spread_split_pos = 0.5
+    if not isinstance(start_with, str):
+        start_with = "odds"
 
     odds_path = None
     evens_path = None
@@ -152,7 +213,7 @@ async def init_book_scan_session(
     evict_stale_sessions()
     SESSION_TIMESTAMPS[session_id] = time.time()
 
-    SESSIONS[session_id] = {
+    session_data = {
         "mode": mode,
         "is_spread": is_spread,
         "odds_order": odds_order,
@@ -165,6 +226,27 @@ async def init_book_scan_session(
         "pages": pages,
         "session_dir": session_dir
     }
+    SESSIONS[session_id] = session_data
+
+    if db is not None:
+        SessionRepository.create_session(
+            db,
+            session_id=session_id,
+            studio_type="book_scan",
+            intake_mode=mode,
+            is_spread=is_spread,
+            session_dir=session_dir,
+            pages_data=pages,
+            settings={
+                "odds_order": odds_order,
+                "evens_order": evens_order,
+                "start_with": start_with,
+                "spread_split_pos": spread_split_pos,
+                "odds_path": odds_path,
+                "evens_path": evens_path,
+                "single_path": single_path,
+            },
+        )
 
     return {
         "session_id": session_id,
@@ -203,10 +285,9 @@ async def get_page_thumbnail(
     flatten_illumination: bool = False,
     despeckle_level: int = 0,
     rev: int = 0,
+    db: DBSession = Depends(get_db),
 ):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found or expired.")
+    session = get_or_load_session(session_id, db)
 
     page_info = next((p for p in session["pages"] if p["id"] == page_id), None)
     if not page_info:
@@ -300,7 +381,7 @@ async def get_page_thumbnail(
         if bleed_mm > 0:
             h_px, w_px = proc_img.shape[:2]
             w_mm_val = float(page_info.get("width_mm") or 0.0)
-            px_per_mm = (w_px / w_mm_val) if w_mm_val > 0 else (dpi / 25.4)
+            px_per_mm = (w_px / w_mm_val) if w_mm_val > 0 else float(mm_to_px(1.0, dpi))
             bleed_px = int(round(max(0.0, float(bleed_mm)) * px_per_mm))
             proc_img = BookScanEngine.apply_bleed_to_image(
                 proc_img,
@@ -321,10 +402,8 @@ async def get_page_thumbnail(
         BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/reorder/{session_id}")
-async def reorder_pages(session_id: str, req: ReorderRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def reorder_pages(session_id: str, req: ReorderRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     page_map = {p["id"]: p for p in session["pages"]}
     new_pages = []
@@ -338,13 +417,13 @@ async def reorder_pages(session_id: str, req: ReorderRequest):
             new_pages.append(p)
 
     session["pages"] = new_pages
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, new_pages)
     return {"status": "ok", "pages": session["pages"]}
 
 @router.post("/rotate/{session_id}")
-async def rotate_page(session_id: str, req: PageRotateRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def rotate_page(session_id: str, req: PageRotateRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     page_info = next((p for p in session["pages"] if p["id"] == req.page_id), None)
     if not page_info:
@@ -360,15 +439,18 @@ async def rotate_page(session_id: str, req: PageRotateRequest):
         page_info["rev"] = int(page_info.get("rev", 0)) + 1
     except (TypeError, ValueError):
         page_info["rev"] = 1
+
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
     return {"status": "ok", "page": page_info}
 
 @router.delete("/page/{session_id}/{page_id}")
-async def delete_page(session_id: str, page_id: str):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def delete_page(session_id: str, page_id: str, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     session["pages"] = [p for p in session["pages"] if p["id"] != page_id]
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
     return {"status": "ok", "remaining": len(session["pages"]), "pages": session["pages"]}
 
 @router.post("/detect-angle/{session_id}/{page_id}")
@@ -376,11 +458,10 @@ async def detect_page_angle(
     session_id: str,
     page_id: str,
     max_angle: float = 10.0,
-    ignore_borders: bool = True
+    ignore_borders: bool = True,
+    db: DBSession = Depends(get_db),
 ):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    session = get_or_load_session(session_id, db)
 
     page_info = next((p for p in session["pages"] if p["id"] == page_id), None)
     if not page_info:
@@ -397,6 +478,8 @@ async def detect_page_angle(
         )
         page_info["deskew_angle"] = detected_angle
         page_info["rev"] = int(page_info.get("rev", 0)) + 1
+        if db is not None:
+            SessionRepository.save_pages(db, session_id, session["pages"])
         return {
             "status": "ok",
             "page_id": page_id,
@@ -407,10 +490,8 @@ async def detect_page_angle(
         BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/detect-angle-batch/{session_id}")
-async def detect_angle_batch(session_id: str, req: BatchDetectAngleRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def detect_angle_batch(session_id: str, req: BatchDetectAngleRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     target_set = set(req.target_page_ids) if req.target_page_ids else None
     doc_map = BookScanEngine.open_session_docs(session)
@@ -431,6 +512,9 @@ async def detect_angle_batch(session_id: str, req: BatchDetectAngleRequest):
             p["rev"] = int(p.get("rev", 0)) + 1
             angles_map[pid] = ang
 
+        if db is not None:
+            SessionRepository.save_pages(db, session_id, session["pages"])
+
         return {
             "status": "ok",
             "angles": angles_map,
@@ -440,10 +524,8 @@ async def detect_angle_batch(session_id: str, req: BatchDetectAngleRequest):
         BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/deskew-page/{session_id}")
-async def set_page_deskew(session_id: str, req: PageDeskewRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def set_page_deskew(session_id: str, req: PageDeskewRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     BookScanEngine.apply_deskew_to_pages(
         session["pages"],
@@ -452,28 +534,28 @@ async def set_page_deskew(session_id: str, req: PageDeskewRequest):
         per_page_angles=req.per_page_angles,
         clear_all=req.clear_all,
     )
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
     return {
         "status": "ok",
         "pages": session["pages"],
     }
 
 @router.post("/mask-page/{session_id}")
-async def mask_page(session_id: str, req: MaskPageRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def mask_page(session_id: str, req: MaskPageRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     BookScanEngine.apply_masks_to_pages(session["pages"], req)
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
     return {
         "status": "ok",
         "pages": session["pages"],
     }
 
 @router.post("/color-mode-page/{session_id}")
-async def set_page_color_mode(session_id: str, req: PageColorModeRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def set_page_color_mode(session_id: str, req: PageColorModeRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     BookScanEngine.apply_color_mode_to_pages(
         session["pages"],
@@ -482,6 +564,8 @@ async def set_page_color_mode(session_id: str, req: PageColorModeRequest):
         target_page_ids=req.target_page_ids,
         clear_all=req.clear_all,
     )
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
     return {
         "status": "ok",
         "pages": session["pages"],
@@ -491,11 +575,10 @@ async def set_page_color_mode(session_id: str, req: PageColorModeRequest):
 async def detect_page_crop(
     session_id: str,
     page_id: str,
-    mode: str = "paper"
+    mode: str = "paper",
+    db: DBSession = Depends(get_db),
 ):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    session = get_or_load_session(session_id, db)
 
     page_info = next((p for p in session["pages"] if p["id"] == page_id), None)
     if not page_info:
@@ -504,9 +587,6 @@ async def detect_page_crop(
     doc_map = BookScanEngine.open_session_docs(session)
 
     try:
-        # Detect within the CURRENT rendered view (stored crops kept): the
-        # returned box is view-relative, matching canvas overlay coordinates.
-        # Apply composes it onto the stored box (compose-on-commit).
         raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=100)
         res = BookScanEngine.detect_book_crop_and_seam(raw_img, mode=mode)
         return {
@@ -519,10 +599,8 @@ async def detect_page_crop(
         BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/detect-crop-batch/{session_id}")
-async def detect_crop_batch(session_id: str, req: BatchDetectCropRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def detect_crop_batch(session_id: str, req: BatchDetectCropRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     target_set = set(req.target_page_ids) if req.target_page_ids else None
     doc_map = BookScanEngine.open_session_docs(session)
@@ -547,10 +625,8 @@ async def detect_crop_batch(session_id: str, req: BatchDetectCropRequest):
         BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/split-spread/{session_id}")
-async def split_spread(session_id: str, req: SplitSpreadRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def split_spread(session_id: str, req: SplitSpreadRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
     if not session.get("pages"):
         raise HTTPException(status_code=400, detail="No pages available in session.")
 
@@ -571,6 +647,8 @@ async def split_spread(session_id: str, req: SplitSpreadRequest):
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 
     session["pages"] = new_pages
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, new_pages)
     return {
         "status": "ok",
         "total_pages": len(session["pages"]),
@@ -579,10 +657,8 @@ async def split_spread(session_id: str, req: SplitSpreadRequest):
     }
 
 @router.post("/revert-spread/{session_id}")
-async def revert_spread(session_id: str, req: RevertSpreadRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def revert_spread(session_id: str, req: RevertSpreadRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     try:
         new_pages, new_selected_id = BookScanEngine.revert_pages(
@@ -595,6 +671,8 @@ async def revert_spread(session_id: str, req: RevertSpreadRequest):
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 
     session["pages"] = new_pages
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, new_pages)
     return {
         "status": "ok",
         "total_pages": len(session["pages"]),
@@ -603,10 +681,8 @@ async def revert_spread(session_id: str, req: RevertSpreadRequest):
     }
 
 @router.post("/crop-page/{session_id}")
-async def crop_page(session_id: str, req: CropPageRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def crop_page(session_id: str, req: CropPageRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
     if not session.get("pages"):
         raise HTTPException(status_code=400, detail="No pages available in session.")
 
@@ -621,21 +697,25 @@ async def crop_page(session_id: str, req: CropPageRequest):
         per_page_crops=req.per_page_crops,
     )
 
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
+
     return {
         "status": "ok",
         "pages": session["pages"]
     }
 
 @router.post("/restore-pages/{session_id}")
-async def restore_pages(session_id: str, req: RestorePagesRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def restore_pages(session_id: str, req: RestorePagesRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     try:
         session["pages"] = BookScanEngine.restore_pages(session["pages"], req.pages)
     except PageOpError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
 
     return {
         "status": "ok",
@@ -658,6 +738,18 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
     EXPORT_JOBS[job_id]["progress"] = 2
     EXPORT_JOBS[job_id]["stage"] = "processing_pages"
     EXPORT_JOBS[job_id]["message"] = f"Initializing export for {total_pages} page(s)..."
+
+    with db_session() as db:
+        SessionRepository.create_or_update_export_job(
+            db,
+            job_id=job_id,
+            session_id=session_id,
+            status="processing",
+            stage="processing_pages",
+            progress=2.0,
+            message=f"Initializing export for {total_pages} page(s)...",
+            total_pages=total_pages,
+        )
 
     doc_map = BookScanEngine.open_session_docs(session)
     try:
@@ -723,6 +815,15 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
             EXPORT_JOBS[job_id]["status"] = "failed"
             EXPORT_JOBS[job_id]["error"] = "Export compilation failed."
             EXPORT_JOBS[job_id]["message"] = "Export compilation failed."
+            with db_session() as db:
+                SessionRepository.create_or_update_export_job(
+                    db,
+                    job_id=job_id,
+                    session_id=session_id,
+                    status="failed",
+                    error="Export compilation failed.",
+                    message="Export compilation failed.",
+                )
             return
 
         file_size = os.path.getsize(output_file_path)
@@ -735,10 +836,32 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
         EXPORT_JOBS[job_id]["media_type"] = media_type
         EXPORT_JOBS[job_id]["file_size_bytes"] = file_size
         EXPORT_JOBS[job_id]["download_url"] = f"/api/book-scan/export-download/{job_id}"
+
+        with db_session() as db:
+            SessionRepository.create_or_update_export_job(
+                db,
+                job_id=job_id,
+                session_id=session_id,
+                status="success",
+                stage="completed",
+                progress=100.0,
+                message=f"Export complete ({total_pages} pages)",
+                output_file_path=output_file_path,
+                file_size_bytes=file_size,
+            )
     except Exception as e:
         EXPORT_JOBS[job_id]["status"] = "failed"
         EXPORT_JOBS[job_id]["error"] = str(e)
         EXPORT_JOBS[job_id]["message"] = f"Export failed: {str(e)}"
+        with db_session() as db:
+            SessionRepository.create_or_update_export_job(
+                db,
+                job_id=job_id,
+                session_id=session_id,
+                status="failed",
+                error=str(e),
+                message=f"Export failed: {str(e)}",
+            )
     finally:
         BookScanEngine.close_session_docs(doc_map)
 
@@ -747,11 +870,10 @@ async def start_export_job(
     session_id: str,
     req: ExportRequest,
     background_tasks: BackgroundTasks,
+    db: DBSession = Depends(get_db),
 ):
     evict_stale_sessions()
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    session = get_or_load_session(session_id, db)
 
     pages = session.get("pages", [])
     if not pages:
@@ -775,12 +897,28 @@ async def start_export_job(
         "created_at": time.time(),
     }
 
+    if db is not None:
+        SessionRepository.create_or_update_export_job(
+            db,
+            job_id=job_id,
+            session_id=session_id,
+            status="pending",
+            stage="queued",
+            progress=0.0,
+            message="Export queued...",
+            total_pages=len(pages),
+        )
+
     background_tasks.add_task(_run_export_job, job_id, session_id, req)
     return {"job_id": job_id, "status": "started", "total_pages": len(pages)}
 
 @router.get("/export-job/{job_id}")
-async def get_export_job_status(job_id: str):
+async def get_export_job_status(job_id: str, db: DBSession = Depends(get_db)):
     job = EXPORT_JOBS.get(job_id)
+    if not job and db is not None:
+        db_job = SessionRepository.get_export_job(db, job_id)
+        if db_job:
+            return db_job
     if not job:
         raise HTTPException(status_code=404, detail="Export job not found or expired.")
     return job
@@ -805,9 +943,10 @@ async def download_export_file(job_id: str):
 async def export_book_pdf(
     session_id: str,
     req: ExportRequest,
+    db: DBSession = Depends(get_db),
 ):
     evict_stale_sessions()
-    session = SESSIONS.get(session_id)
+    session = get_or_load_session(session_id, db)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
@@ -851,10 +990,8 @@ async def export_book_pdf(
         BookScanEngine.close_session_docs(doc_map)
 
 @router.post("/duplicate-page/{session_id}")
-async def duplicate_page(session_id: str, req: DuplicatePageRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def duplicate_page(session_id: str, req: DuplicatePageRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     try:
         new_pages, new_id = BookScanEngine.duplicate_page(
@@ -866,6 +1003,9 @@ async def duplicate_page(session_id: str, req: DuplicatePageRequest):
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 
     session["pages"] = new_pages
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, new_pages)
+
     return {
         "status": "ok",
         "total_pages": len(session["pages"]),
@@ -874,10 +1014,8 @@ async def duplicate_page(session_id: str, req: DuplicatePageRequest):
     }
 
 @router.post("/insert-blank/{session_id}")
-async def insert_blank_page(session_id: str, req: InsertBlankPageRequest):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+async def insert_blank_page(session_id: str, req: InsertBlankPageRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
 
     try:
         new_pages, new_id = BookScanEngine.insert_blank_page(
@@ -891,6 +1029,9 @@ async def insert_blank_page(session_id: str, req: InsertBlankPageRequest):
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 
     session["pages"] = new_pages
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, new_pages)
+
     return {
         "status": "ok",
         "total_pages": len(session["pages"]),
@@ -904,10 +1045,9 @@ async def extract_single_page(
     page_id: str,
     format: str = "pdf",
     dpi: int = 300,
+    db: DBSession = Depends(get_db),
 ):
-    session = SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    session = get_or_load_session(session_id, db)
 
     page_info = next((p for p in session["pages"] if p["id"] == page_id), None)
     if not page_info:
@@ -941,4 +1081,55 @@ async def extract_single_page(
         )
     finally:
         BookScanEngine.close_session_docs(doc_map)
+
+# Multi-User Concurrency, Session Browsing & Locking Endpoints
+@router.get("/sessions")
+async def list_active_sessions(db: DBSession = Depends(get_db)):
+    sessions = SessionRepository.list_sessions(db, studio_type="book_scan")
+    return {
+        "status": "ok",
+        "sessions": [s.to_dict() for s in sessions]
+    }
+
+@router.post("/lock/{session_id}")
+async def acquire_session_lock(
+    session_id: str,
+    workstation_id: str = Form(...),
+    operator_name: str = Form("Operator"),
+    ttl_seconds: int = Form(60),
+    db: DBSession = Depends(get_db),
+):
+    success, lock_info = SessionRepository.acquire_lock(
+        db,
+        session_id=session_id,
+        workstation_id=workstation_id,
+        operator_name=operator_name,
+        ttl_seconds=ttl_seconds,
+    )
+    if not success:
+        return {
+            "status": "locked",
+            "message": f"Session is currently active by {lock_info.get('operator_name', 'another operator')} on {lock_info.get('workstation_id')}.",
+            "lock": lock_info,
+        }
+    return {"status": "ok", "lock": lock_info}
+
+@router.delete("/lock/{session_id}")
+async def release_session_lock(
+    session_id: str,
+    workstation_id: str = Form(...),
+    db: DBSession = Depends(get_db),
+):
+    released = SessionRepository.release_lock(db, session_id, workstation_id)
+    return {"status": "ok", "released": released}
+
+@router.get("/lock/{session_id}")
+async def get_session_lock_status(
+    session_id: str,
+    db: DBSession = Depends(get_db),
+):
+    session = SessionRepository.get_session(db, session_id)
+    if not session or not session.lock:
+        return {"status": "unlocked", "is_locked": False}
+    return {"status": "ok", "is_locked": session.lock.is_active(), "lock": session.lock.to_dict()}
 

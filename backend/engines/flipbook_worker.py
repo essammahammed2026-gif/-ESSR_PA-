@@ -2,8 +2,9 @@ import base64
 import gc
 import json
 import os
+import subprocess
+import tempfile
 import zipfile
-import traceback
 from string import Template
 import fitz
 

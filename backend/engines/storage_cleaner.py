@@ -9,6 +9,15 @@ ROOT_DIR = os.path.dirname(BACKEND_DIR)
 
 STORAGE_TARGETS = [
     {
+        "key": "session_storage",
+        "label": "Persistent Session Storage",
+        "description": "Original PDFs, thumbnails, and exports stored per-session under backend/data/storage.",
+        "path": os.path.join(BACKEND_DIR, "data", "storage"),
+        "display_path": "backend/data/storage",
+        "category": "runtime",
+        "shallow": False,
+    },
+    {
         "key": "book_scans",
         "label": "Book Studio Scans & Thumbnails",
         "description": "Uploaded book scan PDFs, spread slices, and rendered page thumbnails.",
@@ -145,7 +154,23 @@ class StorageCleaner:
     @staticmethod
     def clean_target(key: str) -> int:
         freed = 0
-        if key == "book_scans":
+        if key == "session_storage":
+            p = os.path.join(BACKEND_DIR, "data", "storage")
+            if os.path.exists(p):
+                for entry in os.scandir(p):
+                    if entry.name == ".gitkeep":
+                        continue
+                    if entry.is_dir():
+                        size, _ = get_dir_size_and_count(entry.path)
+                        shutil.rmtree(entry.path, ignore_errors=True)
+                        freed += size
+                    elif entry.is_file():
+                        freed += entry.stat().st_size
+                        try:
+                            os.remove(entry.path)
+                        except OSError:
+                            pass
+        elif key == "book_scans":
             p = os.path.join(BACKEND_DIR, "temp_uploads", "book_scans")
             if os.path.exists(p):
                 for entry in os.scandir(p):

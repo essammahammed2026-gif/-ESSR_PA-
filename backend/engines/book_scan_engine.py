@@ -1,13 +1,12 @@
 import os
-import io
 import math
 import uuid
 import zipfile
 import fitz  # PyMuPDF
 import cv2
 import numpy as np
-from typing import List, Dict, Any, Optional, Callable
-from engines.units import MM_TO_PTS, PTS_TO_MM, hex_to_rgb
+from typing import List, Dict, Any, Optional, Callable, Set
+from engines.units import MM_TO_PTS, PTS_TO_MM, hex_to_rgb, mm_to_px, is_page_in_scope as _is_page_in_scope
 
 class BookScanEngine:
     """
@@ -300,8 +299,8 @@ class BookScanEngine:
         if page_info.get("is_blank") or page_info.get("source") == "blank":
             w_mm = float(page_info.get("width_mm") or 210.0)
             h_mm = float(page_info.get("height_mm") or 297.0)
-            px_w = max(10, int(round(w_mm * dpi / 25.4)))
-            px_h = max(10, int(round(h_mm * dpi / 25.4)))
+            px_w = max(10, mm_to_px(w_mm, dpi))
+            px_h = max(10, mm_to_px(h_mm, dpi))
             return np.full((px_h, px_w, 3), 255, dtype=np.uint8)
 
         source = page_info["source"]
@@ -804,37 +803,8 @@ class BookScanEngine:
 
     @staticmethod
     def is_page_in_scope(page_num: int, scope_mode: str, custom_range: str = "") -> bool:
-        """
-        Determines if a 1-based page number matches the given scope filter:
-        - 'all': matches every page
-        - 'odds': matches odd page numbers (1, 3, 5, ...)
-        - 'evens': matches even page numbers (2, 4, 6, ...)
-        - 'range': parses custom ranges like '1-5, 8, 12-14'
-        """
-        if scope_mode == "all":
-            return True
-        if scope_mode == "odds":
-            return page_num % 2 != 0
-        if scope_mode == "evens":
-            return page_num % 2 == 0
-        if scope_mode == "range":
-            if not custom_range or not custom_range.strip():
-                return True
-            try:
-                parts = [p.strip() for p in custom_range.split(",") if p.strip()]
-                for part in parts:
-                    if "-" in part:
-                        s_str, e_str = part.split("-", 1)
-                        s, e = int(s_str.strip()), int(e_str.strip())
-                        if s <= page_num <= e:
-                            return True
-                    else:
-                        if int(part) == page_num:
-                            return True
-                return False
-            except Exception:
-                return True
-        return True
+        """Determines if a 1-based page number matches the given scope filter (delegated to canonical units.py)."""
+        return _is_page_in_scope(page_num, scope_mode, custom_range)
 
     @staticmethod
     def apply_spot_masks(image: np.ndarray, masks: Optional[List[Dict[str, Any]]]) -> np.ndarray:
@@ -1306,7 +1276,7 @@ class BookScanEngine:
                 cur_placement = per_page_bleed[idx].get("placement", bleed_placement)
                 cur_color_mode = per_page_bleed[idx].get("color_mode", "color")
 
-            bleed_px = int(round(max(0.0, float(cur_bleed_mm)) * (dpi / 25.4)))
+            bleed_px = mm_to_px(max(0.0, float(cur_bleed_mm)), dpi)
 
             extended_img = BookScanEngine.apply_bleed_to_image(
                 img,
@@ -1467,6 +1437,8 @@ class BookScanEngine:
                         "is_spread": False,
                         "parent_spread_width_mm": round(cropped_w, 1),
                         "parent_spread_height_mm": round(cropped_h, 1),
+                        "parent_spread_orig_width_mm": p.get("orig_width_mm") or p_orig_w,
+                        "parent_spread_orig_height_mm": p.get("orig_height_mm") or p_orig_h,
                     }
 
                     slice_ids = []
@@ -1653,7 +1625,11 @@ class BookScanEngine:
         elif target_page_ids:
             t_ids = set(target_page_ids)
             for p in pages:
-                if p["id"] in t_ids and is_split_page(p):
+                if (
+                    p.get("id") in t_ids
+                    or p.get("parent_page_id") in t_ids
+                    or p.get("immediate_parent_id") in t_ids
+                ) and is_split_page(p):
                     target_pairs.add((p["source"], p["doc_idx"]))
         elif page_id:
             target_page = next((p for p in pages if p["id"] == page_id), None)
@@ -1664,7 +1640,7 @@ class BookScanEngine:
             raise PageOpError(400, "page_id or revert_all required.")
 
         if not target_pairs:
-            raise PageOpError(400, "No split pages found to revert.")
+            return pages, page_id or (pages[0]["id"] if pages else None)
 
         new_pages = []
         recombined_pairs = set()
@@ -1675,8 +1651,8 @@ class BookScanEngine:
             if pair in target_pairs and is_split_page(p):
                 if pair not in recombined_pairs:
                     recombined_pairs.add(pair)
-                    orig_w = p.get("parent_spread_width_mm") or p.get("orig_width_mm") or 297.0
-                    orig_h = p.get("parent_spread_height_mm") or p.get("orig_height_mm") or 210.0
+                    orig_w = p.get("parent_spread_orig_width_mm") or p.get("parent_spread_width_mm") or p.get("orig_width_mm") or 297.0
+                    orig_h = p.get("parent_spread_orig_height_mm") or p.get("parent_spread_height_mm") or p.get("orig_height_mm") or 210.0
                     reverted_id = p.get("parent_page_id") or str(uuid.uuid4())[:8]
                     if new_selected_id is None:
                         new_selected_id = reverted_id
@@ -2102,7 +2078,7 @@ class BookScanEngine:
                             os.remove(single_pdf_path)
                     continue
 
-                bleed_px = int(round(max(0.0, float(cur_bleed_mm)) * (dpi / 25.4)))
+                bleed_px = mm_to_px(max(0.0, float(cur_bleed_mm)), dpi)
                 extended_img = BookScanEngine.apply_bleed_to_image(
                     img,
                     bleed_px=bleed_px,

@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { RefreshCw, RotateCcw, Sparkles, Ruler, Grid } from "lucide-react";
 import { IconToolDeskew } from "@/components/shared/StudioIcons";
-import { DeskewModuleConfig, ModuleTaskProgress } from "@/types/book_studio";
-import { PageScopeSelector, ModuleProgressBar, AppliedEntriesList, formatScopeLabel } from "./PageScopeSelector";
+import { DeskewModuleConfig, ModuleTaskProgress, BookStudioPage, AppliedModuleEntry } from "@/types/book_studio";
+import { PageScopeSelector, ModuleProgressBar, LayerEntryStack, formatScopeLabel } from "./PageScopeSelector";
+import { resolveConcretePageNumbers } from "@/lib/pageScope";
 
 export interface DeskewPanelProps {
   deskewModule: DeskewModuleConfig;
@@ -22,6 +23,9 @@ export interface DeskewPanelProps {
   taskProgress?: ModuleTaskProgress;
   selectedPageId?: string | null;
   sessionId: string | null;
+  pages?: BookStudioPage[];
+  activePageNum?: number;
+  shortcutLabels?: Record<string, string>;
 }
 
 export function DeskewPanel({
@@ -40,7 +44,12 @@ export function DeskewPanel({
   taskProgress,
   selectedPageId,
   sessionId,
+  pages = [],
+  activePageNum,
+  shortcutLabels = {},
 }: DeskewPanelProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const effectiveAngle =
     pageDeskewAngle !== null && pageDeskewAngle !== undefined
       ? pageDeskewAngle
@@ -57,20 +66,74 @@ export function DeskewPanel({
     }
   };
 
+  const handleEditEntry = (entry: AppliedModuleEntry) => {
+    if (editingId === entry.id) {
+      setEditingId(null);
+      return;
+    }
+    setEditingId(entry.id);
+    if (entry.params) {
+      setDeskewModule((prev) => ({
+        ...prev,
+        angle: entry.params?.angle ?? prev.angle,
+        ignoreBorders: entry.params?.ignoreBorders ?? prev.ignoreBorders,
+        maxAngle: entry.params?.maxAngle ?? prev.maxAngle,
+        scope: entry.params?.scope ?? prev.scope,
+      }));
+      if (selectedPageId && onChangePageAngle && entry.params?.angle !== undefined) {
+        onChangePageAngle(entry.params.angle);
+      }
+    }
+  };
+
   const handleApply = () => {
-    const scopeLbl = formatScopeLabel(deskewModule.scope);
+    const concrete = resolveConcretePageNumbers(pages, deskewModule.scope, selectedPageId);
     const angleText = `${effectiveAngle > 0 ? "+" : ""}${effectiveAngle.toFixed(2)}°`;
     const label = Math.abs(effectiveAngle) > 0.01 ? `Tilt ${angleText}` : "Auto Deskew";
+    const details = `±${deskewModule.maxAngle}° range • ${deskewModule.ignoreBorders ? "Margins 6%" : "Full Bed"}`;
+
+    const params = {
+      angle: effectiveAngle,
+      ignoreBorders: deskewModule.ignoreBorders,
+      maxAngle: deskewModule.maxAngle,
+      scope: deskewModule.scope,
+    };
+
+    if (editingId) {
+      setDeskewModule((prev) => ({
+        ...prev,
+        appliedEntries: (prev.appliedEntries || []).map((e) =>
+          e.id === editingId
+            ? {
+                ...e,
+                label,
+                details,
+                scopeLabel: concrete.scopeLabel,
+                targetPages: concrete.pageNumbers,
+                targetPageIds: concrete.pageIds,
+                params,
+              }
+            : e
+        ),
+      }));
+      setEditingId(null);
+      return;
+    }
 
     setDeskewModule((prev) => ({
       ...prev,
       enabled: true,
       appliedEntries: [
-        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== scopeLbl),
+        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== concrete.scopeLabel),
         {
           id: `deskew_${Date.now()}`,
           label,
-          scopeLabel: scopeLbl,
+          details,
+          scopeLabel: concrete.scopeLabel,
+          targetPages: concrete.pageNumbers,
+          targetPageIds: concrete.pageIds,
+          visible: true,
+          params,
         },
       ],
     }));
@@ -85,9 +148,67 @@ export function DeskewPanel({
         appliedEntries: remaining,
       };
     });
+    if (editingId === entryId) {
+      setEditingId(null);
+    }
     if ((deskewModule.appliedEntries || []).length <= 1) {
       onClearAllAngles?.();
     }
+  };
+
+  const handleDeleteFromCurrentPage = (entryId: string) => {
+    if (!selectedPageId) return;
+    setDeskewModule((prev) => {
+      const remaining = (prev.appliedEntries || [])
+        .map((e) => {
+          if (e.id !== entryId) return e;
+          const nextIds = (e.targetPageIds || []).filter((id) => id !== selectedPageId);
+          const nextPages = activePageNum !== undefined
+            ? (e.targetPages || []).filter((n) => n !== activePageNum)
+            : (e.targetPages || []);
+          return {
+            ...e,
+            targetPageIds: nextIds,
+            targetPages: nextPages,
+            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+          };
+        })
+        .filter((e) => (e.targetPageIds && e.targetPageIds.length > 0) || (e.targetPages && e.targetPages.length > 0));
+
+      return {
+        ...prev,
+        enabled: remaining.length > 0,
+        appliedEntries: remaining,
+      };
+    });
+    // Reset angle on current page
+    if (onChangePageAngle) {
+      onChangePageAngle(0);
+    }
+  };
+
+  const handleToggleVisibility = (id: string, visible: boolean) => {
+    setDeskewModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => (e.id === id ? { ...e, visible } : e)),
+    }));
+  };
+
+  const handleToggleAllVisibility = (visible: boolean) => {
+    setDeskewModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => ({ ...e, visible })),
+    }));
+  };
+
+  const handleDeleteAll = () => {
+    setDeskewModule((prev) => ({
+      ...prev,
+      enabled: false,
+      appliedEntries: [],
+    }));
+    setEditingId(null);
+    onClearAllAngles?.();
   };
 
   return (
@@ -105,9 +226,6 @@ export function DeskewPanel({
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Deskew</h3>
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
-                  Key 2
-                </span>
                 {deskewedPagesCount > 0 && (
                   <span
                     className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30"
@@ -123,7 +241,10 @@ export function DeskewPanel({
             </div>
           </div>
 
-          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Deskew Layer">
+          <label
+            className="relative inline-flex items-center cursor-pointer shrink-0 mt-1"
+            title={`Toggle Deskew Layer (${shortcutLabels.module_deskew || "2"})`}
+          >
             <input
               type="checkbox"
               checked={deskewModule.enabled}
@@ -152,7 +273,7 @@ export function DeskewPanel({
             onClick={() => detectPageAngle && void detectPageAngle(selectedPageId || undefined)}
             disabled={isDetectingAngle || !sessionId}
             className="flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] rounded-lg text-[11px] font-medium transition-colors disabled:opacity-50 cursor-pointer"
-            title="Detect tilt angle for the current page (Shortcut: A)"
+            title={`Detect tilt angle for the current page (${shortcutLabels.detect_page || "A"})`}
           >
             {isDetectingAngle ? (
               <>
@@ -173,7 +294,7 @@ export function DeskewPanel({
               onClick={() => void detectAllPageAngles()}
               disabled={isDetectingAngle || !sessionId}
               className="flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)] rounded-lg text-[11px] font-medium transition-colors disabled:opacity-50 cursor-pointer"
-              title="Auto-detect individual tilt angle for every page in the book (Shortcut: Shift+A)"
+              title={`Auto-detect individual tilt angle for every page in the book (${shortcutLabels.detect_all || "Shift+A"})`}
             >
               {isDetectingAngle ? (
                 <>
@@ -221,7 +342,7 @@ export function DeskewPanel({
             type="checkbox"
             checked={deskewModule.ignoreBorders}
             onChange={(e) => setDeskewModule((prev) => ({ ...prev, ignoreBorders: e.target.checked }))}
-            className="rounded accent-amber-500"
+            className="rounded accent-[var(--app-accent,#f59e0b)]"
           />
         </label>
       </div>
@@ -247,7 +368,7 @@ export function DeskewPanel({
           step="0.05"
           value={effectiveAngle}
           onChange={(e) => applyAngle(parseFloat(e.target.value))}
-          className="w-full h-1.5 accent-amber-500 cursor-pointer"
+          className="w-full h-1.5 accent-[var(--app-accent,#f59e0b)] cursor-pointer"
           title="Drag slider to micro-rotate current page (-10° to +10°)"
         />
 
@@ -290,29 +411,38 @@ export function DeskewPanel({
             disabled={!sessionId || !selectedPageId}
             className={`w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 ${
               straightenActive
-                ? "bg-amber-500 text-slate-950 border-amber-400 shadow-xs"
+                ? "shadow-xs font-bold"
                 : "bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border-[var(--border-subtle,#242A38)] text-[var(--text-primary,#e2e8f0)]"
             }`}
-            title="Drag a 2-point line along any horizontal text baseline or vertical table border on the canvas (Shortcut: S)"
+            style={
+              straightenActive
+                ? {
+                    backgroundColor: "var(--app-accent, #f59e0b)",
+                    borderColor: "var(--app-accent, #f59e0b)",
+                    color: "var(--app-accent-fg, #090d16)",
+                  }
+                : undefined
+            }
+            title={`Drag a 2-point line along any horizontal text baseline or vertical table border on the canvas (${shortcutLabels.straighten_tool || "S"})`}
           >
             <Ruler size={14} style={!straightenActive ? { color: "var(--app-accent, #f59e0b)" } : undefined} />
-            <span>{straightenActive ? "Drag on Canvas..." : "Straighten (S)"}</span>
+            <span>{straightenActive ? "Drag on Canvas..." : "Straighten"}</span>
           </button>
         )}
 
         <div className="flex items-center justify-between p-2 rounded-lg bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] text-[11px]">
           <label
             className="flex items-center space-x-2 cursor-pointer text-[var(--text-secondary,#cbd5e1)]"
-            title="Overlays horizontal and vertical alignment lines across the preview canvas (Shortcut: G)"
+            title={`Overlays horizontal and vertical alignment lines across the preview canvas (${shortcutLabels.grid_toggle || "G"})`}
           >
             <input
               type="checkbox"
               checked={deskewModule.showGrid}
               onChange={(e) => setDeskewModule((prev) => ({ ...prev, showGrid: e.target.checked }))}
-              className="rounded accent-amber-500"
+              className="rounded accent-[var(--app-accent,#f59e0b)]"
             />
             <Grid size={12} className="text-slate-400" />
-            <span>Grid (G)</span>
+            <span>Grid</span>
           </label>
 
           {deskewModule.showGrid && (
@@ -334,25 +464,48 @@ export function DeskewPanel({
         <PageScopeSelector
           scope={deskewModule.scope}
           onChange={(sc) => setDeskewModule((prev) => ({ ...prev, scope: sc }))}
+          activePageNum={activePageNum}
         />
 
-        <button
-          type="button"
-          onClick={handleApply}
-          className="w-full py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
-          style={{
-            backgroundColor: "var(--app-accent, #f59e0b)",
-            color: "var(--app-accent-fg, #0f172a)",
-          }}
-        >
-          <span>Apply ({formatScopeLabel(deskewModule.scope)})</span>
-        </button>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={handleApply}
+            className="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
+            style={{
+              backgroundColor: "var(--app-accent, #f59e0b)",
+              color: "var(--app-accent-fg, #0f172a)",
+            }}
+            title={`Apply angle to ${formatScopeLabel(deskewModule.scope, activePageNum)} (${shortcutLabels.apply_action || "Enter"})`}
+          >
+            <span>{editingId ? "Update Entry" : `Apply (${formatScopeLabel(deskewModule.scope, activePageNum)})`}</span>
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              onClick={() => setEditingId(null)}
+              className="px-3 py-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-slate-300 text-xs rounded-lg transition-colors cursor-pointer"
+              title="Cancel editing"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Applied Entries List */}
-      <AppliedEntriesList
+      {/* Universal Layer Stack — TCK-02 */}
+      <LayerEntryStack
+        title="Applied Deskews"
         entries={deskewModule.appliedEntries}
+        editingId={editingId}
+        activePageNum={activePageNum}
+        activePageId={selectedPageId}
+        onEdit={handleEditEntry}
         onDelete={handleDeleteApplied}
+        onDeleteFromCurrentPage={handleDeleteFromCurrentPage}
+        onToggleVisibility={handleToggleVisibility}
+        onToggleAllVisibility={handleToggleAllVisibility}
+        onDeleteAll={handleDeleteAll}
       />
     </div>
   );

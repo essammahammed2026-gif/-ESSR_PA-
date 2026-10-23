@@ -21,6 +21,12 @@ import signal
 import threading
 
 app = FastAPI(title="Flint Prepress API")
+
+@app.on_event("startup")
+def on_startup():
+    from db.session import init_db
+    init_db()
+
 app.include_router(settings_router)
 app.include_router(imposing_router)
 app.include_router(book_scan_router)

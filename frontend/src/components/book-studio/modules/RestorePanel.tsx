@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Eraser, Trash2, Sun, Square, Pipette, Check } from "lucide-react";
 import { IconToolCleanup } from "@/components/shared/StudioIcons";
 import {
@@ -8,8 +8,11 @@ import {
   RestorationModuleConfig,
   CleanupColorMode,
   ModuleTaskProgress,
+  BookStudioPage,
+  AppliedModuleEntry,
 } from "@/types/book_studio";
-import { PageScopeSelector, ModuleProgressBar, AppliedEntriesList, formatScopeLabel } from "./PageScopeSelector";
+import { PageScopeSelector, ModuleProgressBar, LayerEntryStack, formatScopeLabel } from "./PageScopeSelector";
+import { resolveConcretePageNumbers } from "@/lib/pageScope";
 
 export interface CleanupPanelProps {
   cleanupModule: CleanupModuleConfig;
@@ -22,6 +25,10 @@ export interface CleanupPanelProps {
   onClearPageMasks: () => void;
   onClearAllMasks: () => void;
   taskProgress?: ModuleTaskProgress;
+  pages?: BookStudioPage[];
+  selectedPageId?: string | null;
+  activePageNum?: number;
+  shortcutLabels?: Record<string, string>;
 }
 
 export function CleanupPanel({
@@ -35,12 +42,17 @@ export function CleanupPanel({
   onClearPageMasks,
   onClearAllMasks,
   taskProgress,
+  pages = [],
+  selectedPageId,
+  activePageNum,
+  shortcutLabels = {},
 }: CleanupPanelProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const handleNativeMaskEyedropper = async () => {
-    if (typeof window !== "undefined" && "EyeDropper" in window) {
+    if (typeof window !== "undefined" && window.EyeDropper) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const eyeDropper = new (window as any).EyeDropper();
+        const eyeDropper = new window.EyeDropper();
         const result = await eyeDropper.open();
         if (result?.sRGBHex) {
           setCleanupModule((prev) => ({ ...prev, maskColor: result.sRGBHex }));
@@ -55,22 +67,77 @@ export function CleanupPanel({
     }
   };
 
+  const handleEditEntry = (entry: AppliedModuleEntry) => {
+    if (editingId === entry.id) {
+      setEditingId(null);
+      return;
+    }
+    setEditingId(entry.id);
+    if (entry.params) {
+      setCleanupModule((prev) => ({
+        ...prev,
+        flattenIllumination: entry.params?.flattenIllumination ?? prev.flattenIllumination,
+        despeckleLevel: entry.params?.despeckleLevel ?? prev.despeckleLevel,
+        maskColor: entry.params?.maskColor ?? prev.maskColor,
+        scope: entry.params?.scope ?? prev.scope,
+      }));
+    }
+  };
+
   const handleApply = () => {
-    const scopeLbl = formatScopeLabel(cleanupModule.scope);
+    const concrete = resolveConcretePageNumbers(pages, cleanupModule.scope, selectedPageId);
     const parts: string[] = [];
     if (cleanupModule.flattenIllumination) parts.push("Spine Shadow");
     if (cleanupModule.despeckleLevel > 0) parts.push(`Despeckle L${cleanupModule.despeckleLevel}`);
     const label = parts.length > 0 ? parts.join(" & ") : "Clean BG";
+    const details = [
+      cleanupModule.flattenIllumination ? "Shadow leveled" : null,
+      cleanupModule.despeckleLevel > 0 ? `Despeckle L${cleanupModule.despeckleLevel}` : null,
+      (cleanupModule.maskColor || "#ffffff").toLowerCase() !== "#ffffff" ? `Fill ${cleanupModule.maskColor.toUpperCase()}` : null,
+    ].filter(Boolean).join(" • ");
+
+    const params = {
+      flattenIllumination: cleanupModule.flattenIllumination,
+      despeckleLevel: cleanupModule.despeckleLevel,
+      maskColor: cleanupModule.maskColor,
+      scope: cleanupModule.scope,
+    };
+
+    if (editingId) {
+      setCleanupModule((prev) => ({
+        ...prev,
+        appliedEntries: (prev.appliedEntries || []).map((e) =>
+          e.id === editingId
+            ? {
+                ...e,
+                label,
+                details,
+                scopeLabel: concrete.scopeLabel,
+                targetPages: concrete.pageNumbers,
+                targetPageIds: concrete.pageIds,
+                params,
+              }
+            : e
+        ),
+      }));
+      setEditingId(null);
+      return;
+    }
 
     setCleanupModule((prev) => ({
       ...prev,
       enabled: true,
       appliedEntries: [
-        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== scopeLbl),
+        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== concrete.scopeLabel),
         {
           id: `cleanup_${Date.now()}`,
           label,
-          scopeLabel: scopeLbl,
+          details,
+          scopeLabel: concrete.scopeLabel,
+          targetPages: concrete.pageNumbers,
+          targetPageIds: concrete.pageIds,
+          visible: true,
+          params,
         },
       ],
     }));
@@ -87,6 +154,63 @@ export function CleanupPanel({
         appliedEntries: remaining,
       };
     });
+    if (editingId === entryId) {
+      setEditingId(null);
+    }
+  };
+
+  const handleDeleteFromCurrentPage = (entryId: string) => {
+    if (!selectedPageId) return;
+    setCleanupModule((prev) => {
+      const remaining = (prev.appliedEntries || [])
+        .map((e) => {
+          if (e.id !== entryId) return e;
+          const nextIds = (e.targetPageIds || []).filter((id) => id !== selectedPageId);
+          const nextPages = activePageNum !== undefined
+            ? (e.targetPages || []).filter((n) => n !== activePageNum)
+            : (e.targetPages || []);
+          return {
+            ...e,
+            targetPageIds: nextIds,
+            targetPages: nextPages,
+            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+          };
+        })
+        .filter((e) => (e.targetPageIds && e.targetPageIds.length > 0) || (e.targetPages && e.targetPages.length > 0));
+
+      return {
+        ...prev,
+        enabled: remaining.length > 0,
+        flattenIllumination: remaining.length > 0 ? prev.flattenIllumination : false,
+        despeckleLevel: remaining.length > 0 ? prev.despeckleLevel : 0,
+        appliedEntries: remaining,
+      };
+    });
+  };
+
+  const handleToggleVisibility = (id: string, visible: boolean) => {
+    setCleanupModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => (e.id === id ? { ...e, visible } : e)),
+    }));
+  };
+
+  const handleToggleAllVisibility = (visible: boolean) => {
+    setCleanupModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => ({ ...e, visible })),
+    }));
+  };
+
+  const handleDeleteAll = () => {
+    setCleanupModule((prev) => ({
+      ...prev,
+      enabled: false,
+      flattenIllumination: false,
+      despeckleLevel: 0,
+      appliedEntries: [],
+    }));
+    setEditingId(null);
   };
 
   return (
@@ -104,9 +228,6 @@ export function CleanupPanel({
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Cleanup</h3>
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
-                  Key 3
-                </span>
                 {totalMasksCount > 0 && (
                   <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
                     {totalMasksCount} box{totalMasksCount > 1 ? "es" : ""}
@@ -119,7 +240,10 @@ export function CleanupPanel({
             </div>
           </div>
 
-          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Cleanup & Masking">
+          <label
+            className="relative inline-flex items-center cursor-pointer shrink-0 mt-1"
+            title={`Toggle Cleanup & Masking (${shortcutLabels.module_cleanup || "3"})`}
+          >
             <input
               type="checkbox"
               checked={cleanupModule.enabled}
@@ -153,13 +277,22 @@ export function CleanupPanel({
           onClick={onToggleMaskTool}
           className={`w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
             maskToolActive
-              ? "bg-amber-500 text-slate-950 border-amber-400 shadow-xs"
+              ? "shadow-xs font-bold"
               : "bg-[var(--surface-inset,#131720)] hover:bg-slate-800 text-[var(--text-primary,#e2e8f0)] border-[var(--border-subtle,#242A38)]"
           }`}
-          title="Drag a rectangle on the canvas to mask out scanner fingers, staples, or punch holes (Shortcut: M)"
+          style={
+            maskToolActive
+              ? {
+                  backgroundColor: "var(--app-accent, #f59e0b)",
+                  borderColor: "var(--app-accent, #f59e0b)",
+                  color: "var(--app-accent-fg, #090d16)",
+                }
+              : undefined
+          }
+          title={`Drag a rectangle on the canvas to mask out scanner fingers, staples, or punch holes (${shortcutLabels.mask_tool || "M"})`}
         >
           <Square size={13} className="stroke-[2.2]" style={!maskToolActive ? { color: "var(--app-accent, #f59e0b)" } : undefined} />
-          <span>{maskToolActive ? "Drag on Canvas..." : "Draw Box (M)"}</span>
+          <span>{maskToolActive ? "Drag on Canvas..." : "Draw Box"}</span>
         </button>
 
         {/* Fill Color Picker */}
@@ -177,8 +310,8 @@ export function CleanupPanel({
               <button
                 type="button"
                 onClick={handleNativeMaskEyedropper}
-                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition-colors cursor-pointer"
-                title="Sample paper color directly from page (Eyedropper)"
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-[var(--app-accent,#f59e0b)] transition-colors cursor-pointer"
+                title={`Sample paper color directly from page (${shortcutLabels.eyedropper || "I"})`}
               >
                 <Pipette size={13} />
               </button>
@@ -246,7 +379,7 @@ export function CleanupPanel({
             onChange={(e) =>
               setCleanupModule((prev) => ({ ...prev, flattenIllumination: e.target.checked }))
             }
-            className="rounded accent-amber-500 shrink-0"
+            className="rounded shrink-0 accent-[var(--app-accent,#f59e0b)]"
           />
         </label>
 
@@ -292,25 +425,48 @@ export function CleanupPanel({
         <PageScopeSelector
           scope={cleanupModule.scope}
           onChange={(sc) => setCleanupModule((prev) => ({ ...prev, scope: sc }))}
+          activePageNum={activePageNum}
         />
 
-        <button
-          type="button"
-          onClick={handleApply}
-          className="w-full py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
-          style={{
-            backgroundColor: "var(--app-accent, #f59e0b)",
-            color: "var(--app-accent-fg, #0f172a)",
-          }}
-        >
-          <span>Apply ({formatScopeLabel(cleanupModule.scope)})</span>
-        </button>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={handleApply}
+            className="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
+            style={{
+              backgroundColor: "var(--app-accent, #f59e0b)",
+              color: "var(--app-accent-fg, #0f172a)",
+            }}
+            title={`Apply erase boxes & filters to ${formatScopeLabel(cleanupModule.scope, activePageNum)} (${shortcutLabels.apply_action || "Enter"})`}
+          >
+            <span>{editingId ? "Update Entry" : `Apply (${formatScopeLabel(cleanupModule.scope, activePageNum)})`}</span>
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              onClick={() => setEditingId(null)}
+              className="px-3 py-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-slate-300 text-xs rounded-lg transition-colors cursor-pointer"
+              title="Cancel editing"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Applied Entries List */}
-      <AppliedEntriesList
+      {/* Universal Layer Stack — TCK-02 */}
+      <LayerEntryStack
+        title="Applied Cleanups"
         entries={cleanupModule.appliedEntries}
+        editingId={editingId}
+        activePageNum={activePageNum}
+        activePageId={selectedPageId}
+        onEdit={handleEditEntry}
         onDelete={handleDeleteApplied}
+        onDeleteFromCurrentPage={handleDeleteFromCurrentPage}
+        onToggleVisibility={handleToggleVisibility}
+        onToggleAllVisibility={handleToggleAllVisibility}
+        onDeleteAll={handleDeleteAll}
       />
     </div>
   );
@@ -323,6 +479,10 @@ export interface RestorePanelProps {
   onSetPageColorMode?: (mode: CleanupColorMode | null, clearAll?: boolean) => void;
   colorOverridePagesCount?: number;
   taskProgress?: ModuleTaskProgress;
+  pages?: BookStudioPage[];
+  selectedPageId?: string | null;
+  activePageNum?: number;
+  shortcutLabels?: Record<string, string>;
 }
 
 const COLOR_MODES: { id: CleanupColorMode; label: string; desc: string }[] = [
@@ -338,23 +498,89 @@ export function RestorePanel({
   onSetPageColorMode,
   colorOverridePagesCount = 0,
   taskProgress,
+  pages = [],
+  selectedPageId,
+  activePageNum,
+  shortcutLabels = {},
 }: RestorePanelProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
   const colorMode = restorationModule.colorMode || "auto";
 
+  const handleEditEntry = (entry: AppliedModuleEntry) => {
+    if (editingId === entry.id) {
+      setEditingId(null);
+      return;
+    }
+    setEditingId(entry.id);
+    if (entry.params) {
+      setRestorationModule((prev) => ({
+        ...prev,
+        colorMode: entry.params?.colorMode ?? prev.colorMode,
+        contrast: entry.params?.contrast ?? prev.contrast,
+        saturation: entry.params?.saturation ?? prev.saturation,
+        whitenBg: entry.params?.whitenBg ?? prev.whitenBg,
+        bwThreshold: entry.params?.bwThreshold ?? prev.bwThreshold,
+        enhanceColors: entry.params?.enhanceColors ?? prev.enhanceColors,
+        scope: entry.params?.scope ?? prev.scope,
+      }));
+    }
+  };
+
   const handleApply = () => {
-    const scopeLbl = formatScopeLabel(restorationModule.scope);
+    const concrete = resolveConcretePageNumbers(pages, restorationModule.scope, selectedPageId);
     const modeName = colorMode === "bw" ? "B&W" : colorMode === "grayscale" ? "Gray" : colorMode === "color" ? "Color" : "Auto";
     const label = `${modeName} Mode`;
+    const details = [
+      `${restorationModule.contrast.toFixed(2)}x Contrast`,
+      restorationModule.whitenBg ? "Whiten BG" : null,
+      restorationModule.enhanceColors ? "Enhance" : null,
+    ].filter(Boolean).join(" • ");
+
+    const params = {
+      colorMode,
+      contrast: restorationModule.contrast,
+      saturation: restorationModule.saturation,
+      whitenBg: restorationModule.whitenBg,
+      bwThreshold: restorationModule.bwThreshold,
+      enhanceColors: restorationModule.enhanceColors,
+      scope: restorationModule.scope,
+    };
+
+    if (editingId) {
+      setRestorationModule((prev) => ({
+        ...prev,
+        appliedEntries: (prev.appliedEntries || []).map((e) =>
+          e.id === editingId
+            ? {
+                ...e,
+                label,
+                details,
+                scopeLabel: concrete.scopeLabel,
+                targetPages: concrete.pageNumbers,
+                targetPageIds: concrete.pageIds,
+                params,
+              }
+            : e
+        ),
+      }));
+      setEditingId(null);
+      return;
+    }
 
     setRestorationModule((prev) => ({
       ...prev,
       enabled: true,
       appliedEntries: [
-        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== scopeLbl),
+        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== concrete.scopeLabel),
         {
           id: `color_${Date.now()}`,
           label,
-          scopeLabel: scopeLbl,
+          details,
+          scopeLabel: concrete.scopeLabel,
+          targetPages: concrete.pageNumbers,
+          targetPageIds: concrete.pageIds,
+          visible: true,
+          params,
         },
       ],
     }));
@@ -374,7 +600,68 @@ export function RestorePanel({
         appliedEntries: remaining,
       };
     });
+    if (editingId === entryId) {
+      setEditingId(null);
+    }
     if ((restorationModule.appliedEntries || []).length <= 1 && onSetPageColorMode) {
+      onSetPageColorMode(null, true);
+    }
+  };
+
+  const handleDeleteFromCurrentPage = (entryId: string) => {
+    if (!selectedPageId) return;
+    setRestorationModule((prev) => {
+      const remaining = (prev.appliedEntries || [])
+        .map((e) => {
+          if (e.id !== entryId) return e;
+          const nextIds = (e.targetPageIds || []).filter((id) => id !== selectedPageId);
+          const nextPages = activePageNum !== undefined
+            ? (e.targetPages || []).filter((n) => n !== activePageNum)
+            : (e.targetPages || []);
+          return {
+            ...e,
+            targetPageIds: nextIds,
+            targetPages: nextPages,
+            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+          };
+        })
+        .filter((e) => (e.targetPageIds && e.targetPageIds.length > 0) || (e.targetPages && e.targetPages.length > 0));
+
+      return {
+        ...prev,
+        enabled: remaining.length > 0,
+        whitenBg: remaining.length > 0 ? prev.whitenBg : false,
+        appliedEntries: remaining,
+      };
+    });
+    if (onSetPageColorMode) {
+      onSetPageColorMode(null);
+    }
+  };
+
+  const handleToggleVisibility = (id: string, visible: boolean) => {
+    setRestorationModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => (e.id === id ? { ...e, visible } : e)),
+    }));
+  };
+
+  const handleToggleAllVisibility = (visible: boolean) => {
+    setRestorationModule((prev) => ({
+      ...prev,
+      appliedEntries: (prev.appliedEntries || []).map((e) => ({ ...e, visible })),
+    }));
+  };
+
+  const handleDeleteAll = () => {
+    setRestorationModule((prev) => ({
+      ...prev,
+      enabled: false,
+      whitenBg: false,
+      appliedEntries: [],
+    }));
+    setEditingId(null);
+    if (onSetPageColorMode) {
       onSetPageColorMode(null, true);
     }
   };
@@ -394,9 +681,6 @@ export function RestorePanel({
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-xs font-bold text-[var(--text-primary,#f1f5f9)]">Colors</h3>
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-400 border border-[var(--border-subtle,#242A38)]">
-                  Key 4
-                </span>
                 {colorOverridePagesCount > 0 && (
                   <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                     {colorOverridePagesCount}p
@@ -409,7 +693,10 @@ export function RestorePanel({
             </div>
           </div>
 
-          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title="Toggle Colors">
+          <label
+            className="relative inline-flex items-center cursor-pointer shrink-0 mt-1"
+            title={`Toggle Colors (${shortcutLabels.module_restore || "4"})`}
+          >
             <input
               type="checkbox"
               checked={restorationModule.enabled}
@@ -478,7 +765,7 @@ export function RestorePanel({
             type="checkbox"
             checked={restorationModule.whitenBg}
             onChange={(e) => setRestorationModule((prev) => ({ ...prev, whitenBg: e.target.checked }))}
-            className="rounded accent-amber-500"
+            className="rounded accent-[var(--app-accent,#f59e0b)]"
           />
         </label>
 
@@ -509,7 +796,7 @@ export function RestorePanel({
               step="2"
               value={restorationModule.bwThreshold ?? 180}
               onChange={(e) => setRestorationModule((prev) => ({ ...prev, bwThreshold: parseInt(e.target.value, 10) }))}
-              className="w-full h-1.5 accent-amber-500 cursor-pointer"
+              className="w-full h-1.5 accent-[var(--app-accent,#f59e0b)] cursor-pointer"
             />
           </div>
         ) : (
@@ -540,7 +827,7 @@ export function RestorePanel({
                   step="0.05"
                   value={restorationModule.saturation}
                   onChange={(e) => setRestorationModule((prev) => ({ ...prev, saturation: parseFloat(e.target.value) }))}
-                  className="w-full h-1.5 accent-amber-500 cursor-pointer"
+                  className="w-full h-1.5 accent-[var(--app-accent,#f59e0b)] cursor-pointer"
                 />
               </div>
             )}
@@ -570,7 +857,7 @@ export function RestorePanel({
                 step="0.02"
                 value={restorationModule.contrast}
                 onChange={(e) => setRestorationModule((prev) => ({ ...prev, contrast: parseFloat(e.target.value) }))}
-                className="w-full h-1.5 accent-amber-500 cursor-pointer"
+                className="w-full h-1.5 accent-[var(--app-accent,#f59e0b)] cursor-pointer"
               />
             </div>
           </div>
@@ -579,25 +866,48 @@ export function RestorePanel({
         <PageScopeSelector
           scope={restorationModule.scope}
           onChange={(sc) => setRestorationModule((prev) => ({ ...prev, scope: sc }))}
+          activePageNum={activePageNum}
         />
 
-        <button
-          type="button"
-          onClick={handleApply}
-          className="w-full py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
-          style={{
-            backgroundColor: "var(--app-accent, #f59e0b)",
-            color: "var(--app-accent-fg, #0f172a)",
-          }}
-        >
-          <span>Apply ({formatScopeLabel(restorationModule.scope)})</span>
-        </button>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={handleApply}
+            className="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-sm hover:opacity-95"
+            style={{
+              backgroundColor: "var(--app-accent, #f59e0b)",
+              color: "var(--app-accent-fg, #0f172a)",
+            }}
+            title={`Apply color mode to ${formatScopeLabel(restorationModule.scope, activePageNum)} (${shortcutLabels.apply_action || "Enter"})`}
+          >
+            <span>{editingId ? "Update Entry" : `Apply (${formatScopeLabel(restorationModule.scope, activePageNum)})`}</span>
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              onClick={() => setEditingId(null)}
+              className="px-3 py-2 bg-[var(--surface-inset,#131720)] hover:bg-slate-800 border border-[var(--border-subtle,#242A38)] text-slate-300 text-xs rounded-lg transition-colors cursor-pointer"
+              title="Cancel editing"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Applied Entries List */}
-      <AppliedEntriesList
+      {/* Universal Layer Stack — TCK-02 */}
+      <LayerEntryStack
+        title="Applied Colors"
         entries={restorationModule.appliedEntries}
+        editingId={editingId}
+        activePageNum={activePageNum}
+        activePageId={selectedPageId}
+        onEdit={handleEditEntry}
         onDelete={handleDeleteApplied}
+        onDeleteFromCurrentPage={handleDeleteFromCurrentPage}
+        onToggleVisibility={handleToggleVisibility}
+        onToggleAllVisibility={handleToggleAllVisibility}
+        onDeleteAll={handleDeleteAll}
       />
     </div>
   );

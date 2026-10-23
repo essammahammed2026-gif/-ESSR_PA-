@@ -147,3 +147,167 @@ export function resolveMaskTargetIds(
     label: customRange.trim() ? `Range (${customRange.trim()})` : "Range",
   };
 }
+
+export interface ConcreteScopeResult {
+  pageNumbers: number[]; // 1-based page numbers
+  pageIndices: number[]; // 0-based page indices
+  pageIds: string[];
+  scopeLabel: string;
+}
+
+/**
+ * Evaluates any ModulePageScope and statically binds it to concrete page numbers,
+ * indices, and IDs based on the current pages deck and active page.
+ * Guarantees that "current" produces an explicit single-element array (e.g. [activePageNum])
+ * and never persists a dynamic "current" reference.
+ */
+export function resolveConcretePageNumbers(
+  pages: BookStudioPage[],
+  scope: ModulePageScope,
+  activePageId?: string | null
+): ConcreteScopeResult {
+  if (!pages || pages.length === 0) {
+    return { pageNumbers: [], pageIndices: [], pageIds: [], scopeLabel: "None" };
+  }
+
+  const activeIdx = activePageId ? pages.findIndex((p) => p.id === activePageId) : -1;
+  const resolvedIdx = activeIdx >= 0 ? activeIdx : 0;
+  const resolvedNum = resolvedIdx + 1;
+
+  if (scope.mode === "current") {
+    const page = pages[resolvedIdx];
+    return {
+      pageNumbers: [resolvedNum],
+      pageIndices: [resolvedIdx],
+      pageIds: page ? [page.id] : [],
+      scopeLabel: `Page ${resolvedNum}`,
+    };
+  }
+
+  if (scope.mode === "all") {
+    return {
+      pageNumbers: pages.map((_, i) => i + 1),
+      pageIndices: pages.map((_, i) => i),
+      pageIds: pages.map((p) => p.id),
+      scopeLabel: `All (${pages.length})`,
+    };
+  }
+
+  if (scope.mode === "odds") {
+    const indices: number[] = [];
+    const numbers: number[] = [];
+    const ids: string[] = [];
+    pages.forEach((p, i) => {
+      const num = i + 1;
+      if (num % 2 !== 0) {
+        indices.push(i);
+        numbers.push(num);
+        ids.push(p.id);
+      }
+    });
+    return {
+      pageNumbers: numbers,
+      pageIndices: indices,
+      pageIds: ids,
+      scopeLabel: `Odds (${numbers.length})`,
+    };
+  }
+
+  if (scope.mode === "evens") {
+    const indices: number[] = [];
+    const numbers: number[] = [];
+    const ids: string[] = [];
+    pages.forEach((p, i) => {
+      const num = i + 1;
+      if (num % 2 === 0) {
+        indices.push(i);
+        numbers.push(num);
+        ids.push(p.id);
+      }
+    });
+    return {
+      pageNumbers: numbers,
+      pageIndices: indices,
+      pageIds: ids,
+      scopeLabel: `Evens (${numbers.length})`,
+    };
+  }
+
+  if (scope.mode === "range") {
+    const wanted = parsePageRange(scope.customRange);
+    const indices: number[] = [];
+    const numbers: number[] = [];
+    const ids: string[] = [];
+    pages.forEach((p, i) => {
+      const num = i + 1;
+      if (wanted.size === 0 || wanted.has(num)) {
+        indices.push(i);
+        numbers.push(num);
+        ids.push(p.id);
+      }
+    });
+    const label = scope.customRange?.trim()
+      ? `Pages ${scope.customRange.trim()}`
+      : `All (${pages.length})`;
+    return {
+      pageNumbers: numbers,
+      pageIndices: indices,
+      pageIds: ids,
+      scopeLabel: label,
+    };
+  }
+
+  return {
+    pageNumbers: pages.map((_, i) => i + 1),
+    pageIndices: pages.map((_, i) => i),
+    pageIds: pages.map((p) => p.id),
+    scopeLabel: "All",
+  };
+}
+
+/**
+ * Checks whether a page is included in a list of applied entries.
+ * Honors entry visibility (skips entries toggled off).
+ */
+export function isPageInAppliedEntries(
+  pageNum: number,
+  pageId: string | undefined,
+  entries: { targetPages?: number[]; targetPageIds?: string[]; visible?: boolean }[] | undefined
+): boolean {
+  if (!entries || entries.length === 0) return false;
+  return entries.some((entry) => {
+    if (entry.visible === false) return false;
+    if (entry.targetPageIds && pageId && entry.targetPageIds.includes(pageId)) {
+      return true;
+    }
+    if (entry.targetPages && entry.targetPages.includes(pageNum)) {
+      return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Formats a sorted list of 1-based page numbers into a compact range string,
+ * e.g. [1, 2, 3, 5, 7, 8] -> "1-3, 5, 7-8".
+ */
+export function formatPageNumbersToRange(pageNumbers: number[]): string {
+  if (!pageNumbers || pageNumbers.length === 0) return "";
+  const uniqueSorted = Array.from(new Set(pageNumbers)).sort((a, b) => a - b);
+  const ranges: string[] = [];
+  let start = uniqueSorted[0];
+  let prev = start;
+
+  for (let i = 1; i < uniqueSorted.length; i++) {
+    const curr = uniqueSorted[i];
+    if (curr === prev + 1) {
+      prev = curr;
+    } else {
+      ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+      start = curr;
+      prev = curr;
+    }
+  }
+  ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+  return ranges.join(", ");
+}

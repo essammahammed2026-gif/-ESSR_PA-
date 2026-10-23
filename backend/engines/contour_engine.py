@@ -3,6 +3,7 @@ import numpy as np
 import base64
 import os
 import fitz
+from engines.units import mm_to_px
 
 
 def chaikin_smooth(points, iterations=1):
@@ -117,9 +118,9 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
 
     # 3. Apply Offset (Bleed/Choke)
     if offset_unit == "mm":
-        offset_px = int(round((offset_val / 25.4) * dpi))
+        offset_px = mm_to_px(offset_val, dpi)
     elif offset_unit == "cm":
-        offset_px = int(round((offset_val / 2.54) * dpi))
+        offset_px = mm_to_px(offset_val * 10.0, dpi)
     elif offset_unit == "inch":
         offset_px = int(round(offset_val * dpi))
     else: # pt
@@ -162,7 +163,7 @@ def generate_contour_cut_svg(img_path, offset_val=0.0, offset_unit="mm", thresho
     raw_contours, _ = cv2.findContours(mask, mode, cv2.CHAIN_APPROX_SIMPLE)
 
     path_d_list = []
-    mm_in_pixels = dpi / 25.4
+    mm_in_pixels = float(mm_to_px(1.0, dpi))
     min_area = max((w * h) * 0.00001, mm_in_pixels * mm_in_pixels)
 
     if raw_contours:

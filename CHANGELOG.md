@@ -8,6 +8,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Book Studio Session Initialization Fix**:
+  - Restored missing `from engines.book_scan_engine import BookScanEngine, PageOpError` import in `backend/book_scan_api.py` that caused a 500 `NameError` on `/api/book-scan/init-session`.
+  - Added robust type normalization for all form and file parameters in `init_book_scan_session`, guaranteeing that raw `Form` and `File` default instances cannot leak into the database JSON settings payload or cause `TypeError`.
+  - Restored missing imports in downstream engines (`apply_alignment` and `resolve_temp_file` in `sheet_gang_exporter.py`, `subprocess` and `tempfile` in `flipbook_worker.py`, and `Set` in `book_scan_engine.py`).
+- **Split Deletion & Per-Page Entry Removal Fixes**:
+  - Fixed crop module spread split deletion crash: patched `backend/engines/book_scan_engine.py` (`revert_pages`) to match both `parent_page_id` and `immediate_parent_id` in addition to page ID, preventing missing ID lookup errors when reverting split slices.
+  - Stored `parent_spread_orig_width_mm` and `parent_spread_orig_height_mm` on split slices to reliably restore pre-split spread geometry on recombine.
+  - Made spread reversion fully idempotent in `revert_pages`, avoiding 400 error halts if an entry is cleared after an earlier spread modification.
+  - Implemented per-page entry removal (`FileMinus` icon button in `LayerEntryStack`): for multi-page edits (All, Odds, Evens, Range), users can now click "Remove edit only from Page X" to selectively unlink the current page while preserving the edit on all other target pages.
+  - Fully integrated single-page removal across `CropSplitPanel`, `DeskewPanel`, `CleanupPanel`, `RestorePanel`, and `BleedPanel`.
+  - Updated project documentation (`AGENTS.md`, `docs/api.md`, `docs/architecture.md`) to reflect all active canonical modules, database storage models, and the 26 backend endpoints.
+- **Codebase Clean-Up, Rule Enforcement & Optimization**:
+  - Fixed React Rules of Hooks violation in `LayerEntryStack` (`PageScopeSelector.tsx`) by executing `useMemo` hooks unconditionally before any early returns.
+  - Eliminated loose `any` types and experimental `(window as any).EyeDropper` casts across `BleedPanel.tsx`, `RestorePanel.tsx`, and `AppearanceSection.tsx` with dedicated ambient definitions in `frontend/src/types/eyedropper.d.ts`.
+  - Debounced the micro-rotation angle slider in `DeskewPanel.tsx` and `useBookStudioState.ts` (~350ms delay) using a debounce ref timer, maintaining 60fps instant visual canvas rotation while preventing network request flooding.
+  - Canonicalized mathematical conversions (`pxToMmAtDpi` and `mmToPxAtDpi` in `frontend/src/lib/units.ts`, and `mm_to_px`, `px_to_mm` in `backend/engines/units.py`), eliminating all inline `25.4` magic numbers across components and engines.
+  - Safely deleted orphaned, unused `frontend/src/lib/utils.ts` and pruned unused `pages` prop destructuring in `CropSplitPanel.tsx`.
+  - Added missing `cropModule.splitLines` dependency to `useCallback` hook in `useBookModules.ts`.
+  - Pruned unused imports across 13 backend modules (`settings_api.py`, `book_scan_api.py`, `imposing_api.py`, `flipbook_worker.py`, `roll_packer.py`, `sheet_gang_exporter.py`, `sheet_packer.py`, `report_generator.py`, `book_scan_engine.py`, `db/models.py`, `db/repository.py`, `storage/asset_store.py`).
+  - Integrated `session_storage` target into `backend/engines/storage_cleaner.py` to allow monitoring and cleanup of persistent session disk assets under `backend/data/storage`.
+  - Synchronized Repository Navigation Map in `docs/architecture.md`.
+- **SQLite WAL Database & Structured Asset Store Architecture**:
+  - Implemented transactional database persistence using SQLAlchemy and SQLite in WAL mode (`PRAGMA journal_mode=WAL`, `busy_timeout=15000`) at `backend/data/flint.db`.
+  - Added relational schemas (`SessionModel`, `PageModel`, `AppliedLayerModel`, `SessionLockModel`, `ExportJobModel`) with transactional CRUD repository (`backend/db/repository.py`).
+  - Added structured asset storage (`backend/storage/asset_store.py`) isolating heavy binary payloads (original PDFs, rendered page thumbnails, and PDF exports) into deterministic directories (`backend/data/storage/{session_id}/raw|thumb|exports/`).
+  - Refactored `backend/book_scan_api.py` to auto-rehydrate sessions from SQLite WAL upon Uvicorn server restarts or across multiple worker processes (`get_or_load_session`).
+  - Transactionally synced page mutations (reorder, rotate, delete, crop, split, deskew, mask, restore, duplicate, insert blank) to the database on every action.
+  - Added multi-user collaborative lock endpoints (`POST /lock/{session_id}`, `DELETE /lock/{session_id}`, `GET /lock/{session_id}`) and `GET /sessions` listing.
+  - Mirrored export jobs to SQLite with status tracking (`queued`, `processing`, `completed`, `failed`), progress metrics, and error logging.
+- **Layer Stack Latest-On-Top & Ultra-Compact Density Polish**:
+  - Arranged all module layer entries so the most recently applied entry is always rendered at the top of the stack (`LayerEntryStack`).
+  - Redesigned entry cards into an ultra-compact, high-density single line layout (`py-1.5 px-2`), reducing vertical footprint by >50% to save sidebar space across all 5 Book Studio modules (`Crop & Split`, `Deskew`, `Cleanup`, `Colors`, and `Bleed`).
+  - Prioritized crucial details on cards: scope badge (`P.1`, `All`, `Odds`, `Evens`), primary operation label, and truncated inline parameter text with full card tooltip.
+- **Crop Module Entry Reversal & Atomic Reversion Fixes**:
+  - Fixed crop entry removal bug where deleting an entry previously restored stale whole-document snapshots, causing multi-page crops to cross-contaminate or fail to revert pages.
+  - Implemented target-page-aware crop re-evaluation in `removeAppliedCrop`: if a targeted page has remaining entries, it falls back to the latest active crop; if no remaining entries target it, its crop box is purged and dimensions cleanly revert to `orig_width_mm`/`orig_height_mm` with a cache-busting `rev` bump.
+  - Added dedicated atomic `removeAllAppliedCrops` routine to eliminate concurrent `forEach` race conditions when clearing all crop entries, cleanly recombining any split spreads and resetting all page dimensions.
+  - Wired in-place crop editing in `CropSplitPanel` so updating an edited entry removes the previous entry's crop box before applying updated boundaries, preventing compounding crop shrink.
+- **UI Accent & Tooltip Behavior (TCK-03)**:
+  - Audited all switches, checkboxes, sliders, and tool toggle buttons across Book Studio modules (`Crop & Split`, `Deskew`, `Cleanup`, `Colors`, `Bleed`, and `WorkspaceToolbar`); ensured all active states dynamically reflect `var(--app-accent, #f59e0b)`, `--app-accent-fg`, and `accent-[var(--app-accent,#f59e0b)]`.
+  - Stripped hardcoded/static shortcut badges (`Key 1`, `Key 2`, `Key 3`, `Key 4`, `Key 5`, `↵`) from module headers, hub cards, and commit buttons.
+  - Removed static parenthetical key labels from button text (`(M)`, `(S)`, `(G)` in `RestorePanel` and `DeskewPanel`).
+  - Migrated keyboard shortcut indicators exclusively to hover tooltips that dynamically read from user keybind settings (`useBookShortcuts.ts` and `useBookStudioState.ts` `shortcutLabels`).
+  - Added module navigation key mappings (`module_crop`, `module_deskew`, `module_cleanup`, `module_restore`, `module_bleed`, and `exit_module`) to `useBookShortcuts.ts` with custom combo support and centralized `formatCombo` formatting.
+- **Universal Edit Entry Pattern ("Layer Stack") (TCK-02)**:
+  - Created standardized `LayerEntryStack` component (and aliased `AppliedEntriesList`) in `PageScopeSelector.tsx` for multi-pass tool inspection.
+  - Added full entry capabilities across all 5 Book Studio modules (`Bleed`, `Colors`, `Cleanup`, `Deskew`, `Crop & Split`): in-place parameter editing (`Pencil`), delete & reverse (`Trash2`), and preview visibility toggle (`Eye`/`EyeOff`).
+  - Implemented preview comparison vs. export separation: visibility toggle controls canvas and thumbnail preview rendering only (`isPageInAppliedEntries`), while all non-deleted applied entries remain active on export (`resolveModuleExportScope` in `useBookModules.ts`).
+  - Added header batch controls: **Show/Hide All** preview layers toggle and **Delete All** button.
+  - Enhanced metadata display with explicit target page badges (`P.4`, `Range 1-10`, `All`, `Odds`, `Evens`), operation details, and editing state indicator.
+  - Replaced legacy ad-hoc applied list in `BleedPanel.tsx` with `LayerEntryStack`.
+- **Next.js SSR Hydration Safety (TCK-13)**:
+  - Created reusable `ClientOnly.tsx` to guard client-only UI components and theme states from server rendering mismatches.
+  - Wrapped `ThemeToggleButton` in `layout.tsx` to prevent localStorage theme mismatch during initial hydration.
+  - Decoupled `unit` state in `useBookStudioState.ts` from direct synchronous `localStorage` reads during initial render, eliminating dimension string mismatches.
+  - Set dynamic canvas imports in `book-studio`, `imposing`, `contour`, and `flipbook` routes with `ssr: false` to ensure canvas viewports mount safely on the client.
+- **Scope Resolution & State Immutability (TCK-01)**:
+  - Enforced static concrete target binding: `resolveConcretePageNumbers` evaluates any `ModulePageScope` to explicit 1-based `pageNumbers: number[]` and `pageIds: string[]`.
+  - Statically bound applied entries (`AppliedModuleEntry` & `BleedEntry`) so committed module effects freeze permanently to their applied pages and never drift when the operator navigates to another page.
+  - Updated `isPageInAppliedEntries` in `pageScope.ts` and `useBookSession.ts` thumbnail URL builders to honor concrete page sets over floating draft scopes.
+  - Updated `PageScopeSelector.tsx` and all 5 module panels (`CropSplitPanel`, `DeskewPanel`, `CleanupPanel`, `RestorePanel`, `BleedPanel`) to display concrete active page labels (`P.1`, `Apply (Page 1)`) instead of ambiguous generic "Current" text.
+  - Export PDF pipeline (`useBookModules.ts`) now aggregates concrete target pages directly from applied entries via `formatPageNumbersToRange`, preserving accurate page targeting during final print-ready exports.
+
 - **Smart Window/Tab Launch & Single-Instance Reuse (`start.sh`)**:
   - Removed `--new-window` flag from browser opening logic, ensuring Flint opens in the already-active browser window/tab instead of creating an unwanted new window.
   - Added `is_flint_tab_open` detector combining Hyprland client title queries and Zen Browser live sessionstore inspection (`recovery.jsonlz4`).

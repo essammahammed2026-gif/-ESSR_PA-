@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { apiFetch, getApiUrl } from "@/lib/api";
-import { isPageInScope } from "@/lib/pageScope";
+import { isPageInScope, isPageInAppliedEntries } from "@/lib/pageScope";
 import {
   BookIntakeMode,
   MultiFileStrategy,
@@ -434,18 +434,31 @@ export function useBookSession() {
     const activeIdx = selectedPageId ? pages.findIndex((p) => p.id === selectedPageId) : -1;
     const activePageNum = activeIdx >= 0 ? activeIdx + 1 : pageNum;
 
-    // Check scope applicability for this specific page
-    const inDeskewScope = isPageInScope(pageNum, opts.deskewScope, activePageNum);
+    // Check scope applicability for this specific page (prioritize committed applied entries over dynamic draft scope)
+    const inDeskewScope = opts.deskewAppliedEntries && opts.deskewAppliedEntries.length > 0
+      ? isPageInAppliedEntries(pageNum, pageId, opts.deskewAppliedEntries)
+      : isPageInScope(pageNum, opts.deskewScope, activePageNum);
     const hasPageAngle = page?.deskew_angle !== undefined && page?.deskew_angle !== null;
     const applyDeskew = inDeskewScope && (opts.deskewEnabled || hasPageAngle);
     const effectiveDeskewMode = hasPageAngle ? "manual" : opts.deskewMode;
     const effectiveDeskewAngle = hasPageAngle ? Number(page.deskew_angle) : opts.deskewAngle;
 
-    const applyCleanup = isClean && opts.cleanupEnabled && isPageInScope(pageNum, opts.cleanupScope, activePageNum);
-    const applyRestoration = isClean && opts.restorationEnabled && isPageInScope(pageNum, opts.restorationScope, activePageNum);
+    const inCleanupScope = opts.cleanupAppliedEntries && opts.cleanupAppliedEntries.length > 0
+      ? isPageInAppliedEntries(pageNum, pageId, opts.cleanupAppliedEntries)
+      : isPageInScope(pageNum, opts.cleanupScope, activePageNum);
+    const applyCleanup = isClean && opts.cleanupEnabled && inCleanupScope;
+
+    const inRestorationScope = opts.restorationAppliedEntries && opts.restorationAppliedEntries.length > 0
+      ? isPageInAppliedEntries(pageNum, pageId, opts.restorationAppliedEntries)
+      : isPageInScope(pageNum, opts.restorationScope, activePageNum);
+    const applyRestoration = isClean && opts.restorationEnabled && inRestorationScope;
     const hasPageColorOverride = isClean && Boolean(page?.color_mode);
     const effectiveColorMode = page?.color_mode || (applyRestoration ? opts.colorMode : "original");
-    const applyBleed = isClean && opts.bleedEnabled && isPageInScope(pageNum, opts.bleedScope, activePageNum);
+
+    const inBleedScope = opts.bleedAppliedEntries && opts.bleedAppliedEntries.length > 0
+      ? isPageInAppliedEntries(pageNum, pageId, opts.bleedAppliedEntries)
+      : isPageInScope(pageNum, opts.bleedScope, activePageNum);
+    const applyBleed = isClean && opts.bleedEnabled && inBleedScope;
 
     const params = new URLSearchParams({
       preview_clean: String(isClean),

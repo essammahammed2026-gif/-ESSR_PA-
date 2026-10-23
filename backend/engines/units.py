@@ -1,7 +1,48 @@
 """Shared prepress units & formatting — single copy (fix.md Phase 1.2)."""
 from typing import List, Optional, Tuple
-MM_TO_PTS = 72.0 / 25.4
-PTS_TO_MM = 25.4 / 72.0
+
+MM_PER_INCH = 25.4
+MM_TO_PTS = 72.0 / MM_PER_INCH
+PTS_TO_MM = MM_PER_INCH / 72.0
+
+
+def mm_to_px(mm: float, dpi: float = 150.0) -> int:
+    """Convert millimeters to screen/print pixels at a given DPI."""
+    if mm <= 0:
+        return 0
+    return int(round((float(mm) / MM_PER_INCH) * dpi))
+
+
+def px_to_mm(px: float, dpi: float = 150.0) -> float:
+    """Convert screen/print pixels to millimeters at a given DPI."""
+    if px <= 0 or dpi <= 0:
+        return 0.0
+    return round((float(px) / dpi) * MM_PER_INCH, 2)
+
+
+def is_page_in_scope(page_num: int, scope_mode: str, custom_range: str = "") -> bool:
+    """
+    Determines if a 1-based page number matches the given scope filter:
+    - 'all': matches every page
+    - 'odds': matches odd page numbers (1, 3, 5, ...)
+    - 'evens': matches even page numbers (2, 4, 6, ...)
+    - 'range': parses custom ranges like '1-5, 8, 12-14'
+    """
+    if scope_mode == "all":
+        return True
+    if scope_mode == "odds":
+        return page_num % 2 != 0
+    if scope_mode == "evens":
+        return page_num % 2 == 0
+    if scope_mode == "range":
+        if not custom_range or not custom_range.strip():
+            return True
+        sel = parse_page_selection(custom_range)
+        if sel is None:
+            return True
+        # sel is 0-based page indices
+        return (page_num - 1) in sel
+    return True
 
 
 def hex_to_rgb(h: str) -> Tuple[float, float, float]:

@@ -2,7 +2,9 @@ import os
 import base64
 import fitz
 from typing import List
-from engines.sheet_packer import SingleSheetResult, PlacedSheetItem
+from engines.sheet_packer import SingleSheetResult
+from engines.imposing_prep import apply_alignment
+from engines.thumbnails import resolve_temp_file
 from engines.units import MM_TO_PTS as _MM_TO_PTS
 from engines.units import hex_to_rgb
 

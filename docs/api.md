@@ -48,20 +48,35 @@ Managed in `backend/main.py`.
 * **`GET /api/contour/export`**: Downloads the final cut path as a standalone SVG or PDF with designated spot-color die lines.
 
 ### 5. Book Scan Ingest & Cleanup (`/api/book-scan/*`)
-Managed by `backend/book_scan_api.py`.
+Managed by `backend/book_scan_api.py`, backed by SQLite WAL persistence (`backend/db/`) and structured asset store (`backend/storage/`).
 
-* **`POST /api/book-scan/init-session`**: Initializes a book scan session. Supports single-pass scans, 2-up double-page spreads, dual-pass duplex scans (odds/evens), and digital PDFs.
+* **`POST /api/book-scan/init-session`**: Initializes a book scan session. Supports single-pass scans, 2-up double-page spreads, dual-pass duplex scans (odds/evens), and digital PDFs. Persists page records in SQLite and caches raw assets.
+* **`GET /api/book-scan/sessions`**: Lists all active book scan sessions with page counts, thumbnail previews, creation timestamps, and active lock statuses.
 * **`GET /api/book-scan/page-thumbnail/{session_id}/{page_id}`**: Returns cached raster thumbnail or high-res page image. Supports dynamic resolution via `dpi` (e.g. 100 DPI for fast deck cards, 150 DPI for high-res viewport inspection) and live preview filters (border cleanup, saturation, contrast, deskew).
+* **`GET /api/book-scan/extract-page/{session_id}/{page_id}`**: Streams full-resolution processed page image for single-page export or inspection.
 * **`POST /api/book-scan/reorder/{session_id}`**: Persists reordered page sequence.
 * **`POST /api/book-scan/rotate/{session_id}`**: Rotates individual page in 90° CW/CCW increments.
 * **`DELETE /api/book-scan/page/{session_id}/{page_id}`**: Removes blank or unwanted scan pages.
-* **`POST /api/book-scan/detect-angle/{session_id}/{page_id}`**: Auto-detects and returns skew angle for a page.
+* **`POST /api/book-scan/duplicate-page/{session_id}`**: Duplicates an existing page record and its asset references.
+* **`POST /api/book-scan/insert-blank/{session_id}`**: Inserts a synthesized blank page at a specified position with custom dimensions.
+* **`POST /api/book-scan/detect-angle/{session_id}/{page_id}`**: Auto-detects and returns skew angle for a single page.
+* **`POST /api/book-scan/detect-angle-batch/{session_id}`**: Batch calculates skew angles across all or scoped pages in parallel.
+* **`POST /api/book-scan/deskew-page/{session_id}`**: Persists deskew angle adjustments for a page or batch scope.
 * **`POST /api/book-scan/detect-crop/{session_id}/{page_id}`**: Auto-detects the physical page bounds/crop box against the scanner backing.
-* **`POST /api/book-scan/split-spread/{session_id}`**: Splits a 2-up double-page spread (or multi-line cut grid) into individual pages along specified cut lines.
-* **`POST /api/book-scan/revert-spread/{session_id}`**: Restores a previously split spread back into its original parent sheet format.
-* **`POST /api/book-scan/restore-pages/{session_id}`**: Atomically restores session pages and module states to a historical snapshot (Undo/Redo/History Journal & Restore Original).
+* **`POST /api/book-scan/detect-crop-batch/{session_id}`**: Batch calculates detected physical crop boxes across pages.
 * **`POST /api/book-scan/crop-page/{session_id}`**: Persists manual or detected crop box adjustments to a page or batch scope.
-* **`POST /api/book-scan/export/{session_id}`**: Compiles processed pages with 3mm synthesized mirrored bleed, PDF trim boxes, and vector crop marks into a print-ready PDF, processing according to selected page scope filters.
+* **`POST /api/book-scan/split-spread/{session_id}`**: Splits 2-up double-page spreads (or multi-line cut grids) into individual child page slices, tracking parent-child relationships and restoring spread origins.
+* **`POST /api/book-scan/revert-spread/{session_id}`**: Restores previously split spread slices back into their original parent sheet format, matching by parent ID or slice IDs.
+* **`POST /api/book-scan/mask-page/{session_id}`**: Applies or updates cleanup mask polygons/rectangles.
+* **`POST /api/book-scan/color-mode-page/{session_id}`**: Applies color-mode and tone corrections (B&W thresholding, grayscale, contrast/saturation boost).
+* **`POST /api/book-scan/restore-pages/{session_id}`**: Atomically restores session pages and module states to a historical snapshot (Undo/Redo/History Journal & Restore Original).
+* **`POST /api/book-scan/lock/{session_id}`**: Acquires or heartbeats a cooperative concurrency lock with an owner identifier and TTL.
+* **`DELETE /api/book-scan/lock/{session_id}`**: Releases a held session concurrency lock.
+* **`GET /api/book-scan/lock/{session_id}`**: Inspects the current lock holder, remaining TTL, and active edit state.
+* **`POST /api/book-scan/export-job/{session_id}`**: Enqueues an asynchronous background export job returning a `job_id` for progress tracking.
+* **`GET /api/book-scan/export-job/{job_id}`**: Polls the background export job status, page-by-page progress percentage, and error state.
+* **`GET /api/book-scan/export-download/{job_id}`**: Downloads the print-ready compiled PDF once the background export job completes.
+* **`POST /api/book-scan/export/{session_id}`**: Synchronously compiles processed pages with synthesized bleed, trim boxes, and vector crop marks into a print-ready PDF.
 
 ### 6. Settings, Presets & Runtime Storage (`/api/settings/*`)
 Managed by `backend/settings_api.py` and `backend/engines/storage_cleaner.py`.

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
 import { IconBookStudio, IconHandPan } from "@/components/shared/StudioIcons";
 import { BookStudioPage, CropModuleConfig, BleedModuleConfig, CropBox } from "@/types/book_studio";
-import type { LengthUnit } from "@/lib/units";
+import { pxToMmAtDpi, type LengthUnit } from "@/lib/units";
 import { WorkspaceToolbar } from "./WorkspaceToolbar";
 import { PageCanvas } from "./PageCanvas";
 import type { HistoryEntry } from "@/hooks/useBookHistory";
@@ -80,14 +80,14 @@ export function BookWorkspace({
   const pageBaseWidthMm = useMemo(() => {
     if (selectedPage?.width_mm) return selectedPage.width_mm;
     if (selectedPage?.orig_width_mm) return selectedPage.orig_width_mm;
-    if (naturalSize) return Math.round((naturalSize.w / 150) * 25.4 * 10) / 10;
+    if (naturalSize) return pxToMmAtDpi(naturalSize.w, 150);
     return 297.0;
   }, [selectedPage, naturalSize]);
 
   const pageBaseHeightMm = useMemo(() => {
     if (selectedPage?.height_mm) return selectedPage.height_mm;
     if (selectedPage?.orig_height_mm) return selectedPage.orig_height_mm;
-    if (naturalSize) return Math.round((naturalSize.h / 150) * 25.4 * 10) / 10;
+    if (naturalSize) return pxToMmAtDpi(naturalSize.h, 150);
     return 210.0;
   }, [selectedPage, naturalSize]);
 

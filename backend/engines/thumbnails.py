@@ -5,6 +5,7 @@ fitz 0.72-scale + cv2 720px/quality-90 logic. Import from here instead.
 """
 import os
 from typing import Optional
+from engines.units import px_to_mm
 
 PDF_THUMB_SCALE = 0.72
 IMAGE_MAX_DIM = 720.0
@@ -139,7 +140,7 @@ def get_dimensions_mm(file_path: str) -> tuple:
     if img is not None:
         # Assume 300 DPI if unknown
         h, w = img.shape[:2]
-        return ((w / 300.0) * 25.4, (h / 300.0) * 25.4)
+        return (px_to_mm(w, 300.0), px_to_mm(h, 300.0))
     return (100.0, 100.0)
 
 

@@ -190,9 +190,18 @@ export function WorkspaceToolbar({
               onClick={onToggleCropTool}
               className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
                 cropEnabled
-                  ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                  ? "font-semibold shadow-2xs"
                   : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
               }`}
+              style={
+                cropEnabled
+                  ? {
+                      backgroundColor: "var(--app-accent-15, rgba(245, 158, 11, 0.15))",
+                      color: "var(--app-accent-text, var(--app-accent, #f59e0b))",
+                      borderColor: "var(--app-accent-30, rgba(245, 158, 11, 0.35))",
+                    }
+                  : undefined
+              }
               title={`Toggle Crop Box Overlay (${shortcutLabels.crop_toggle || "C"})`}
             >
               <Crop size={12} />
@@ -206,9 +215,18 @@ export function WorkspaceToolbar({
               onClick={onToggleStraighten}
               className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
                 straightenActive
-                  ? "bg-amber-500 text-slate-950 font-bold border-amber-400"
+                  ? "font-bold shadow-xs"
                   : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
               }`}
+              style={
+                straightenActive
+                  ? {
+                      backgroundColor: "var(--app-accent, #f59e0b)",
+                      borderColor: "var(--app-accent, #f59e0b)",
+                      color: "var(--app-accent-fg, #090d16)",
+                    }
+                  : undefined
+              }
               title={`Draw Straighten Line (${shortcutLabels.straighten_tool || "S"})`}
             >
               <Ruler size={12} />
@@ -222,9 +240,18 @@ export function WorkspaceToolbar({
               onClick={onToggleMaskTool}
               className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
                 maskToolActive
-                  ? "bg-amber-500 text-slate-950 font-bold border-amber-400"
+                  ? "font-bold shadow-xs"
                   : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
               }`}
+              style={
+                maskToolActive
+                  ? {
+                      backgroundColor: "var(--app-accent, #f59e0b)",
+                      borderColor: "var(--app-accent, #f59e0b)",
+                      color: "var(--app-accent-fg, #090d16)",
+                    }
+                  : undefined
+              }
               title={`Draw Erase / Whiteout Box (${shortcutLabels.mask_tool || "M"})`}
             >
               <Eraser size={12} />
@@ -257,7 +284,7 @@ export function WorkspaceToolbar({
                 ? "bg-slate-800 text-white border-slate-600"
                 : "bg-[var(--surface-card,#181D27)] text-slate-300 border-[var(--border-subtle,#242A38)] hover:text-white hover:border-slate-600"
             }`}
-            title={`Toggle Original vs. Processed View (Shortcut: ${shortcutLabels.toggle_original || "O"} or Hold Space)`}
+            title={`Toggle Original vs. Processed View (${shortcutLabels.toggle_original || "O"} or Hold Space)`}
           >
             <IconCompareScan size={13} style={{ color: "var(--app-accent, #f59e0b)" }} />
             <span>{isViewingOriginal ? "Original" : "Compare"}</span>

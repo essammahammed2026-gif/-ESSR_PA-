@@ -34,15 +34,17 @@
    - Before writing any helper, math calculation, or state hook, check and reuse these canonical modules:
      - **Frontend (`frontend/src/`)**:
        - `src/lib/api.ts`: All backend URLs (`API_BASE_URL`, `getApiUrl`) and file downloads (`downloadBlob`). Never write manual `fetch` + `URL.createObjectURL` anchor-click boilerplate.
-       - `src/lib/units.ts`: All length unit conversions (`mmToUnit`, `unitToMm`, `formatMmInUnit`, `getStepForUnit`). Never write inline `25.4` or `96 / 25.4` unit math in components.
-       - `src/lib/pageScope.ts`: All page range parsing (`parsePageRange`), scope filtering (`isPageInScope`), and crop target resolution (`resolveCropTarget`).
+       - `src/lib/units.ts`: All length unit conversions (`mmToUnit`, `unitToMm`, `formatMmInUnit`, `getStepForUnit`, `pxToMmAtDpi`, `mmToPxAtDpi`). Never write inline `25.4` or `96 / 25.4` unit math in components.
+       - `src/lib/pageScope.ts`: All page range parsing (`parsePageRange`), scope filtering (`isPageInScope`), crop target resolution (`resolveCropTarget`), and concrete page number calculation (`resolveConcretePageNumbers`).
        - `src/lib/splitLines.ts`: All cut-line sorting, non-overlapping placement (`getNextCutLine`), and millimeter/percentage segment sizing (`segmentSizes`).
-       - `src/hooks/useBookModules.ts`: Unified Book Studio module state, split/crop operations, and PDF/imposing export handoff. Never split back into separate sub-hooks.
+       - `src/hooks/useBookModules.ts`: Unified Book Studio module state, split/crop operations, per-page layer unlinking, and PDF/imposing export handoff. Never split back into separate sub-hooks.
        - `src/hooks/useImpositionStudio.ts`: Unified Imposing Studio page deck, layout state, debounced preview, and export actions (`buildImposingPagesFromMeta`, `buildImposingPayload`). Never split back into separate sub-hooks.
-     - **Backend (`backend/engines/`)**:
-       - `engines/units.py`: `MM_TO_PTS`, `PTS_TO_MM`, `hex_to_rgb`, `format_page_ranges`, `parse_page_range`, `parse_page_selection`. Never hardcode `(pt / 72.0) * 25.4`.
+     - **Backend (`backend/`)**:
+       - `engines/units.py`: `MM_TO_PTS`, `PTS_TO_MM`, `mm_to_px`, `px_to_mm`, `is_page_in_scope`, `resolve_scope_pages`, `hex_to_rgb`, `format_page_ranges`, `parse_page_range`, `parse_page_selection`. Never hardcode `(pt / 72.0) * 25.4`.
        - `engines/thumbnails.py`: `resolve_temp_file`, `get_dimensions_mm`, `list_pdf_pages_mm`, `render_pdf_thumb`, `render_image_thumb`, `probe_source_dims`. Never write manual `.pdf/.png/.jpg` extension-fallback loops in routers.
        - `engines/imposing_prep.py`: `compute_opposing_rotation_deg`, `effective_page_rotation`, `build_imposing_pages_meta`, `build_sheet_specs`, `build_roll_specs`, `apply_alignment`.
+       - `db/`: SQLite WAL ACID Persistence (`session.py`, `models.py`, `repository.py`) - handles concurrent session state, page ordering, applied edit layers, distributed locks, and export task tracking.
+       - `storage/`: Structured Session Asset Store (`asset_store.py`) - isolates raw scans, rendered thumbnails, and compiled PDF exports under deterministic `data/storage/{session_id}/` directories.
 
 ---
 
@@ -58,8 +60,8 @@
    - ABSOLUTELY ignore the contents of `backend/temp_uploads/` and `backend/public_flipbooks/` during text and code searches so the agent doesn't waste tokens reading old, cached images or heavy PDFs.
 
 3. **Automated Session Hand-Off & Crash Recovery:**
-   - At the beginning of a session, check if `backend/temp_uploads/` contains leftover files from a previous crash. If it does, run the `backend/engines/storage_cleaner.py` routine to safely purge them before writing code.
-   - Before ending a coding session, the agent MUST summarize workspace changes into `SESSION_LOG.md` and ensure `temp_uploads/` is completely empty.
+   - At the beginning of a session, check if `backend/temp_uploads/` contains leftover scratch files from a previous crash. If it does, run the `backend/engines/storage_cleaner.py` routine to safely purge them before writing code. (Note: Persistent session assets live securely in `backend/data/storage/` tracked by SQLite WAL).
+   - Before ending a coding session, the agent MUST summarize workspace changes into `SESSION_LOG.md` and ensure `temp_uploads/` is cleanly maintained.
 
 4. **Strict Version Control Restrictions (User-Only Permissions):**
    - The AI agent is ABSOLUTELY FORBIDDEN from running `git commit`, `git push`, or `git pull` commands autonomously.

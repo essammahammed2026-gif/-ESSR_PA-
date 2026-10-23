@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type Dispatch, type 
 import { apiFetch, downloadBlob } from "@/lib/api";
 import { useDebounce } from "@/lib/useDebounce";
 import { groupSplitLines } from "@/lib/splitLines";
-import { resolveCropTarget, resolveMaskTargetIds } from "@/lib/pageScope";
+import { resolveCropTarget, resolveMaskTargetIds, formatPageNumbersToRange } from "@/lib/pageScope";
 import {
   BookIntakeMode,
   BookStudioPage,
@@ -477,6 +477,14 @@ export function useBookModules({
       }
       // Committed: overlay back to full bed over the new slices and clear cut lines
       clearPageCrops();
+      const allSliceIds = current
+        .filter((p) => parentIds.includes(p.parent_page_id || "") || parentIds.includes(p.immediate_parent_id || ""))
+        .map((p) => p.id);
+      const splitTargetIds = Array.from(new Set([...parentIds, ...allSliceIds]));
+      const splitTargetPages = current
+        .map((p, idx) => (splitTargetIds.includes(p.id) ? idx + 1 : null))
+        .filter((n): n is number => n !== null);
+
       updateCropModule((prev) => ({
         ...prev,
         cropBox: { ...FULL_BED },
@@ -486,8 +494,19 @@ export function useBookModules({
           {
             id: `split_${Date.now()}`,
             label: `Split (${cutCount} cut${cutCount > 1 ? "s" : ""})`,
-            scopeLabel: scopeLbl,
+            details: `${vertical.length} vert • ${horizontal.length} horiz cuts`,
+            scopeLabel: splitTargetPages.length > 0 ? `P.${splitTargetPages.join(",")}` : scopeLbl,
+            targetPages: splitTargetPages,
+            targetPageIds: splitTargetIds,
+            visible: true,
             prevPagesSnapshot: prevSnapshot,
+            params: {
+              cropBox: cropModule.cropBox,
+              splitLines: cropModule.splitLines,
+              target: cropModule.target,
+              parentIds: parentIds,
+              sliceIds: allSliceIds,
+            },
           },
         ],
       }));
@@ -582,6 +601,9 @@ export function useBookModules({
         }
         // Committed: the view now shows the cropped region, so the overlay
         // resets to full bed — repeat crops refine the visible region.
+        const cropTargetPages = pages
+          .map((p, idx) => (targetIdSet.has(p.id) ? idx + 1 : null))
+          .filter((n): n is number => n !== null);
         updateCropModule((prev) => ({
           ...prev,
           cropBox: { ...FULL_BED },
@@ -591,8 +613,18 @@ export function useBookModules({
             {
               id: `crop_${Date.now()}`,
               label: `Crop (${modeLabel})`,
+              details: `L:${Math.round(cropModule.cropBox.x1 * 100)}% T:${Math.round(cropModule.cropBox.y1 * 100)}% R:${Math.round((1 - cropModule.cropBox.x2) * 100)}% B:${Math.round((1 - cropModule.cropBox.y2) * 100)}%`,
               scopeLabel: scopeLbl,
+              targetPages: cropTargetPages,
+              targetPageIds: Array.from(targetIdSet),
+              visible: true,
               prevPagesSnapshot: prevSnapshot,
+              params: {
+                cropBox: cropModule.cropBox,
+                splitLines: cropModule.splitLines,
+                target: cropModule.target,
+                detectMode: cropModule.detectMode,
+              },
             },
           ],
         }));
@@ -604,39 +636,273 @@ export function useBookModules({
     } finally {
       setTimeout(() => setCropActionProgress(IDLE_PROGRESS), 250);
     }
-  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.target, cropModule.detectMode, pages, setPages, updateCropModule, clearPageCrops, recordStep, formatCropScopeLabel]);
+  }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.splitLines, cropModule.target, cropModule.detectMode, pages, setPages, updateCropModule, clearPageCrops, recordStep, formatCropScopeLabel]);
 
-  // Reverse an applied crop/split entry by restoring its saved page snapshot
-  const removeAppliedCrop = useCallback(async (entryId: string) => {
-    const entry = (cropModule.appliedEntries || []).find((e) => e.id === entryId);
+  // Remove all applied crops and splits, restoring all pages to uncropped base state
+  const removeAllAppliedCrops = useCallback(async () => {
+    if (!sessionId) return;
     setCropModule((prev) => ({
       ...prev,
-      appliedEntries: (prev.appliedEntries || []).filter((e) => e.id !== entryId),
+      cropBox: { ...FULL_BED },
+      splitLines: [],
+      appliedEntries: [],
     }));
-    if (!entry?.prevPagesSnapshot || !sessionId) return;
-    const snapshot = entry.prevPagesSnapshot.map((p) => ({
-      ...p,
-      rev: (p.rev ?? 0) + 1,
-    }));
-    setPages(snapshot);
     clearPageCrops();
+    setCropActionProgress({ active: true, progress: 40, label: "Reverting all crops & splits..." });
     try {
+      let currentPages = pages;
+      const hasSplitPages = currentPages.some(
+        (p) => p.half === "left" || p.half === "right" || p.slice_box || p.parent_page_id
+      );
+      if (hasSplitPages) {
+        const revRes = await apiFetch(`/api/book-scan/revert-spread/${sessionId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revert_all: true }),
+        });
+        if (revRes.ok) {
+          const revData = await revRes.json();
+          currentPages = revData.pages;
+        }
+      }
+
+      // Clear all crop boxes and restore original millimeter dimensions
+      const cleanPages = currentPages.map((p) => {
+        const origW = p.orig_width_mm || p.width_mm || 210.0;
+        const origH = p.orig_height_mm || p.height_mm || 297.0;
+        const next = { ...p };
+        delete next.crop_box;
+        delete next.page_crop_box;
+        delete next.spread_crop_box;
+        next.width_mm = origW;
+        next.height_mm = origH;
+        next.orig_width_mm = origW;
+        next.orig_height_mm = origH;
+        next.rev = (next.rev ?? 0) + 1;
+        return next;
+      });
+
       const res = await apiFetch(`/api/book-scan/restore-pages/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pages: snapshot }),
+        body: JSON.stringify({ pages: cleanPages }),
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.pages) {
-          setPages(data.pages);
-          recordStep?.("Undo Crop", data.pages, selectedPageId);
+        const finalPages = data.pages || cleanPages;
+        setPages(finalPages);
+        if (!finalPages.some((p: BookStudioPage) => p.id === selectedPageId) && finalPages[0]) {
+          setSelectedPageId(finalPages[0].id);
         }
+        recordStep?.("Revert All Crops", finalPages, selectedPageId);
       }
     } catch (err) {
-      console.error("Failed to reverse applied crop:", err);
+      console.error("Failed to revert all crops:", err);
+    } finally {
+      setTimeout(() => setCropActionProgress(IDLE_PROGRESS), 250);
     }
-  }, [cropModule.appliedEntries, sessionId, setPages, clearPageCrops, recordStep, selectedPageId]);
+  }, [sessionId, pages, setPages, selectedPageId, setSelectedPageId, clearPageCrops, recordStep]);
+
+  // Reverse a specific applied crop/split entry deterministically (full entry or current page only)
+  const removeAppliedCrop = useCallback(async (entryId: string, onlyTargetPageId?: string) => {
+    if (!sessionId) return;
+    const currentEntries = cropModule.appliedEntries || [];
+    const entry = currentEntries.find((e) => e.id === entryId);
+    if (!entry) return;
+
+    // A. Removing entry only for the current viewing page (when entry targets multiple pages)
+    if (onlyTargetPageId && (entry.targetPageIds?.length ?? 0) > 1) {
+      setCropActionProgress({ active: true, progress: 40, label: "Removing crop from current page..." });
+      try {
+        let currentPages = pages;
+        const pageIdx = currentPages.findIndex((p) => p.id === onlyTargetPageId);
+        const pageNum = pageIdx >= 0 ? pageIdx + 1 : undefined;
+
+        // If this entry was a split on this page, revert this page's split
+        if (entry.id.startsWith("split_") || entry.label?.toLowerCase().includes("split")) {
+          const revRes = await apiFetch(`/api/book-scan/revert-spread/${sessionId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              target_page_ids: [onlyTargetPageId],
+            }),
+          });
+          if (revRes.ok) {
+            const revData = await revRes.json();
+            currentPages = revData.pages;
+          }
+        }
+
+        const nextTargetIds = (entry.targetPageIds || []).filter((id) => id !== onlyTargetPageId);
+        const nextTargetPages = pageNum !== undefined
+          ? (entry.targetPages || []).filter((n) => n !== pageNum)
+          : (entry.targetPages || []);
+
+        const updatedEntry = {
+          ...entry,
+          targetPageIds: nextTargetIds,
+          targetPages: nextTargetPages,
+          scopeLabel: nextTargetPages.length > 0 ? `P.${nextTargetPages.join(",")}` : "None",
+        };
+
+        const nextEntries = currentEntries.map((e) => (e.id === entryId ? updatedEntry : e));
+        setCropModule((prev) => ({
+          ...prev,
+          appliedEntries: nextEntries,
+        }));
+
+        // Re-evaluate page crop for onlyTargetPageId
+        const activeEntryForPage = [...nextEntries]
+          .reverse()
+          .find((e) => e.id !== entryId && e.targetPageIds && e.targetPageIds.includes(onlyTargetPageId));
+
+        const nextPages = currentPages.map((p) => {
+          if (p.id !== onlyTargetPageId) return p;
+          if (!activeEntryForPage) {
+            const origW = p.orig_width_mm || p.width_mm || 210.0;
+            const origH = p.orig_height_mm || p.height_mm || 297.0;
+            const clean = { ...p };
+            delete clean.crop_box;
+            delete clean.page_crop_box;
+            clean.width_mm = origW;
+            clean.height_mm = origH;
+            clean.rev = (clean.rev ?? 0) + 1;
+            return clean;
+          } else {
+            const cb = activeEntryForPage.params?.cropBox || FULL_BED;
+            const origW = p.orig_width_mm || p.width_mm || 210.0;
+            const origH = p.orig_height_mm || p.height_mm || 297.0;
+            const fracW = Math.max(0.01, cb.x2 - cb.x1);
+            const fracH = Math.max(0.01, cb.y2 - cb.y1);
+            const isSlice = Boolean(p.half === "left" || p.half === "right" || p.slice_box || p.parent_page_id);
+            const updated = { ...p };
+            if (isSlice) updated.page_crop_box = cb;
+            else updated.crop_box = cb;
+            updated.width_mm = Math.round(origW * fracW * 10) / 10;
+            updated.height_mm = Math.round(origH * fracH * 10) / 10;
+            updated.rev = (updated.rev ?? 0) + 1;
+            return updated;
+          }
+        });
+
+        clearPageCrops();
+        const res = await apiFetch(`/api/book-scan/restore-pages/${sessionId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pages: nextPages }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const finalPages = data.pages || nextPages;
+          setPages(finalPages);
+          recordStep?.("Remove Crop from Page", finalPages, selectedPageId);
+        }
+      } catch (err) {
+        console.error("Failed to remove crop from page:", err);
+      } finally {
+        setTimeout(() => setCropActionProgress(IDLE_PROGRESS), 250);
+      }
+      return;
+    }
+
+    // B. Removing entry completely from all pages
+    const remainingEntries = currentEntries.filter((e) => e.id !== entryId);
+    setCropModule((prev) => ({
+      ...prev,
+      appliedEntries: remainingEntries,
+    }));
+
+    if (remainingEntries.length === 0) {
+      await removeAllAppliedCrops();
+      return;
+    }
+
+    setCropActionProgress({ active: true, progress: 40, label: "Reverting crop entry..." });
+    try {
+      let currentPages = pages;
+      let newSelectedId: string | null = null;
+
+      // If the removed entry was a split, revert those split pages back into spreads
+      if (entry.id.startsWith("split_") || entry.label?.toLowerCase().includes("split")) {
+        const revRes = await apiFetch(`/api/book-scan/revert-spread/${sessionId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_page_ids: entry.targetPageIds,
+          }),
+        });
+        if (revRes.ok) {
+          const revData = await revRes.json();
+          currentPages = revData.pages;
+          newSelectedId = revData.new_selected_id;
+        }
+      }
+
+      // Re-evaluate crop state for every targeted page
+      const targetIds = new Set(entry.targetPageIds || []);
+      const nextPages = currentPages.map((p) => {
+        if (!targetIds.has(p.id) && !targetIds.has(p.parent_page_id || "")) {
+          return p;
+        }
+
+        // Check if any remaining entry still targets this page
+        const activeEntryForPage = [...remainingEntries]
+          .reverse()
+          .find((e) => e.targetPageIds && (e.targetPageIds.includes(p.id) || (p.parent_page_id && e.targetPageIds.includes(p.parent_page_id))));
+
+        if (!activeEntryForPage) {
+          const origW = p.orig_width_mm || p.width_mm || 210.0;
+          const origH = p.orig_height_mm || p.height_mm || 297.0;
+          const cleanPage = { ...p };
+          delete cleanPage.crop_box;
+          delete cleanPage.page_crop_box;
+          cleanPage.width_mm = origW;
+          cleanPage.height_mm = origH;
+          cleanPage.rev = (cleanPage.rev ?? 0) + 1;
+          return cleanPage;
+        } else {
+          const cb = activeEntryForPage.params?.cropBox || FULL_BED;
+          const origW = p.orig_width_mm || p.width_mm || 210.0;
+          const origH = p.orig_height_mm || p.height_mm || 297.0;
+          const fracW = Math.max(0.01, cb.x2 - cb.x1);
+          const fracH = Math.max(0.01, cb.y2 - cb.y1);
+          const isSlice = Boolean(p.half === "left" || p.half === "right" || p.slice_box || p.parent_page_id);
+          const updated = { ...p };
+          if (isSlice) {
+            updated.page_crop_box = cb;
+          } else {
+            updated.crop_box = cb;
+          }
+          updated.width_mm = Math.round(origW * fracW * 10) / 10;
+          updated.height_mm = Math.round(origH * fracH * 10) / 10;
+          updated.rev = (updated.rev ?? 0) + 1;
+          return updated;
+        }
+      });
+
+      clearPageCrops();
+      const res = await apiFetch(`/api/book-scan/restore-pages/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pages: nextPages }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const finalPages = data.pages || nextPages;
+        setPages(finalPages);
+        if (newSelectedId && finalPages.some((p: BookStudioPage) => p.id === newSelectedId)) {
+          setSelectedPageId(newSelectedId);
+        } else if (!finalPages.some((p: BookStudioPage) => p.id === selectedPageId) && finalPages[0]) {
+          setSelectedPageId(finalPages[0].id);
+        }
+        recordStep?.("Remove Crop Entry", finalPages, selectedPageId);
+      }
+    } catch (err) {
+      console.error("Failed to remove applied crop entry:", err);
+    } finally {
+      setTimeout(() => setCropActionProgress(IDLE_PROGRESS), 250);
+    }
+  }, [sessionId, cropModule.appliedEntries, pages, setPages, selectedPageId, setSelectedPageId, clearPageCrops, recordStep, removeAllAppliedCrops]);
 
   const dismissExportProgress = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -919,7 +1185,24 @@ export function useBookModules({
 
     const activeIdx = selectedPageId ? pages.findIndex((p) => p.id === selectedPageId) : -1;
     const activePageNum = activeIdx >= 0 ? activeIdx + 1 : 1;
-    const resolveExportScope = (sc: { mode: string; customRange: string }) => {
+    const resolveModuleExportScope = (
+      sc: { mode: string; customRange: string },
+      appliedEntries?: { targetPages?: number[]; visible?: boolean }[]
+    ) => {
+      // TCK-02: Visibility toggle controls preview rendering only; all non-deleted entries remain active on export.
+      const activeEntries = appliedEntries || [];
+      if (activeEntries.length > 0) {
+        const allPages: number[] = [];
+        activeEntries.forEach((e) => {
+          if (e.targetPages && e.targetPages.length > 0) {
+            allPages.push(...e.targetPages);
+          }
+        });
+        if (allPages.length > 0) {
+          const rangeStr = formatPageNumbersToRange(allPages);
+          return { mode: "range", customRange: rangeStr };
+        }
+      }
       if (sc.mode === "current") {
         return { mode: "range", customRange: String(activePageNum) };
       }
@@ -955,8 +1238,8 @@ export function useBookModules({
       deskew_angle: deskewModule.angle,
       deskew_max_angle: deskewModule.maxAngle,
       deskew_ignore_borders: deskewModule.ignoreBorders,
-      deskew_scope_mode: resolveExportScope(deskewModule.scope).mode,
-      deskew_custom_range: resolveExportScope(deskewModule.scope).customRange,
+      deskew_scope_mode: resolveModuleExportScope(deskewModule.scope, deskewModule.appliedEntries).mode,
+      deskew_custom_range: resolveModuleExportScope(deskewModule.scope, deskewModule.appliedEntries).customRange,
       per_page_deskew_angles: Object.keys(perPageAnglesMap).length > 0 ? perPageAnglesMap : undefined,
       per_page_crops: cropModule.enabled && Object.keys(draftCropsMap).length > 0 ? draftCropsMap : undefined,
       per_page_color_modes: Object.keys(perPageColorsMap).length > 0 ? perPageColorsMap : undefined,
@@ -964,16 +1247,16 @@ export function useBookModules({
       cleanup_module_enabled: cleanupModule.enabled,
       flatten_illumination: cleanupModule.flattenIllumination,
       despeckle_level: cleanupModule.despeckleLevel,
-      cleanup_scope_mode: resolveExportScope(cleanupModule.scope).mode,
-      cleanup_custom_range: resolveExportScope(cleanupModule.scope).customRange,
+      cleanup_scope_mode: resolveModuleExportScope(cleanupModule.scope, cleanupModule.appliedEntries).mode,
+      cleanup_custom_range: resolveModuleExportScope(cleanupModule.scope, cleanupModule.appliedEntries).customRange,
 
       bleed_module_enabled: bleedModule.enabled,
-      bleed_scope_mode: resolveExportScope(bleedModule.scope).mode,
-      bleed_custom_range: resolveExportScope(bleedModule.scope).customRange,
+      bleed_scope_mode: resolveModuleExportScope(bleedModule.scope, bleedModule.appliedBleeds).mode,
+      bleed_custom_range: resolveModuleExportScope(bleedModule.scope, bleedModule.appliedBleeds).customRange,
 
       restoration_module_enabled: restorationModule.enabled,
-      restoration_scope_mode: resolveExportScope(restorationModule.scope).mode,
-      restoration_custom_range: resolveExportScope(restorationModule.scope).customRange,
+      restoration_scope_mode: resolveModuleExportScope(restorationModule.scope, restorationModule.appliedEntries).mode,
+      restoration_custom_range: resolveModuleExportScope(restorationModule.scope, restorationModule.appliedEntries).customRange,
     };
 
     try {
@@ -1081,6 +1364,7 @@ export function useBookModules({
     revertSpread,
     applyCrop,
     removeAppliedCrop,
+    removeAllAppliedCrops,
     applyMaskBox,
     removeMaskBox,
     clearPageMasks,

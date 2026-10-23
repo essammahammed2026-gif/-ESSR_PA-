@@ -81,8 +81,14 @@ export type CropDetectMode = "paper" | "content";
 export interface AppliedModuleEntry {
   id: string;
   label: string;
+  details?: string;
   scopeLabel: string;
+  targetPages: number[]; // Explicit 1-based page numbers: [n], [1, 2, ...], etc. Never dynamic "current"
+  targetPageIds?: string[];
   prevPagesSnapshot?: BookStudioPage[];
+  visible?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  params?: Record<string, any>;
 }
 
 export interface CropModuleConfig {
@@ -132,6 +138,13 @@ export interface BleedEntry {
   placement: "outside" | "inside";
   showCropMarks: boolean;
   scopeLabel?: string;
+  targetPages: number[]; // Explicit 1-based page numbers
+  targetPageIds?: string[];
+  visible?: boolean;
+  label?: string;
+  details?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  params?: Record<string, any>;
 }
 
 export interface BleedModuleConfig {
@@ -238,6 +251,10 @@ export interface ThumbnailRenderOpts {
   bleedColor: string;
   bleedPlacement: "outside" | "inside";
   showCropMarks: boolean;
+  deskewAppliedEntries?: AppliedModuleEntry[];
+  cleanupAppliedEntries?: AppliedModuleEntry[];
+  restorationAppliedEntries?: AppliedModuleEntry[];
+  bleedAppliedEntries?: BleedEntry[];
 }
 
 export interface ModuleTaskProgress {

@@ -6,11 +6,23 @@ import { FolderOpen, SlidersHorizontal, Download, List, LayoutGrid, RefreshCw, C
 import { useBookStudioState } from "@/hooks/useBookStudioState";
 import { type LengthUnit, UNIT_OPTIONS } from "@/lib/units";
 import { ExportFormat, TiffCompression } from "@/types/book_studio";
+import dynamic from "next/dynamic";
 import { StudioLayout } from "@/components/layout/StudioLayout";
 import { BookLeftPanel } from "@/components/book-studio/BookLeftPanel";
-import { BookWorkspace } from "@/components/book-studio/BookWorkspace";
 import { BookRightPanel } from "@/components/book-studio/BookRightPanel";
 import { ExportProgressModal } from "@/components/book-studio/ExportProgressModal";
+
+const BookWorkspace = dynamic(
+  () => import("@/components/book-studio/BookWorkspace").then((mod) => mod.BookWorkspace),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex-1 flex items-center justify-center bg-[#0d1017] text-slate-500 text-xs font-mono">
+        Loading canvas viewport...
+      </div>
+    ),
+  }
+);
 
 function BookStudioContent() {
   const {
@@ -63,6 +75,7 @@ function BookStudioContent() {
     revertSpread,
     applyCrop,
     removeAppliedCrop,
+    removeAllAppliedCrops,
     clearAllDeskewAngles,
     applyMaskBox,
     removeMaskBox,
@@ -514,6 +527,7 @@ function BookStudioContent() {
       onToggleRight={() => setIsRightCollapsed((prev) => !prev)}
       rightPanel={
         <BookRightPanel
+          shortcutLabels={shortcutLabels}
           cropModule={cropModule}
           setCropModule={setCropModule}
           isDetectingCrop={isDetectingCrop}
@@ -526,6 +540,7 @@ function BookStudioContent() {
           revertSpread={revertSpread}
           applyCrop={applyCrop}
           removeAppliedCrop={removeAppliedCrop}
+          removeAllAppliedCrops={removeAllAppliedCrops}
           pages={pages}
           deskewModule={deskewModule}
           setDeskewModule={setDeskewModule}
@@ -608,7 +623,13 @@ function BookStudioContent() {
 
 export default function BookStudioPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-[#12151B] text-slate-400 text-xs font-mono">
+          Loading Book Studio...
+        </div>
+      }
+    >
       <BookStudioContent />
     </Suspense>
   );

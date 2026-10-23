@@ -20,6 +20,22 @@ const MM_PER_INCH = 25.4;
 const PX_PER_INCH = 96; // Standard CSS screen pixels (96 DPI)
 
 /**
+ * Converts screen/image pixels to millimeters at a given DPI resolution.
+ */
+export function pxToMmAtDpi(px: number, dpi: number = 150): number {
+  if (!Number.isFinite(px) || dpi <= 0) return 0;
+  return Math.round((px / dpi) * MM_PER_INCH * 10) / 10;
+}
+
+/**
+ * Converts millimeters to screen/image pixels at a given DPI resolution.
+ */
+export function mmToPxAtDpi(mm: number, dpi: number = 150): number {
+  if (!Number.isFinite(mm) || dpi <= 0) return 0;
+  return Math.round((mm / MM_PER_INCH) * dpi);
+}
+
+/**
  * Converts a value in millimeters to the target unit.
  */
 export function mmToUnit(valMm: number, unit: LengthUnit | string): number {

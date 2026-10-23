@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { apiFetch } from "@/lib/api";
 import { type LengthUnit, getStoredUnit, setStoredUnit } from "@/lib/units";
 import { resolveCropTarget } from "@/lib/pageScope";
@@ -17,10 +17,14 @@ import type { CropBox, DetectCropResult, FocusedModuleId, ExportOptions } from "
  * return API consumed by book-studio/page.tsx.
  */
 export function useBookStudioState() {
-  const [unit, setUnitState] = useState<LengthUnit>(() => getStoredUnit("mm"));
+  const [unit, setUnitState] = useState<LengthUnit>("mm");
   const setUnit = useCallback((next: LengthUnit) => {
     setUnitState(next);
     setStoredUnit(next);
+  }, []);
+
+  useEffect(() => {
+    setUnitState(getStoredUnit("mm"));
   }, []);
 
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
@@ -145,7 +149,17 @@ export function useBookStudioState() {
     );
   }, [session, modules]);
 
-  const setPageDeskewAngle = useCallback(async (pageId: string, angle: number) => {
+  const deskewSyncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (deskewSyncTimeoutRef.current) {
+        clearTimeout(deskewSyncTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const setPageDeskewAngle = useCallback((pageId: string, angle: number) => {
     if (!session.sessionId) return;
     const rounded = Math.round(angle * 100) / 100;
     // Optimistically update local page deskew_angle + rev so canvas updates immediately
@@ -157,15 +171,23 @@ export function useBookStudioState() {
       enabled: true,
       angle: rounded,
     }));
-    try {
-      await apiFetch(`/api/book-scan/deskew-page/${session.sessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page_id: pageId, angle: rounded }),
-      });
-    } catch (err) {
-      console.error("Failed to persist per-page deskew angle:", err);
+
+    // Debounce network persistence (~350ms) to prevent server flooding while dragging slider
+    if (deskewSyncTimeoutRef.current) {
+      clearTimeout(deskewSyncTimeoutRef.current);
     }
+    const currentSessionId = session.sessionId;
+    deskewSyncTimeoutRef.current = setTimeout(async () => {
+      try {
+        await apiFetch(`/api/book-scan/deskew-page/${currentSessionId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page_id: pageId, angle: rounded }),
+        });
+      } catch (err) {
+        console.error("Failed to persist per-page deskew angle:", err);
+      }
+    }, 350);
   }, [session, modules]);
 
   // Detect crop boundary, then apply the result to the crop module
@@ -349,6 +371,12 @@ export function useBookStudioState() {
     detect_page: formatCombo("detect_page"),
     detect_all: formatCombo("detect_all"),
     apply_action: formatCombo("apply_action"),
+    module_crop: formatCombo("module_crop") || "1",
+    module_deskew: formatCombo("module_deskew") || "2",
+    module_cleanup: formatCombo("module_cleanup") || "3",
+    module_restore: formatCombo("module_restore") || "4",
+    module_bleed: formatCombo("module_bleed") || "5",
+    exit_module: formatCombo("exit_module") || "Esc",
   }), [formatCombo]);
 
   // Merged error state (session init errors + export errors)
@@ -392,8 +420,11 @@ export function useBookStudioState() {
       bleedColor: modules.debouncedBleedColor,
       bleedPlacement: modules.bleedModule.placement,
       showCropMarks: modules.bleedModule.showCropMarks,
+      deskewAppliedEntries: modules.deskewModule.appliedEntries,
+      cleanupAppliedEntries: modules.cleanupModule.appliedEntries,
+      restorationAppliedEntries: modules.restorationModule.appliedEntries,
+      bleedAppliedEntries: modules.bleedModule.appliedBleeds,
     });
-
   }, [session, modules]);
 
   // Export wired with the live intake mode and optional multi-format export options
@@ -514,6 +545,7 @@ export function useBookStudioState() {
     revertSpread: modules.revertSpread,
     applyCrop: modules.applyCrop,
     removeAppliedCrop: modules.removeAppliedCrop,
+    removeAllAppliedCrops: modules.removeAllAppliedCrops,
     clearAllDeskewAngles,
     applyMaskBox,
     removeMaskBox: modules.removeMaskBox,

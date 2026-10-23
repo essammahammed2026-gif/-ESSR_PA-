@@ -34,6 +34,13 @@ backend/public_flipbooks/flipbook_export_*
 .env.local
 .env.*.local
 
+# Database & Persistent Runtime Storage
+backend/data/*
+!backend/data/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+
 # IDE & OS
 .DS_Store
 Thumbs.db

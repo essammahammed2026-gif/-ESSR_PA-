@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 import cv2
 import numpy as np
 from typing import Dict, Any, List
-from engines.units import format_page_ranges  # canonical; kept re-exported for compat
+from engines.units import format_page_ranges, px_to_mm, MM_PER_INCH
 
 def match_standard_paper_name(w_mm: float, h_mm: float) -> str:
     """Matches width and height against international standard sheet sizes."""
@@ -336,8 +336,8 @@ def analyze_universal_asset(file_path: str, filename: str) -> Dict[str, Any]:
                 channels = img.shape[2] if len(img.shape) > 2 else 1
                 
                 # Standard 300 DPI calculation for physical dimensions
-                w_mm = round((w / 300.0) * 25.4, 2)
-                h_mm = round((h / 300.0) * 25.4, 2)
+                w_mm = px_to_mm(w, 300.0)
+                h_mm = px_to_mm(h, 300.0)
                 analysis["width_mm"] = w_mm
                 analysis["height_mm"] = h_mm
                 if h_mm > 0:
@@ -386,7 +386,7 @@ def analyze_universal_asset(file_path: str, filename: str) -> Dict[str, Any]:
                             "low_dpi_pages": [1] if is_low_res else [],
                             "low_dpi_images": [{
                                 "page": 1,
-                                "dpi": int(min(w, h) / (max(w_mm, h_mm) / 25.4)),
+                                "dpi": int(min(w, h) / (max(w_mm, h_mm) / MM_PER_INCH)),
                                 "dimensions": f"{w} × {h} px",
                                 "status": "Low resolution"
                             }] if is_low_res else [],

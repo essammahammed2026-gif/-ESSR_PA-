@@ -1,14 +1,26 @@
 "use client";
 
 import { Suspense, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { ImposingPageMeta } from "@/types/prepress";
 import { useImpositionStudio, buildImposingPagesFromMeta } from "@/hooks/useImpositionStudio";
 import { StudioLayout } from "@/components/layout/StudioLayout";
-import { PreviewViewport } from "@/components/imposing/PreviewViewport";
 import { LeftAssetPanel } from "@/components/imposing/LeftAssetPanel";
 import { RightControlPanel } from "@/components/imposing/RightControlPanel";
+
+const PreviewViewport = dynamic(
+  () => import("@/components/imposing/PreviewViewport").then((mod) => mod.PreviewViewport),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex-1 flex items-center justify-center bg-[#0d1017] text-slate-500 text-xs font-mono">
+        Loading imposing canvas...
+      </div>
+    ),
+  }
+);
 
 interface PreloadPagesResponse {
   success: boolean;
@@ -201,7 +213,13 @@ function ImposingStudioContent() {
 
 export default function ImposingStudio() {
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-[#12151B] text-slate-400 text-xs font-mono">
+          Loading Imposing Studio...
+        </div>
+      }
+    >
       <ImposingStudioContent />
     </Suspense>
   );

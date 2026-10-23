@@ -43,6 +43,7 @@ interface BookRightPanelProps {
   revertSpread?: (mode?: "current" | "all", pageId?: string) => Promise<void>;
   applyCrop?: () => Promise<void>;
   removeAppliedCrop?: (id: string) => Promise<void> | void;
+  removeAllAppliedCrops?: () => Promise<void> | void;
   pages: BookStudioPage[];
   deskewModule: DeskewModuleConfig;
   setDeskewModule: React.Dispatch<React.SetStateAction<DeskewModuleConfig>>;
@@ -81,6 +82,7 @@ interface BookRightPanelProps {
   unit?: LengthUnit;
   onActivateEyedropper?: () => void;
   onCollapse?: () => void;
+  shortcutLabels?: Record<string, string>;
 }
 
 export function BookRightPanel({
@@ -96,6 +98,7 @@ export function BookRightPanel({
   revertSpread,
   applyCrop,
   removeAppliedCrop,
+  removeAllAppliedCrops,
   pages,
   deskewModule,
   setDeskewModule,
@@ -134,8 +137,11 @@ export function BookRightPanel({
   unit = "mm",
   onActivateEyedropper,
   onCollapse,
+  shortcutLabels = {},
 }: BookRightPanelProps) {
-  const activePage = pages.find((p) => p.id === selectedPageId);
+  const activeIdx = selectedPageId ? pages.findIndex((p) => p.id === selectedPageId) : -1;
+  const activePageNum = activeIdx >= 0 ? activeIdx + 1 : 1;
+  const activePage = activeIdx >= 0 ? pages[activeIdx] : undefined;
   const pageMasksCount = activePage?.masks?.length ?? 0;
   const totalMasksCount = pages.reduce((acc, p) => acc + (p.masks?.length ?? 0), 0);
   const colorOverridePagesCount = pages.filter((p) => Boolean(p.color_mode)).length;
@@ -204,9 +210,17 @@ export function BookRightPanel({
     return `${pl} ${mmToUnit(bleedModule.bleedMm, unit)}${unitShort} • ${md}`;
   })();
 
+  const moduleShortcuts: Record<FocusedModuleId, string> = {
+    crop: shortcutLabels.module_crop || "1",
+    deskew: shortcutLabels.module_deskew || "2",
+    cleanup: shortcutLabels.module_cleanup || "3",
+    restore: shortcutLabels.module_restore || "4",
+    bleed: shortcutLabels.module_bleed || "5",
+  };
+
   const moduleDescriptors: {
     id: FocusedModuleId;
-    keyNum: number;
+    shortcut: string;
     title: string;
     summary: string;
     enabled: boolean;
@@ -217,7 +231,7 @@ export function BookRightPanel({
   }[] = [
     {
       id: "crop",
-      keyNum: 1,
+      shortcut: moduleShortcuts.crop,
       title: "Crop & Split",
       summary: cropSummary,
       enabled: cropModule.enabled,
@@ -228,7 +242,7 @@ export function BookRightPanel({
     },
     {
       id: "deskew",
-      keyNum: 2,
+      shortcut: moduleShortcuts.deskew,
       title: "Deskew",
       summary: deskewSummary,
       enabled: deskewModule.enabled,
@@ -239,7 +253,7 @@ export function BookRightPanel({
     },
     {
       id: "cleanup",
-      keyNum: 3,
+      shortcut: moduleShortcuts.cleanup,
       title: "Cleanup",
       summary: cleanupSummary,
       enabled: cleanupModule.enabled,
@@ -250,7 +264,7 @@ export function BookRightPanel({
     },
     {
       id: "restore",
-      keyNum: 4,
+      shortcut: moduleShortcuts.restore,
       title: "Colors",
       summary: restoreSummary,
       enabled: restorationModule.enabled,
@@ -261,7 +275,7 @@ export function BookRightPanel({
     },
     {
       id: "bleed",
-      keyNum: 5,
+      shortcut: moduleShortcuts.bleed,
       title: "Bleed",
       summary: bleedSummary,
       enabled: bleedModule.enabled,
@@ -330,7 +344,7 @@ export function BookRightPanel({
                   ? "bg-[var(--surface-card,#181D27)] border-[var(--border-strong,#333D52)] hover:border-amber-500/60 shadow-2xs"
                   : "bg-[var(--surface-card,#181D27)]/80 border-[var(--border-subtle,#242A38)] hover:border-slate-600"
               }`}
-              title={`Open ${mod.title} options (Shortcut: ${mod.keyNum})`}
+              title={`Open ${mod.title} options (${mod.shortcut})`}
             >
               <div className="flex items-center justify-between gap-2.5">
                 {/* Left Icon */}
@@ -350,9 +364,6 @@ export function BookRightPanel({
                   <div className="flex items-center space-x-1.5">
                     <span className="text-xs font-bold text-[var(--text-primary,#f1f5f9)] truncate">
                       {mod.title}
-                    </span>
-                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-[var(--surface-inset,#131720)] text-slate-500 border border-[var(--border-subtle,#242A38)] shrink-0">
-                      {mod.keyNum}
                     </span>
                     {mod.badge && (
                       <span
@@ -441,7 +452,7 @@ export function BookRightPanel({
           type="button"
           onClick={() => onFocusModule?.(null)}
           className="flex items-center space-x-1.5 px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--text-primary,#e2e8f0)] hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-          title="Return to All Modules (Shortcut: Esc)"
+          title={`Return to All Modules (${shortcutLabels.exit_module || "Esc"})`}
         >
           <ArrowLeft size={13} style={{ color: "var(--app-accent, #f59e0b)" }} />
           <span>All Modules</span>
@@ -463,7 +474,7 @@ export function BookRightPanel({
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                   style={isCurrent ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-                  title={`Jump to ${mod.title} (Shortcut: ${mod.keyNum})`}
+                  title={`Jump to ${mod.title} (${mod.shortcut})`}
                 >
                   {React.cloneElement(mod.icon as React.ReactElement<{ size?: number }>, { size: 13 })}
                   {mod.enabled && (
@@ -505,9 +516,13 @@ export function BookRightPanel({
           revertSpread={revertSpread}
           applyCrop={applyCrop}
           removeAppliedCrop={removeAppliedCrop}
+          removeAllAppliedCrops={removeAllAppliedCrops}
           taskProgress={cropProgress}
           selectedPageId={selectedPageId}
           sessionId={sessionId}
+          pages={pages}
+          activePageNum={activePageNum}
+          shortcutLabels={shortcutLabels}
         />
       )}
 
@@ -528,6 +543,9 @@ export function BookRightPanel({
           taskProgress={deskewProgress}
           selectedPageId={selectedPageId}
           sessionId={sessionId}
+          pages={pages}
+          activePageNum={activePageNum}
+          shortcutLabels={shortcutLabels}
         />
       )}
 
@@ -543,6 +561,10 @@ export function BookRightPanel({
           onClearPageMasks={() => onClearPageMasks?.()}
           onClearAllMasks={() => onClearAllMasks?.()}
           taskProgress={cleanupProgress}
+          pages={pages}
+          selectedPageId={selectedPageId}
+          activePageNum={activePageNum}
+          shortcutLabels={shortcutLabels}
         />
       )}
 
@@ -554,6 +576,10 @@ export function BookRightPanel({
           onSetPageColorMode={onSetPageColorMode}
           colorOverridePagesCount={colorOverridePagesCount}
           taskProgress={restoreProgress}
+          pages={pages}
+          selectedPageId={selectedPageId}
+          activePageNum={activePageNum}
+          shortcutLabels={shortcutLabels}
         />
       )}
 
@@ -564,6 +590,10 @@ export function BookRightPanel({
           taskProgress={bleedProgress}
           unit={unit}
           onActivateEyedropper={onActivateEyedropper}
+          pages={pages}
+          selectedPageId={selectedPageId}
+          activePageNum={activePageNum}
+          shortcutLabels={shortcutLabels}
         />
       )}
     </div>

@@ -7,7 +7,19 @@ import { apiFetch, getApiUrl, downloadBlob } from "@/lib/api";
 import { useDebounce } from "@/lib/useDebounce";
 import { StudioLayout } from "@/components/layout/StudioLayout";
 import { ContourControls, DetectedProfile } from "@/components/contour/ContourControls";
-import { ContourViewport } from "@/components/contour/ContourViewport";
+import dynamic from "next/dynamic";
+
+const ContourViewport = dynamic(
+  () => import("@/components/contour/ContourViewport").then((mod) => mod.ContourViewport),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex-1 flex items-center justify-center bg-[#0d1017] text-slate-500 text-xs font-mono">
+        Loading contour viewport...
+      </div>
+    ),
+  }
+);
 
 function ContourStudioContent() {
   const [fileId, setFileId] = useState<string | null>(null);
@@ -225,7 +237,13 @@ function ContourStudioContent() {
 
 export default function ContourStudio() {
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-[#12151B] text-slate-400 text-xs font-mono">
+          Loading Contour Studio...
+        </div>
+      }
+    >
       <ContourStudioContent />
     </Suspense>
   );
