@@ -31,21 +31,39 @@ class AssetStore:
         os.makedirs(path, exist_ok=True)
         return path
 
-    def save_session_file(self, session_id: str, filename: str, content: bytes) -> Tuple[str, str]:
+    def save_file_stream(self, dest_path: str, file_obj: Any) -> str:
+        """Atomically saves content from a file-like object or bytes to dest_path."""
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        tmp_path = f"{dest_path}.tmp_{os.getpid()}_{int(time.time() * 1000)}"
+        with open(tmp_path, "wb") as f:
+            if hasattr(file_obj, "read"):
+                shutil.copyfileobj(file_obj, f)
+            elif isinstance(file_obj, bytes):
+                f.write(file_obj)
+            else:
+                f.write(bytes(file_obj))
+        os.replace(tmp_path, dest_path)
+        return dest_path
+
+    def save_session_file(self, session_id: str, filename: str, content: Any) -> Tuple[str, str]:
         """
-        Saves an uploaded file into the session directory.
+        Saves an uploaded or generated file into the session directory.
         Returns (relative_filename, absolute_path).
         """
         session_dir = self.get_session_dir(session_id)
         safe_name = os.path.basename(filename)
         dest_path = os.path.join(session_dir, safe_name)
+        self.save_file_stream(dest_path, content)
+        return safe_name, dest_path
 
-        # Atomic write
-        tmp_path = f"{dest_path}.tmp_{os.getpid()}_{int(time.time() * 1000)}"
-        with open(tmp_path, "wb") as f:
-            f.write(content)
-        os.replace(tmp_path, dest_path)
-
+    def save_original(self, filename: str, content: Any) -> Tuple[str, str]:
+        """
+        Saves an immutable raw uploaded artwork or scan into originals_dir.
+        Returns (safe_filename, absolute_path).
+        """
+        safe_name = os.path.basename(filename)
+        dest_path = os.path.join(self.originals_dir, safe_name)
+        self.save_file_stream(dest_path, content)
         return safe_name, dest_path
 
     def get_thumbnail_cache_path(self, session_id: str, cache_tag: str) -> str:
@@ -77,6 +95,80 @@ class AssetStore:
             shutil.rmtree(c_dir, ignore_errors=True)
 
         return freed
+
+    def clear_cache(self) -> int:
+        """Purges all rendered thumbnail caches without touching originals, sessions, or exports."""
+        freed = 0
+        if os.path.exists(self.cache_dir):
+            for entry in os.scandir(self.cache_dir):
+                if entry.name == ".gitkeep":
+                    continue
+                if entry.is_dir():
+                    size = sum(f.stat().st_size for f in os.scandir(entry.path) if f.is_file())
+                    shutil.rmtree(entry.path, ignore_errors=True)
+                    freed += size
+                elif entry.is_file():
+                    freed += entry.stat().st_size
+                    try:
+                        os.remove(entry.path)
+                    except OSError:
+                        pass
+        return freed
+
+    def resolve_asset_file(self, file_id_or_name: str, session_id: Optional[str] = None) -> Optional[str]:
+        """
+        Locates an asset file across storage tiers:
+        1. Specific session folder (if session_id provided)
+        2. Originals storage
+        3. Any session folder
+        4. Legacy temp_uploads (migration fallback)
+        """
+        if not file_id_or_name:
+            return None
+
+        # Direct absolute/relative path check
+        if os.path.isfile(file_id_or_name):
+            return os.path.abspath(file_id_or_name)
+
+        safe_name = os.path.basename(file_id_or_name)
+
+        # 1. Target session dir
+        if session_id:
+            candidate = os.path.join(self.sessions_dir, session_id, safe_name)
+            if os.path.isfile(candidate):
+                return candidate
+
+        # 2. Originals
+        candidate = os.path.join(self.originals_dir, safe_name)
+        if os.path.isfile(candidate):
+            return candidate
+
+        # 2b. Check with standard extensions in originals
+        for ext in [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff"]:
+            cand_ext = os.path.join(self.originals_dir, f"{safe_name}{ext}")
+            if os.path.isfile(cand_ext):
+                return cand_ext
+
+        # 3. Scan session directories
+        if os.path.exists(self.sessions_dir):
+            for s_entry in os.scandir(self.sessions_dir):
+                if s_entry.is_dir():
+                    cand = os.path.join(s_entry.path, safe_name)
+                    if os.path.isfile(cand):
+                        return cand
+
+        # 4. Fallback to temp_uploads (legacy migration safety)
+        legacy_dir = os.path.join(BACKEND_DIR, "temp_uploads")
+        if os.path.exists(legacy_dir):
+            cand = os.path.join(legacy_dir, safe_name)
+            if os.path.isfile(cand):
+                return cand
+            for ext in [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff"]:
+                cand_ext = os.path.join(legacy_dir, f"{safe_name}{ext}")
+                if os.path.isfile(cand_ext):
+                    return cand_ext
+
+        return None
 
     def get_stats(self) -> Dict[str, Any]:
         """Computes current storage consumption across originals, cache, and exports."""

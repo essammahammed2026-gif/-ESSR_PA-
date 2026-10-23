@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Binary Asset Store Cut-Over & Storage Tiering**:
+  - **AssetStore Integration Across All Routers**: Migrated binary file handling from flat `temp_uploads/` to `backend/storage/asset_store.py` (`data/storage/` with 4 isolated tiers: `originals/`, `sessions/{session_id}/`, `cache/{session_id}/`, `exports/{job_id}`).
+  - **Book Studio Storage Migration**: Updated `backend/book_scan_api.py` to route session document intake and splits to `asset_store.get_session_dir(session_id)`, rendered page thumbnails to `asset_store.get_thumbnail_cache_path(session_id, cache_tag)`, and print exports to `asset_store.get_export_path(...)`. Stored session paths in SQLite now point directly to `backend/data/storage/sessions/{session_id}`.
+  - **Imposing & Inspect Studio Storage Migration**: Updated `backend/imposing_api.py` and `backend/main.py` (`/api/inspect`, `/api/contour/upload`) to preserve incoming master PDFs and artwork in `data/storage/originals/` with atomic writes, while caching preview rasters in `data/storage/cache/`.
+  - **Universal Fallback Resolution**: Updated `resolve_temp_file` in `backend/engines/thumbnails.py` to transparently resolve files across `originals/`, `sessions/`, and legacy `temp_uploads/`, ensuring zero regression for ongoing sessions.
+  - **Storage Cleaner Tier Separation**: Refactored `backend/engines/storage_cleaner.py` to isolate cache purges from original source artworks and completed exports. Clicking "Clear Cache" safely purges `backend/data/storage/cache` without risking data loss.
+  - **Next.js & Static Route Rewrites**: Added `/storage/cache/:path*` rewrite in `frontend/next.config.mjs`, mounted static cache in `backend/main.py`, and updated contour preview regex in `frontend/src/app/contour/page.tsx`.
+- **Modifications Panel & Scope Cleanups Across Book Studio**:
+  - **Active-Page Entry Filtering**: Updated `LayerEntryStack` (`frontend/src/components/book-studio/modules/PageScopeSelector.tsx`) to filter modifications to only those targeting the currently viewed page. When an entry is removed from a page (or if no modifications target that page), the panel completely disappears from that page until a new modification is made.
+  - **Custom Scope with Exclusion Tooltip**: When an effect applied to "All" is unlinked from one or more pages, the scope badge now renders as `Custom` instead of a long list of page numbers, and displays a clean hover tooltip: `All minus (p.n, p.m)`.
+  - **Panel Renaming & Polish**: Renamed the modification boxes across all 5 modules (`CropSplitPanel`, `DeskewPanel`, `CleanupPanel`, `RestorePanel`, `BleedPanel`) to `Modifications`.
+  - **Distinguished Counter & Single-Line Batch Controls**: Positioned the modifications count badge directly adjacent to the panel title in a highlighted pill, and shortened batch control button labels from "Hide All" / "Show All" / "Clear All" to "Hide" / "Show" / "Clear" so they sit cleanly on a single line without wrapping.
+  - **Consistent P.n Scope Labels**: Unified all scope selectors (`PageScopeSelector`, `CropSplitPanel`, `formatScopeLabel`, `resolveConcretePageNumbers`) to consistently display `P.n` instead of randomly alternating between `Current` and `Page n`.
+  - **Clean Card Content**: Stripped verbose dimension percentages (e.g., `L:10% T:5% ...`) from applied crop cards. Cards now display concise effect names and options (e.g. `Crop • Paper`, `Bleed • 3mm • #FFFFFF` with inline color swatch, `Deskew • +1.50°`, `Cleanup • Spine Shadow`).
+  - **Removed Redundant Badges**: Removed the unnecessary `{pageCropsCount} ready • Active` badge from `CropSplitPanel`.
+
 - **Book Studio Session Initialization Fix**:
   - Restored missing `from engines.book_scan_engine import BookScanEngine, PageOpError` import in `backend/book_scan_api.py` that caused a 500 `NameError` on `/api/book-scan/init-session`.
   - Added robust type normalization for all form and file parameters in `init_book_scan_session`, guaranteeing that raw `Form` and `File` default instances cannot leak into the database JSON settings payload or cause `TypeError`.

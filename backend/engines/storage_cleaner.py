@@ -9,31 +9,40 @@ ROOT_DIR = os.path.dirname(BACKEND_DIR)
 
 STORAGE_TARGETS = [
     {
-        "key": "session_storage",
-        "label": "Persistent Session Storage",
-        "description": "Original PDFs, thumbnails, and exports stored per-session under backend/data/storage.",
-        "path": os.path.join(BACKEND_DIR, "data", "storage"),
-        "display_path": "backend/data/storage",
+        "key": "storage_cache",
+        "label": "Rendered Thumbnail Cache",
+        "description": "Preview textures and thumbnail caches under backend/data/storage/cache. 100% safe to delete anytime (regenerates on demand).",
+        "path": os.path.join(BACKEND_DIR, "data", "storage", "cache"),
+        "display_path": "backend/data/storage/cache",
         "category": "runtime",
         "shallow": False,
     },
     {
-        "key": "book_scans",
-        "label": "Book Studio Scans & Thumbnails",
-        "description": "Uploaded book scan PDFs, spread slices, and rendered page thumbnails.",
-        "path": os.path.join(BACKEND_DIR, "temp_uploads", "book_scans"),
-        "display_path": "backend/temp_uploads/book_scans",
+        "key": "storage_sessions",
+        "label": "Session Working Slices",
+        "description": "Active and abandoned temporary session slice files under backend/data/storage/sessions.",
+        "path": os.path.join(BACKEND_DIR, "data", "storage", "sessions"),
+        "display_path": "backend/data/storage/sessions",
+        "category": "runtime",
+        "shallow": False,
+    },
+    {
+        "key": "storage_exports",
+        "label": "Exported Print Deliverables",
+        "description": "Completed PDF and ZIP print exports stored under backend/data/storage/exports.",
+        "path": os.path.join(BACKEND_DIR, "data", "storage", "exports"),
+        "display_path": "backend/data/storage/exports",
         "category": "runtime",
         "shallow": False,
     },
     {
         "key": "temp_uploads",
-        "label": "Imposing & Contour Previews",
-        "description": "Temporary uploaded artwork PDFs and extracted preview images.",
+        "label": "Legacy Temp Uploads",
+        "description": "Deprecated scratch files in backend/temp_uploads/.",
         "path": os.path.join(BACKEND_DIR, "temp_uploads"),
         "display_path": "backend/temp_uploads",
         "category": "runtime",
-        "shallow": True,
+        "shallow": False,
     },
     {
         "key": "public_flipbooks",
@@ -154,8 +163,8 @@ class StorageCleaner:
     @staticmethod
     def clean_target(key: str) -> int:
         freed = 0
-        if key == "session_storage":
-            p = os.path.join(BACKEND_DIR, "data", "storage")
+        if key in ["storage_cache", "cache"]:
+            p = os.path.join(BACKEND_DIR, "data", "storage", "cache")
             if os.path.exists(p):
                 for entry in os.scandir(p):
                     if entry.name == ".gitkeep":
@@ -170,8 +179,8 @@ class StorageCleaner:
                             os.remove(entry.path)
                         except OSError:
                             pass
-        elif key == "book_scans":
-            p = os.path.join(BACKEND_DIR, "temp_uploads", "book_scans")
+        elif key in ["storage_sessions", "sessions"]:
+            p = os.path.join(BACKEND_DIR, "data", "storage", "sessions")
             if os.path.exists(p):
                 for entry in os.scandir(p):
                     if entry.name == ".gitkeep":
@@ -186,13 +195,32 @@ class StorageCleaner:
                             os.remove(entry.path)
                         except OSError:
                             pass
-        elif key == "temp_uploads":
+        elif key in ["storage_exports", "exports"]:
+            p = os.path.join(BACKEND_DIR, "data", "storage", "exports")
+            if os.path.exists(p):
+                for entry in os.scandir(p):
+                    if entry.name == ".gitkeep":
+                        continue
+                    if entry.is_file():
+                        freed += entry.stat().st_size
+                        try:
+                            os.remove(entry.path)
+                        except OSError:
+                            pass
+        elif key == "session_storage":
+            freed += StorageCleaner.clean_target("storage_cache")
+            freed += StorageCleaner.clean_target("storage_sessions")
+        elif key in ["book_scans", "temp_uploads"]:
             p = os.path.join(BACKEND_DIR, "temp_uploads")
             if os.path.exists(p):
                 for entry in os.scandir(p):
-                    if entry.name in [".gitkeep", "book_scans"]:
+                    if entry.name == ".gitkeep":
                         continue
-                    if entry.is_file():
+                    if entry.is_dir():
+                        size, _ = get_dir_size_and_count(entry.path)
+                        shutil.rmtree(entry.path, ignore_errors=True)
+                        freed += size
+                    elif entry.is_file():
                         freed += entry.stat().st_size
                         try:
                             os.remove(entry.path)
@@ -235,7 +263,7 @@ class StorageCleaner:
         cleaned_keys: List[str] = []
 
         if mode == "runtime":
-            keys = ["book_scans", "temp_uploads", "public_flipbooks"]
+            keys = ["storage_cache", "storage_sessions", "temp_uploads", "public_flipbooks"]
         elif mode == "all":
             keys = [t["key"] for t in STORAGE_TARGETS]
         else:

@@ -180,7 +180,7 @@ export function resolveConcretePageNumbers(
       pageNumbers: [resolvedNum],
       pageIndices: [resolvedIdx],
       pageIds: page ? [page.id] : [],
-      scopeLabel: `Page ${resolvedNum}`,
+      scopeLabel: `P.${resolvedNum}`,
     };
   }
 
@@ -189,7 +189,7 @@ export function resolveConcretePageNumbers(
       pageNumbers: pages.map((_, i) => i + 1),
       pageIndices: pages.map((_, i) => i),
       pageIds: pages.map((p) => p.id),
-      scopeLabel: `All (${pages.length})`,
+      scopeLabel: "All",
     };
   }
 
@@ -209,7 +209,7 @@ export function resolveConcretePageNumbers(
       pageNumbers: numbers,
       pageIndices: indices,
       pageIds: ids,
-      scopeLabel: `Odds (${numbers.length})`,
+      scopeLabel: "Odds",
     };
   }
 
@@ -229,7 +229,7 @@ export function resolveConcretePageNumbers(
       pageNumbers: numbers,
       pageIndices: indices,
       pageIds: ids,
-      scopeLabel: `Evens (${numbers.length})`,
+      scopeLabel: "Evens",
     };
   }
 

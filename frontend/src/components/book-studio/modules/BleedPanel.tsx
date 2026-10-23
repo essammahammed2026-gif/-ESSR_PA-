@@ -54,11 +54,12 @@ export function BleedPanel({
 
   const handleApplyBleed = () => {
     const concrete = resolveConcretePageNumbers(pages, bleedModule.scope, selectedPageId);
-    const modeName = bleedModule.mode === "solid" ? "Solid" : "Mirror";
-    const placementName = (bleedModule.placement || "outside") === "inside" ? "Inside" : "Outside";
-    const marksName = bleedModule.showCropMarks ? "Marks On" : "Marks Off";
-    const label = `${mmToUnit(bleedModule.bleedMm, unit)} ${unitShort} Bleed`;
-    const details = `${modeName} • ${placementName} • ${marksName}`;
+    const isAll = bleedModule.scope.mode === "all";
+    const label = "Bleed";
+    const bleedOption = bleedModule.mode === "solid"
+      ? `${mmToUnit(bleedModule.bleedMm, unit)}${unitShort} • ${bleedModule.solidColor.toUpperCase()}`
+      : `${mmToUnit(bleedModule.bleedMm, unit)}${unitShort} • Mirror`;
+    const details = bleedOption;
 
     const currentEntry: BleedEntry = {
       id: editingId || `bleed_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -68,6 +69,8 @@ export function BleedPanel({
       placement: bleedModule.placement || "outside",
       showCropMarks: bleedModule.showCropMarks,
       scopeLabel: concrete.scopeLabel,
+      origScope: isAll ? "all" : undefined,
+      excludedPages: [],
       targetPages: concrete.pageNumbers,
       targetPageIds: concrete.pageIds,
       visible: true,
@@ -139,11 +142,24 @@ export function BleedPanel({
           const nextPages = activePageNum !== undefined
             ? (b.targetPages || []).filter((n) => n !== activePageNum)
             : (b.targetPages || []);
+          const isFromAll = b.origScope === "all" || (b.targetPages?.length ?? 0) + (b.excludedPages?.length ?? 0) >= pages.length;
+          const nextExcluded = activePageNum !== undefined
+            ? Array.from(new Set([...(b.excludedPages || []), activePageNum])).sort((a, b) => a - b)
+            : (b.excludedPages || []);
+
           return {
             ...b,
+            origScope: b.origScope || (isFromAll ? "all" : undefined),
+            excludedPages: nextExcluded,
             targetPageIds: nextIds,
             targetPages: nextPages,
-            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+            scopeLabel: isFromAll && nextExcluded.length > 0
+              ? "Custom"
+              : nextPages.length === 1
+                ? `P.${nextPages[0]}`
+                : nextPages.length > 0
+                  ? `P.${nextPages.join(",")}`
+                  : "None",
           };
         })
         .filter((b) => (b.targetPageIds && b.targetPageIds.length > 0) || (b.targetPages && b.targetPages.length > 0));
@@ -486,7 +502,7 @@ export function BleedPanel({
 
       {/* Universal Layer Stack — TCK-02 */}
       <LayerEntryStack
-        title="Applied Bleeds"
+        title="Modifications"
         entries={appliedList}
         editingId={editingId}
         activePageNum={activePageNum}

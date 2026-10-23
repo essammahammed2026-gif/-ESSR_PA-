@@ -417,12 +417,15 @@ export function useBookModules({
 
   const formatCropScopeLabel = useCallback(() => {
     const t = cropModule.target;
-    if (t.base === "current") return "Current";
+    if (t.base === "current") {
+      const pageIdx = pages.findIndex((p) => p.id === selectedPageId);
+      return pageIdx >= 0 ? `P.${pageIdx + 1}` : "P.1";
+    }
     if (t.base === "range") return t.customRange?.trim() ? `Pages ${t.customRange.trim()}` : "Range";
     if (t.parity === "odds") return "Odds";
     if (t.parity === "evens") return "Evens";
     return "All";
-  }, [cropModule.target]);
+  }, [cropModule.target, pages, selectedPageId]);
 
   // Cut along the configured cut lines across the crop target (empty = plain crop)
   const splitSpread = useCallback(async () => {
@@ -493,9 +496,11 @@ export function useBookModules({
           ...(prev.appliedEntries || []),
           {
             id: `split_${Date.now()}`,
-            label: `Split (${cutCount} cut${cutCount > 1 ? "s" : ""})`,
-            details: `${vertical.length} vert • ${horizontal.length} horiz cuts`,
+            label: "Split",
+            details: `${cutCount} cut${cutCount > 1 ? "s" : ""}`,
             scopeLabel: splitTargetPages.length > 0 ? `P.${splitTargetPages.join(",")}` : scopeLbl,
+            origScope: cropModule.target.base === "all" ? "all" : undefined,
+            excludedPages: [],
             targetPages: splitTargetPages,
             targetPageIds: splitTargetIds,
             visible: true,
@@ -612,9 +617,11 @@ export function useBookModules({
             ...(prev.appliedEntries || []),
             {
               id: `crop_${Date.now()}`,
-              label: `Crop (${modeLabel})`,
-              details: `L:${Math.round(cropModule.cropBox.x1 * 100)}% T:${Math.round(cropModule.cropBox.y1 * 100)}% R:${Math.round((1 - cropModule.cropBox.x2) * 100)}% B:${Math.round((1 - cropModule.cropBox.y2) * 100)}%`,
+              label: "Crop",
+              details: modeLabel,
               scopeLabel: scopeLbl,
+              origScope: cropModule.target.base === "all" ? "all" : undefined,
+              excludedPages: [],
               targetPages: cropTargetPages,
               targetPageIds: Array.from(targetIdSet),
               visible: true,
@@ -738,11 +745,24 @@ export function useBookModules({
           ? (entry.targetPages || []).filter((n) => n !== pageNum)
           : (entry.targetPages || []);
 
+        const isFromAll = entry.origScope === "all" || (entry.targetPages?.length ?? 0) + (entry.excludedPages?.length ?? 0) >= pages.length;
+        const nextExcluded = pageNum !== undefined
+          ? Array.from(new Set([...(entry.excludedPages || []), pageNum])).sort((a, b) => a - b)
+          : (entry.excludedPages || []);
+
         const updatedEntry = {
           ...entry,
+          origScope: entry.origScope || (isFromAll ? "all" : undefined),
+          excludedPages: nextExcluded,
           targetPageIds: nextTargetIds,
           targetPages: nextTargetPages,
-          scopeLabel: nextTargetPages.length > 0 ? `P.${nextTargetPages.join(",")}` : "None",
+          scopeLabel: isFromAll && nextExcluded.length > 0
+            ? "Custom"
+            : nextTargetPages.length === 1
+              ? `P.${nextTargetPages[0]}`
+              : nextTargetPages.length > 0
+                ? `P.${nextTargetPages.join(",")}`
+                : "None",
         };
 
         const nextEntries = currentEntries.map((e) => (e.id === entryId ? updatedEntry : e));

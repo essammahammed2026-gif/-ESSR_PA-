@@ -89,8 +89,9 @@ export function DeskewPanel({
   const handleApply = () => {
     const concrete = resolveConcretePageNumbers(pages, deskewModule.scope, selectedPageId);
     const angleText = `${effectiveAngle > 0 ? "+" : ""}${effectiveAngle.toFixed(2)}°`;
-    const label = Math.abs(effectiveAngle) > 0.01 ? `Tilt ${angleText}` : "Auto Deskew";
-    const details = `±${deskewModule.maxAngle}° range • ${deskewModule.ignoreBorders ? "Margins 6%" : "Full Bed"}`;
+    const label = "Deskew";
+    const details = Math.abs(effectiveAngle) > 0.01 ? angleText : "Auto";
+    const isAll = deskewModule.scope.mode === "all";
 
     const params = {
       angle: effectiveAngle,
@@ -109,6 +110,8 @@ export function DeskewPanel({
                 label,
                 details,
                 scopeLabel: concrete.scopeLabel,
+                origScope: isAll ? "all" : undefined,
+                excludedPages: [],
                 targetPages: concrete.pageNumbers,
                 targetPageIds: concrete.pageIds,
                 params,
@@ -130,6 +133,8 @@ export function DeskewPanel({
           label,
           details,
           scopeLabel: concrete.scopeLabel,
+          origScope: isAll ? "all" : undefined,
+          excludedPages: [],
           targetPages: concrete.pageNumbers,
           targetPageIds: concrete.pageIds,
           visible: true,
@@ -166,11 +171,24 @@ export function DeskewPanel({
           const nextPages = activePageNum !== undefined
             ? (e.targetPages || []).filter((n) => n !== activePageNum)
             : (e.targetPages || []);
+          const isFromAll = e.origScope === "all" || (e.targetPages?.length ?? 0) + (e.excludedPages?.length ?? 0) >= pages.length;
+          const nextExcluded = activePageNum !== undefined
+            ? Array.from(new Set([...(e.excludedPages || []), activePageNum])).sort((a, b) => a - b)
+            : (e.excludedPages || []);
+
           return {
             ...e,
+            origScope: e.origScope || (isFromAll ? "all" : undefined),
+            excludedPages: nextExcluded,
             targetPageIds: nextIds,
             targetPages: nextPages,
-            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+            scopeLabel: isFromAll && nextExcluded.length > 0
+              ? "Custom"
+              : nextPages.length === 1
+                ? `P.${nextPages[0]}`
+                : nextPages.length > 0
+                  ? `P.${nextPages.join(",")}`
+                  : "None",
           };
         })
         .filter((e) => (e.targetPageIds && e.targetPageIds.length > 0) || (e.targetPages && e.targetPages.length > 0));
@@ -495,7 +513,7 @@ export function DeskewPanel({
 
       {/* Universal Layer Stack — TCK-02 */}
       <LayerEntryStack
-        title="Applied Deskews"
+        title="Modifications"
         entries={deskewModule.appliedEntries}
         editingId={editingId}
         activePageNum={activePageNum}

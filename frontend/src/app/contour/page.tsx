@@ -55,7 +55,7 @@ function ContourStudioContent() {
       if (data.success) {
         // Ensure relative asset URLs in SVG point to the centralized API
         const displaySvg = (data.svg as string).replace(
-          /(href|xlink:href)\s*=\s*["'](\/temp_uploads\/[^"']+)["']/g,
+          /(href|xlink:href)\s*=\s*["'](\/(?:temp_uploads|storage\/cache)\/[^"']+)["']/g,
           (_match, attr, path) => `${attr}="${getApiUrl(path)}"`
         );
         setSvgContent(displaySvg);

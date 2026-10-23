@@ -6,6 +6,10 @@ const nextConfig = {
         source: "/temp_uploads/:path*",
         destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/temp_uploads/:path*`,
       },
+      {
+        source: "/storage/cache/:path*",
+        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/storage/cache/:path*`,
+      },
     ];
   },
   distDir: process.env.NODE_ENV === 'production' ? '.next-build' : '.next',

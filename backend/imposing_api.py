@@ -15,7 +15,8 @@ from engines.imposing_prep import (
     build_sheet_specs,
     effective_page_rotation,
 )
-from engines.thumbnails import get_dimensions_mm
+from engines.thumbnails import get_dimensions_mm, resolve_temp_file
+from storage.asset_store import asset_store
 
 
 router = APIRouter()
@@ -51,14 +52,11 @@ async def upload_imposing_file(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename)[1].lower()
     if not ext: ext = ".pdf"
     file_id_ext = f"{file_id}{ext}"
-    file_path = f"temp_uploads/{file_id_ext}"
+    _, file_path = asset_store.save_original(file_id_ext, await file.read())
     
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
-        
     page_count = 1
     w, h = 100.0, 100.0
-    thumb_path = f"temp_uploads/{file_id}_thumb_p0.jpg"
+    thumb_path = asset_store.get_thumbnail_cache_path("imposing", f"{file_id}_thumb_p0")
     pages_meta = []
     
     if ext == ".pdf":
@@ -140,20 +138,23 @@ def _cleanup_export_file(path: str) -> None:
 def get_imposing_thumbnail(file_id: str, page_num: int):
     safe_file_id = os.path.basename(file_id)
     stem = os.path.splitext(safe_file_id)[0]
-    thumb_filename = f"{stem}_thumb_p{page_num}.jpg"
-    thumb_path = os.path.join("temp_uploads", thumb_filename)
+    thumb_path = asset_store.get_thumbnail_cache_path("imposing", f"{stem}_thumb_p{page_num}")
     if os.path.exists(thumb_path):
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+    legacy_thumb = os.path.join("temp_uploads", f"{stem}_thumb_p{page_num}.jpg")
+    if os.path.exists(legacy_thumb):
+        return FileResponse(legacy_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
     src_path = resolve_temp_file(file_id)
     if not src_path or not os.path.exists(src_path):
         raise HTTPException(status_code=404, detail="File not found")
 
     actual_stem = os.path.splitext(os.path.basename(src_path))[0]
-    actual_thumb_path = os.path.join("temp_uploads", f"{actual_stem}_thumb_p{page_num}.jpg")
+    actual_thumb_path = asset_store.get_thumbnail_cache_path("imposing", f"{actual_stem}_thumb_p{page_num}")
     if os.path.exists(actual_thumb_path):
         return FileResponse(actual_thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
     ext = os.path.splitext(src_path)[1].lower()
     if ext == ".pdf":
         try:
@@ -174,7 +175,6 @@ def get_imposing_thumbnail(file_id: str, page_num: int):
             return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Image thumbnail error: {e}")
-        return FileResponse(src_path)
 
 @router.post("/api/imposing/preview")
 def preview_imposing(req: ImposingRequest):
@@ -305,7 +305,7 @@ def preview_imposing(req: ImposingRequest):
 @router.post("/api/imposing/export")
 def export_imposing(req: ImposingRequest, background_tasks: BackgroundTasks):
     try:
-        out_path = f"temp_uploads/imposing_export_{uuid.uuid4().hex[:8]}.pdf"
+        out_path = asset_store.get_export_path(f"imposing_export_{uuid.uuid4().hex[:8]}", "pdf")
         
         if req.mode == "Sheet":
             specs = build_sheet_specs(req.items)
@@ -363,7 +363,7 @@ def export_imposing(req: ImposingRequest, background_tasks: BackgroundTasks):
 def export_imposing_svg(req: ImposingRequest, background_tasks: BackgroundTasks):
     try:
         page_idx = req.page_index if req.page_index is not None else 0
-        out_path = f"temp_uploads/imposing_export_{uuid.uuid4().hex[:8]}.svg"
+        out_path = asset_store.get_export_path(f"imposing_export_{uuid.uuid4().hex[:8]}", "svg")
 
         if req.mode == "Sheet":
             specs = build_sheet_specs(req.items)

@@ -71,8 +71,6 @@ export function CropSplitPanel({
   isDetectingCrop,
   detectCrop,
   detectAllCrops,
-  pageCropsCount = 0,
-  hasActivePageDraftCrop = false,
   clearPageCrops,
   splitSpread,
   applyCrop,
@@ -161,7 +159,7 @@ export function CropSplitPanel({
 
   const targetLabel = useMemo(() => {
     const t = cropModule.target;
-    if (t.base === "current") return activePageNum !== undefined ? `Page ${activePageNum}` : "Current Page";
+    if (t.base === "current") return `P.${activePageNum !== undefined ? activePageNum : 1}`;
     if (t.base === "range") return `Range (${t.customRange || "..."})`;
     if (t.parity === "odds") return "Odd Pages";
     if (t.parity === "evens") return "Even Pages";
@@ -243,15 +241,6 @@ export function CropSplitPanel({
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
             Smart Trim
           </span>
-          {pageCropsCount > 0 && (
-            <span
-              className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono text-[9px] font-semibold"
-              title={`${pageCropsCount} page(s) have individual crop boxes ready to browse & apply`}
-            >
-              {pageCropsCount} ready
-              {hasActivePageDraftCrop ? " • Active" : ""}
-            </span>
-          )}
         </div>
 
         {/* Detect Mode Cards: Paper Sheet vs Tight Content */}
@@ -515,7 +504,7 @@ export function CropSplitPanel({
 
       {/* Universal Layer Stack — TCK-02 */}
       <LayerEntryStack
-        title="Applied Crops"
+        title="Modifications"
         entries={cropModule.appliedEntries}
         editingId={editingId}
         activePageNum={activePageNum}

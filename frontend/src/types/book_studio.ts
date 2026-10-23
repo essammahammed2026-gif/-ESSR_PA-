@@ -85,6 +85,8 @@ export interface AppliedModuleEntry {
   scopeLabel: string;
   targetPages: number[]; // Explicit 1-based page numbers: [n], [1, 2, ...], etc. Never dynamic "current"
   targetPageIds?: string[];
+  origScope?: "all" | "odds" | "evens" | "range" | "current";
+  excludedPages?: number[];
   prevPagesSnapshot?: BookStudioPage[];
   visible?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -140,6 +142,8 @@ export interface BleedEntry {
   scopeLabel?: string;
   targetPages: number[]; // Explicit 1-based page numbers
   targetPageIds?: string[];
+  origScope?: "all" | "odds" | "evens" | "range" | "current";
+  excludedPages?: number[];
   visible?: boolean;
   label?: string;
   details?: string;

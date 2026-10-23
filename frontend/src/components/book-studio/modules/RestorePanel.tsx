@@ -89,12 +89,9 @@ export function CleanupPanel({
     const parts: string[] = [];
     if (cleanupModule.flattenIllumination) parts.push("Spine Shadow");
     if (cleanupModule.despeckleLevel > 0) parts.push(`Despeckle L${cleanupModule.despeckleLevel}`);
-    const label = parts.length > 0 ? parts.join(" & ") : "Clean BG";
-    const details = [
-      cleanupModule.flattenIllumination ? "Shadow leveled" : null,
-      cleanupModule.despeckleLevel > 0 ? `Despeckle L${cleanupModule.despeckleLevel}` : null,
-      (cleanupModule.maskColor || "#ffffff").toLowerCase() !== "#ffffff" ? `Fill ${cleanupModule.maskColor.toUpperCase()}` : null,
-    ].filter(Boolean).join(" • ");
+    const label = "Cleanup";
+    const details = parts.length > 0 ? parts.join(", ") : "Clean BG";
+    const isAll = cleanupModule.scope.mode === "all";
 
     const params = {
       flattenIllumination: cleanupModule.flattenIllumination,
@@ -113,6 +110,8 @@ export function CleanupPanel({
                 label,
                 details,
                 scopeLabel: concrete.scopeLabel,
+                origScope: isAll ? "all" : undefined,
+                excludedPages: [],
                 targetPages: concrete.pageNumbers,
                 targetPageIds: concrete.pageIds,
                 params,
@@ -134,6 +133,8 @@ export function CleanupPanel({
           label,
           details,
           scopeLabel: concrete.scopeLabel,
+          origScope: isAll ? "all" : undefined,
+          excludedPages: [],
           targetPages: concrete.pageNumbers,
           targetPageIds: concrete.pageIds,
           visible: true,
@@ -169,11 +170,24 @@ export function CleanupPanel({
           const nextPages = activePageNum !== undefined
             ? (e.targetPages || []).filter((n) => n !== activePageNum)
             : (e.targetPages || []);
+          const isFromAll = e.origScope === "all" || (e.targetPages?.length ?? 0) + (e.excludedPages?.length ?? 0) >= pages.length;
+          const nextExcluded = activePageNum !== undefined
+            ? Array.from(new Set([...(e.excludedPages || []), activePageNum])).sort((a, b) => a - b)
+            : (e.excludedPages || []);
+
           return {
             ...e,
+            origScope: e.origScope || (isFromAll ? "all" : undefined),
+            excludedPages: nextExcluded,
             targetPageIds: nextIds,
             targetPages: nextPages,
-            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+            scopeLabel: isFromAll && nextExcluded.length > 0
+              ? "Custom"
+              : nextPages.length === 1
+                ? `P.${nextPages[0]}`
+                : nextPages.length > 0
+                  ? `P.${nextPages.join(",")}`
+                  : "None",
           };
         })
         .filter((e) => (e.targetPageIds && e.targetPageIds.length > 0) || (e.targetPages && e.targetPages.length > 0));
@@ -456,7 +470,7 @@ export function CleanupPanel({
 
       {/* Universal Layer Stack — TCK-02 */}
       <LayerEntryStack
-        title="Applied Cleanups"
+        title="Modifications"
         entries={cleanupModule.appliedEntries}
         editingId={editingId}
         activePageNum={activePageNum}
@@ -528,13 +542,10 @@ export function RestorePanel({
 
   const handleApply = () => {
     const concrete = resolveConcretePageNumbers(pages, restorationModule.scope, selectedPageId);
-    const modeName = colorMode === "bw" ? "B&W" : colorMode === "grayscale" ? "Gray" : colorMode === "color" ? "Color" : "Auto";
-    const label = `${modeName} Mode`;
-    const details = [
-      `${restorationModule.contrast.toFixed(2)}x Contrast`,
-      restorationModule.whitenBg ? "Whiten BG" : null,
-      restorationModule.enhanceColors ? "Enhance" : null,
-    ].filter(Boolean).join(" • ");
+    const modeName = colorMode === "bw" ? "B&W" : colorMode === "grayscale" ? "Grayscale" : colorMode === "color" ? "Color" : "Auto";
+    const label = "Color";
+    const details = modeName;
+    const isAll = restorationModule.scope.mode === "all";
 
     const params = {
       colorMode,
@@ -556,6 +567,8 @@ export function RestorePanel({
                 label,
                 details,
                 scopeLabel: concrete.scopeLabel,
+                origScope: isAll ? "all" : undefined,
+                excludedPages: [],
                 targetPages: concrete.pageNumbers,
                 targetPageIds: concrete.pageIds,
                 params,
@@ -577,6 +590,8 @@ export function RestorePanel({
           label,
           details,
           scopeLabel: concrete.scopeLabel,
+          origScope: isAll ? "all" : undefined,
+          excludedPages: [],
           targetPages: concrete.pageNumbers,
           targetPageIds: concrete.pageIds,
           visible: true,
@@ -618,11 +633,24 @@ export function RestorePanel({
           const nextPages = activePageNum !== undefined
             ? (e.targetPages || []).filter((n) => n !== activePageNum)
             : (e.targetPages || []);
+          const isFromAll = e.origScope === "all" || (e.targetPages?.length ?? 0) + (e.excludedPages?.length ?? 0) >= pages.length;
+          const nextExcluded = activePageNum !== undefined
+            ? Array.from(new Set([...(e.excludedPages || []), activePageNum])).sort((a, b) => a - b)
+            : (e.excludedPages || []);
+
           return {
             ...e,
+            origScope: e.origScope || (isFromAll ? "all" : undefined),
+            excludedPages: nextExcluded,
             targetPageIds: nextIds,
             targetPages: nextPages,
-            scopeLabel: nextPages.length > 0 ? `P.${nextPages.join(",")}` : "None",
+            scopeLabel: isFromAll && nextExcluded.length > 0
+              ? "Custom"
+              : nextPages.length === 1
+                ? `P.${nextPages[0]}`
+                : nextPages.length > 0
+                  ? `P.${nextPages.join(",")}`
+                  : "None",
           };
         })
         .filter((e) => (e.targetPageIds && e.targetPageIds.length > 0) || (e.targetPages && e.targetPages.length > 0));
@@ -897,7 +925,7 @@ export function RestorePanel({
 
       {/* Universal Layer Stack — TCK-02 */}
       <LayerEntryStack
-        title="Applied Colors"
+        title="Modifications"
         entries={restorationModule.appliedEntries}
         editingId={editingId}
         activePageNum={activePageNum}

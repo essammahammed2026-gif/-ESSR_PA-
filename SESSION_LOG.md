@@ -2,6 +2,113 @@
 
 ## Date: 2026-10-23
 
+### Task 12: Production Build Gate & Session Hand-Off
+- **Objective**:
+  1. Execute comprehensive production build verification gate (`npm run build`) across all frontend pages and routes.
+  2. Perform full backend syntax and import compilation check (`python3 -m py_compile`).
+  3. Verify zero-retention storage policy on `backend/temp_uploads/`.
+  4. Perform workspace readiness audit prior to session close.
+- **Verification Results**:
+  - **Backend Compilation**: `python3 -m py_compile main.py book_scan_api.py imposing_api.py settings_api.py engines/*.py db/*.py storage/*.py` executed with exit code `0` (clean).
+  - **Frontend Production Build**: `cd frontend && npm run build` (Next.js 14.2.35) succeeded with exit code `0`.
+    - Type checking and linting passed (`✓ Linting and checking validity of types`).
+    - 13 static routes generated successfully without runtime or SSG errors (`/`, `/book-studio`, `/imposing`, `/contour`, `/flipbook`, `/settings`, etc.).
+  - **Storage Hygiene**: `backend/temp_uploads/` and `backend/temp_uploads/book_scans/` verified clean (zero dangling scratch or payload files; only repository `.gitkeep` files present).
+  - **Git Status**: Git tree inspected; uncommitted modifications preserved cleanly for user review without autonomous commits (adhering strictly to User-Only Version Control rule in `AGENTS.md`).
+
+### Task 11: Binary Asset Store Cut-Over & Tiered Storage Migration (Task 1.3)
+- **Objective**:
+  1. Cut over the binary file pipeline from flat `temp_uploads/` to `backend/storage/asset_store.py` (`data/storage/` with its 4 isolated tiers: `originals/`, `sessions/`, `cache/`, `exports/`).
+  2. Ensure all SQLite database session records point directly to structured storage paths (`backend/data/storage/sessions/{session_id}`).
+  3. Route thousands of rendered page thumbnails to `backend/data/storage/cache/{session_id}/`, keeping session directories clean and allowing risk-free cache clearing without deleting customer files.
+  4. Preserve original incoming PDFs and artwork uploads immutably in `backend/data/storage/originals/` using atomic writes.
+  5. Store background print exports in `backend/data/storage/exports/` mapped to `ExportJobModel`.
+  6. Update `StorageCleaner` so operators can safely purge preview caches without risking data loss.
+- **Root Cause & Architectural Problem**:
+  - In Phase 1 of the persistence migration, the SQLite WAL database was wired for metadata, but routers (`book_scan_api.py`, `imposing_api.py`, `main.py`) still hardcoded `TEMP_DIR = "temp_uploads/book_scans"`, dumping raw uploads, temp splits, thumbnails, and exports into the same directory and pointing database rows back into `temp_uploads/`.
+- **Changes Delivered**:
+  - [`backend/storage/asset_store.py`](file:///home/essam/Projects/ESSR_PA/backend/storage/asset_store.py):
+    - Added `save_file_stream` for atomic streaming writes via temporary files and OS-level `os.replace`.
+    - Added `save_original` for archiving incoming raw artwork in `originals/`.
+    - Added `resolve_asset_file` supporting multi-tier lookup (session, originals, and legacy fallback).
+    - Added `clear_cache` for dedicated thumbnail purging.
+  - [`backend/book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py):
+    - Removed `TEMP_DIR = "temp_uploads/book_scans"`.
+    - Replaced with `session_dir = asset_store.get_session_dir(session_id)`.
+    - Stored uploads using `asset_store.save_file_stream`.
+    - Routed rendered thumbnails in `get_page_thumbnail` to `asset_store.get_thumbnail_cache_path(session_id, cache_tag)`.
+    - Routed export outputs (`_run_export_job`, `export_cleaned_book`, `extract_single_page`) to `asset_store.get_export_path(...)`.
+    - Routed session cleanup to `asset_store.purge_session(session_id)`.
+  - [`backend/imposing_api.py`](file:///home/essam/Projects/ESSR_PA/backend/imposing_api.py):
+    - Routed uploads to `asset_store.save_original(...)`.
+    - Routed thumbnails to `asset_store.get_thumbnail_cache_path("imposing", ...)`.
+    - Routed PDF/SVG exports to `asset_store.get_export_path(...)`.
+  - [`backend/main.py`](file:///home/essam/Projects/ESSR_PA/backend/main.py):
+    - Mounted `/storage/cache` as `StaticFiles` alongside `/temp_uploads`.
+    - Routed `/api/inspect` uploads to `asset_store.save_original` and thumbnails to `asset_store.get_thumbnail_cache_path("inspect", ...)`.
+    - Routed contour upload to `asset_store.save_original` and cache to `asset_store.cache_dir`.
+  - [`backend/engines/thumbnails.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/thumbnails.py):
+    - Updated `pregen_pdf_thumbnails` to store pregenerated thumbnails in `asset_store.cache_dir`.
+    - Updated `resolve_temp_file` to search `asset_store` across all tiers first before falling back to `temp_uploads`.
+  - [`backend/engines/storage_cleaner.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/storage_cleaner.py):
+    - Replaced monolithic directory wipe with fine-grained targets: `storage_cache` (safe preview cache), `storage_sessions` (abandoned session slices), and `storage_exports` (completed exports).
+  - [`frontend/next.config.mjs`](file:///home/essam/Projects/ESSR_PA/frontend/next.config.mjs) & [`frontend/src/app/contour/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/contour/page.tsx):
+    - Added `/storage/cache/:path*` rewrite to backend proxy.
+    - Updated SVG path regex in Contour Studio to support both `/temp_uploads/` and `/storage/cache/`.
+  - [`docs/architecture.md`](file:///home/essam/Projects/ESSR_PA/docs/architecture.md):
+    - Updated Repository Navigation Map entry for `backend/storage/`.
+- **Verification**:
+  - Live API verification test (`/api/book-scan/init-session` -> `/api/book-scan/page-thumbnail`):
+    - Verified session directory created in `backend/data/storage/sessions/{session_id}`.
+    - Verified thumbnail saved and retrieved from `backend/data/storage/cache/{session_id}/`.
+    - Verified `temp_uploads/book_scans` remained completely untouched.
+    - Verified `asset_store.purge_session` cleanly removed session workspace and cache.
+  - Ran `StorageCleaner.clean('runtime')` (freed 120.9 MB; `temp_uploads` completely cleared).
+  - Backend py_compile passed with 0 errors across all modules.
+  - Frontend `npx tsc --noEmit` passed with 0 errors.
+
+### Task 10: Modifications Panel Per-Page Filtering, Custom Scope Tooltip & UI Cleanups
+- **Objective**:
+  1. Fix the applied entries display bug: when an entry is removed from a page and that page has no other modifications, the modifications box must not show on that page at all.
+  2. Implement `Custom` scope badge with `All minus (p.n, p.m)` hover tooltip when an "All" scope entry is unlinked from specific pages.
+  3. Rename applied effect boxes to `Modifications` across all modules (`Crop & Split`, `Deskew`, `Cleanup`, `Colors`, `Bleed`).
+  4. Move modifications count closer to the panel title and highlight it in a distinguished badge.
+  5. Shorten batch control button labels from "Hide All" / "Clear All" to "Hide" / "Clear" so they fit on a single line.
+  6. Standardize scope indicators to always use `P.n` instead of alternating with `Current` or `Page n`.
+  7. Strip verbose dimension percentages (e.g. `L:10% T:5%...`) from applied cards, showing concise effect names and options (with inline color swatch for solid bleeds).
+  8. Remove the redundant `{pageCropsCount} ready • Active` badge from `CropSplitPanel`.
+- **Root Cause & Architectural Problem**:
+  1. `LayerEntryStack` previously rendered all module entries regardless of whether the entry targeted `activePageId` or `activePageNum`. When an operator unlinked an entry from Page 2, Page 2's panel continued showing the entry with the remaining pages list (`P.1,3`), causing confusing clutter.
+  2. The scope badge previously printed the full remaining page list (e.g. `P.1,3,4,5...29`), overflowing the card.
+- **Changes Delivered**:
+  - [`frontend/src/types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts):
+    - Added `origScope?: "all" | "odds" | "evens" | "range" | "current"` and `excludedPages?: number[]` to `AppliedModuleEntry` and `BleedEntry`.
+  - [`frontend/src/lib/pageScope.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/lib/pageScope.ts):
+    - Standardized `resolveConcretePageNumbers` to generate `P.n`, `All`, `Odds`, `Evens`.
+  - [`frontend/src/components/book-studio/modules/PageScopeSelector.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx):
+    - Default `title = "Modifications"`.
+    - Added `pageEntries` filtering based on `activePageId`, `activePageNum`, and `entry.excludedPages`. Returns `null` when `pageEntries.length === 0`.
+    - Compacted header with distinguished pill badge and single-line "Hide" / "Clear" buttons.
+    - Added `Custom` scope badge with `All minus (p.n, ...)` tooltip.
+    - Stripped `L:10% ...` dimension percentages and added color swatch support for solid bleed.
+    - Ensured `SCOPE_OPTIONS` always formats current page as `P.n`.
+  - [`frontend/src/components/book-studio/modules/CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx):
+    - Removed `{pageCropsCount} ready • Active` badge.
+    - Set title to `Modifications`.
+    - Formatted scope presets and apply buttons to `P.n`.
+  - [`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts):
+    - Formatted `formatCropScopeLabel` to `P.n`.
+    - Cleaned `Crop` card details to `Paper` / `Content` (no percentages).
+    - Tracked `origScope` and `excludedPages` in `removeAppliedCrop`.
+  - [`frontend/src/components/book-studio/modules/DeskewPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/DeskewPanel.tsx), [`RestorePanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/RestorePanel.tsx), [`BleedPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/BleedPanel.tsx):
+    - Updated entry creation and per-page unlinking routines to record `origScope` and `excludedPages`.
+    - Set title to `Modifications`.
+    - Cleaned card details (concise options, angles, and hex colors).
+- **Verification**:
+  - `cd frontend && npx tsc --noEmit` exited 0 (clean TypeScript build).
+  - `cd frontend && npm run lint` exited 0 (`✔ No ESLint warnings or errors`).
+
+
 ### Task 9: Resolve Book Studio Session Initialization Failure
 - **Objective**: Fix the `failed to initialize book studio session` error returned when uploading files in Book Studio.
 - **Root Cause & Architectural Problem**:

@@ -66,11 +66,19 @@ def pregen_pdf_thumbnails(file_path: str, stem: str, page_count: int,
     """
     import fitz
     try:
+        from storage.asset_store import asset_store
+        cache_dir = os.path.join(asset_store.cache_dir, "imposing")
+        os.makedirs(cache_dir, exist_ok=True)
+    except Exception:
+        cache_dir = "temp_uploads"
+
+    try:
         doc = fitz.open(file_path)
         mat = fitz.Matrix(scale, scale)
         for p in range(page_count):
-            thumb_path = os.path.join("temp_uploads", f"{stem}_thumb_p{p}.jpg")
-            if not os.path.exists(thumb_path):
+            thumb_path = os.path.join(cache_dir, f"{stem}_thumb_p{p}.jpg")
+            legacy_thumb = os.path.join("temp_uploads", f"{stem}_thumb_p{p}.jpg")
+            if not os.path.exists(thumb_path) and not os.path.exists(legacy_thumb):
                 pix = doc[p].get_pixmap(matrix=mat, alpha=False)
                 pix.save(thumb_path)
         doc.close()
@@ -103,9 +111,17 @@ def render_downsampled_preview(src_path: str, dest_path: str,
 
 
 def resolve_temp_file(file_id: str, extra_exts: Optional[list] = None) -> Optional[str]:
-    """Shared temp-file fallback lookup (single copy for all routers)."""
+    """Shared file lookup across AssetStore (originals, sessions) and legacy temp_uploads."""
     if not file_id:
         return None
+    try:
+        from storage.asset_store import asset_store
+        found = asset_store.resolve_asset_file(file_id)
+        if found and os.path.isfile(found):
+            return found
+    except Exception:
+        pass
+
     safe_name = os.path.basename(file_id)
     p = os.path.join("temp_uploads", safe_name)
     if os.path.exists(p) and os.path.isfile(p):

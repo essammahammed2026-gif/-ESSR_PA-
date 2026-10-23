@@ -15,6 +15,7 @@ from engines.flipbook_worker import generate_flipbook_task, export_flipbook_task
 from engines.units import parse_page_selection
 from engines.asset_inspector import analyze_universal_asset
 from engines.report_generator import generate_prepress_report_pdf
+from storage.asset_store import asset_store
 import time
 
 import signal
@@ -43,6 +44,7 @@ os.makedirs("temp_uploads", exist_ok=True)
 os.makedirs("public_flipbooks", exist_ok=True)
 
 app.mount("/temp_uploads", StaticFiles(directory="temp_uploads"), name="temp_uploads")
+app.mount("/storage/cache", StaticFiles(directory=asset_store.cache_dir), name="storage_cache")
 app.mount("/flipbooks", StaticFiles(directory="public_flipbooks"), name="flipbooks")
 
 TASK_STATES: Dict[str, Any] = {}
@@ -97,9 +99,7 @@ async def inspect_asset(file: UploadFile = File(...)):
         ext = ".pdf"
     
     full_file_id = f"{file_id}{ext}"
-    file_path = f"temp_uploads/{full_file_id}"
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    _, file_path = asset_store.save_original(full_file_id, file.file)
         
     CACHE_TIMESTAMPS[file_id] = time.time()
     CACHE_TIMESTAMPS[full_file_id] = time.time()
@@ -112,10 +112,8 @@ async def inspect_asset(file: UploadFile = File(...)):
     analysis["file_path"] = file_path
 
     # Generate preview thumbnail
-    thumb_p0_filename = f"{file_id}_thumb_p0.jpg"
-    thumb_p0_disk_path = f"temp_uploads/{thumb_p0_filename}"
-    thumb_filename = f"{file_id}_thumb.jpg"
-    thumb_disk_path = f"temp_uploads/{thumb_filename}"
+    thumb_p0_disk_path = asset_store.get_thumbnail_cache_path("inspect", f"{file_id}_thumb_p0")
+    thumb_disk_path = asset_store.get_thumbnail_cache_path("inspect", f"{file_id}_thumb")
     analysis["thumbnail_url"] = f"/api/inspect/thumbnail/{full_file_id}"
     try:
         from engines.thumbnails import render_thumb_for_file, get_pdf_page_count
@@ -184,19 +182,28 @@ def get_inspect_thumbnail(file_id: str):
     """Serves or dynamically renders page 0 thumbnail for inspected assets."""
     safe_file_id = os.path.basename(file_id)
     stem = os.path.splitext(safe_file_id)[0]
-    thumb_path = os.path.join("temp_uploads", f"{stem}_thumb.jpg")
+    thumb_path = asset_store.get_thumbnail_cache_path("inspect", f"{stem}_thumb")
     if os.path.exists(thumb_path):
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
-    thumb_p0_path = os.path.join("temp_uploads", f"{stem}_thumb_p0.jpg")
+    thumb_p0_path = asset_store.get_thumbnail_cache_path("inspect", f"{stem}_thumb_p0")
     if os.path.exists(thumb_p0_path):
         return FileResponse(thumb_p0_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    legacy_thumb = os.path.join("temp_uploads", f"{stem}_thumb.jpg")
+    if os.path.exists(legacy_thumb):
+        return FileResponse(legacy_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    legacy_p0 = os.path.join("temp_uploads", f"{stem}_thumb_p0.jpg")
+    if os.path.exists(legacy_p0):
+        return FileResponse(legacy_p0, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
     from engines.thumbnails import resolve_temp_file, render_thumb_for_file
     src_path = resolve_temp_file(file_id)
     if not src_path or not os.path.exists(src_path):
         raise HTTPException(status_code=404, detail="Artwork file not found")
 
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
     ok = render_thumb_for_file(src_path, thumb_path, page_num=0)
     if ok and os.path.exists(thumb_path):
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
@@ -372,23 +379,23 @@ async def get_task_status(task_id: str):
 async def upload_contour_file(file: UploadFile = File(...)):
     try:
         evict_stale_caches()
-        os.makedirs("temp_uploads", exist_ok=True)
         file_id = str(uuid.uuid4())[:12]
-        ext = os.path.splitext(file.filename)[1].lower()
-        file_path = f"temp_uploads/{file_id}_{file.filename}"
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        _, file_path = asset_store.save_original(f"{file_id}_{file.filename}", file.file)
         
         CONTOUR_CACHE[file_id] = file_path
         CACHE_TIMESTAMPS[file_id] = time.time()
 
         # Generate lightweight downsampled raster for ultra-fast, low-memory browser proofing
         preview_filename = f"{file_id}_preview.png"
-        preview_disk_path = f"temp_uploads/{preview_filename}"
+        preview_cache_dir = os.path.join(asset_store.cache_dir, "contour")
+        os.makedirs(preview_cache_dir, exist_ok=True)
+        preview_disk_path = os.path.join(preview_cache_dir, preview_filename)
+        legacy_preview_path = f"temp_uploads/{preview_filename}"
         try:
             from engines.thumbnails import render_downsampled_preview
             render_downsampled_preview(file_path, preview_disk_path)
             if os.path.exists(preview_disk_path):
+                shutil.copy(preview_disk_path, legacy_preview_path)
                 CONTOUR_PREVIEWS[file_id] = f"/temp_uploads/{preview_filename}"
         except Exception as e_prev:
             print("Notice: could not generate downsampled preview:", e_prev)
@@ -429,10 +436,7 @@ async def generate_contour(
         if file_id and file_id in CONTOUR_CACHE:
             file_path = CONTOUR_CACHE[file_id]
         elif file:
-            os.makedirs("temp_uploads", exist_ok=True)
-            file_path = f"temp_uploads/{uuid.uuid4()}_{file.filename}"
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+            _, file_path = asset_store.save_original(f"{uuid.uuid4()}_{file.filename}", file.file)
         else:
             return {"success": False, "error": "No file provided"}
 

@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session as DBSession
 from db.session import get_db, db_session
 from db.repository import SessionRepository
+from storage.asset_store import asset_store
 from engines.book_scan_engine import BookScanEngine, PageOpError
 from engines.units import mm_to_px
 from engines.schemas import (
@@ -20,9 +21,6 @@ from engines.schemas import (
 import time
 
 router = APIRouter(prefix="/api/book-scan", tags=["Book Scan Studio"])
-
-TEMP_DIR = "temp_uploads/book_scans"
-os.makedirs(TEMP_DIR, exist_ok=True)
 
 # In-memory L1 session store & TTL tracking
 SESSIONS: Dict[str, Dict[str, Any]] = {}
@@ -69,14 +67,15 @@ def evict_stale_sessions():
     for sid in stale_ids:
         SESSION_TIMESTAMPS.pop(sid, None)
         sess = SESSIONS.pop(sid, None)
-        if sess and "session_dir" in sess:
-            cleanup_session_dir(sess["session_dir"])
+        asset_store.purge_session(sid)
     stale_jobs = [jid for jid, j in EXPORT_JOBS.items() if now - j.get("created_at", now) > SESSION_TTL_SECONDS]
     for jid in stale_jobs:
         EXPORT_JOBS.pop(jid, None)
 
-def cleanup_session_dir(session_dir: str):
-    if os.path.exists(session_dir):
+def cleanup_session_dir(session_dir: str, session_id: Optional[str] = None):
+    if session_id:
+        asset_store.purge_session(session_id)
+    elif os.path.exists(session_dir):
         shutil.rmtree(session_dir, ignore_errors=True)
 
 @router.post("/init-session")
@@ -96,8 +95,7 @@ async def init_book_scan_session(
     db: DBSession = Depends(get_db),
 ):
     session_id = str(uuid.uuid4())
-    session_dir = os.path.join(TEMP_DIR, session_id)
-    os.makedirs(session_dir, exist_ok=True)
+    session_dir = asset_store.get_session_dir(session_id)
 
     if not (hasattr(file_single, "file") and hasattr(file_single, "filename")):
         file_single = None
@@ -137,10 +135,8 @@ async def init_book_scan_session(
                 raise HTTPException(status_code=400, detail="Both Odds and Evens PDF files are required in dual mode.")
         odds_path = os.path.join(session_dir, f"odds_{file_odds.filename}")
         evens_path = os.path.join(session_dir, f"evens_{file_evens.filename}")
-        with open(odds_path, "wb") as f:
-            shutil.copyfileobj(file_odds.file, f)
-        with open(evens_path, "wb") as f:
-            shutil.copyfileobj(file_evens.file, f)
+        asset_store.save_file_stream(odds_path, file_odds.file)
+        asset_store.save_file_stream(evens_path, file_evens.file)
 
         pages = BookScanEngine.collate_from_paths(
             odds_path=odds_path,
@@ -158,8 +154,7 @@ async def init_book_scan_session(
         for idx, upload in enumerate(files):
             clean_name = f"{idx}_{upload.filename}"
             save_path = os.path.join(session_dir, clean_name)
-            with open(save_path, "wb") as f:
-                shutil.copyfileobj(upload.file, f)
+            asset_store.save_file_stream(save_path, upload.file)
             saved_paths.append(save_path)
 
         rev_indices_set = set()
@@ -192,16 +187,16 @@ async def init_book_scan_session(
                 raise HTTPException(status_code=400, detail="Please upload at least one file.")
         if file_single:
             single_path = os.path.join(session_dir, f"single_{file_single.filename}")
-            with open(single_path, "wb") as f:
-                shutil.copyfileobj(file_single.file, f)
+            asset_store.save_file_stream(single_path, file_single.file)
             if not single_path.lower().endswith(".pdf"):
                 combined_pdf_path = os.path.join(session_dir, "single_converted.pdf")
                 if BookScanEngine.combine_files_to_pdf([single_path], combined_pdf_path):
                     single_path = combined_pdf_path
         else:
-            if not os.path.exists(existing_file_path):
+            resolved = asset_store.resolve_asset_file(existing_file_path, session_id=session_id)
+            if not resolved or not os.path.exists(resolved):
                 raise HTTPException(status_code=404, detail="Referenced file does not exist on server.")
-            single_path = existing_file_path
+            single_path = resolved
 
         pages = BookScanEngine.collate_from_paths(
             single_path=single_path,
@@ -338,10 +333,13 @@ async def get_page_thumbnail(
     if bleed_mm > 0:
         clean_hex = (bleed_color or "#ffffff").lstrip("#")
         cache_tag += f"_bl_{int(bleed_mm*100)}_{bleed_mode}_{clean_hex}_{int(show_crop_marks)}_{bleed_placement}"
-    thumb_path = os.path.join(session["session_dir"], f"{cache_tag}.jpg")
+    thumb_path = asset_store.get_thumbnail_cache_path(session_id, cache_tag)
 
     if os.path.exists(thumb_path):
         return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+    legacy_thumb = os.path.join(session["session_dir"], f"{cache_tag}.jpg")
+    if os.path.exists(legacy_thumb):
+        return FileResponse(legacy_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
     doc_map = BookScanEngine.open_session_docs(session)
 
@@ -392,8 +390,7 @@ async def get_page_thumbnail(
                 placement=bleed_placement,
             )
 
-
-        os.makedirs(session["session_dir"], exist_ok=True)
+        os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
         if not BookScanEngine.write_thumbnail_jpg(proc_img, thumb_path, quality=80):
             raise HTTPException(status_code=500, detail="Failed to encode thumbnail.")
 
@@ -776,7 +773,7 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
 
         if export_fmt in ["pdf_split", "jpeg", "jpg", "png", "tiff", "tif"]:
             export_filename = f"cleaned_book_{session_id[:8]}_{export_fmt}.zip"
-            output_file_path = os.path.join(session["session_dir"], export_filename)
+            output_file_path = asset_store.get_export_path(f"{job_id}_{export_filename}", "zip")
             media_type = "application/zip"
             success = BookScanEngine.export_pages_archive(
                 processed_images=processed_images,
@@ -795,7 +792,7 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
             )
         else:
             export_filename = f"cleaned_book_{session_id[:8]}.pdf"
-            output_file_path = os.path.join(session["session_dir"], export_filename)
+            output_file_path = asset_store.get_export_path(f"{job_id}_{export_filename}", "pdf")
             media_type = "application/pdf"
             success = BookScanEngine.add_bleed_and_export_pdf(
                 processed_images=processed_images,
@@ -962,7 +959,7 @@ async def export_book_pdf(
         )
 
         export_filename = f"cleaned_book_{session_id[:8]}.pdf"
-        output_pdf_path = os.path.join(session["session_dir"], export_filename)
+        output_pdf_path = asset_store.get_export_path(f"sync_{session_id[:8]}", "pdf")
 
         effective_quality = getattr(req, "quality", 88) or 88
         success = BookScanEngine.add_bleed_and_export_pdf(
@@ -1060,7 +1057,7 @@ async def extract_single_page(
     ext = "pdf" if fmt == "pdf" else ("jpg" if fmt in ["jpeg", "jpg"] else fmt)
     media_type = "application/pdf" if fmt == "pdf" else f"image/{fmt}"
     export_filename = f"page_{page_id[:8]}.{ext}"
-    output_path = os.path.join(session["session_dir"], export_filename)
+    output_path = asset_store.get_export_path(f"page_{session_id[:8]}_{page_id[:8]}", ext)
 
     doc_map = BookScanEngine.open_session_docs(session)
     try:

@@ -17,7 +17,7 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 | `backend/settings_api.py` | `/api/settings/*` (Presets CRUD, Defaults, Runtime Storage Cleanup) | `storage_cleaner.py` *(persists config to `backend/settings.json`)* |
 | `backend/main.py` | `/api/inspect`, `/api/inspect/thumbnail/*`, `/api/contour/*`, `/api/flipbook/*`, `/api/report/*` | `asset_inspector.py`, `contour_engine.py`, `flipbook_worker.py`, `report_generator.py`, `thumbnails.py`, `units.py` |
 | `backend/db/` | SQLite WAL ACID Metadata Persistence (`session.py`, `models.py`, `repository.py`) | Transactional CRUD for sessions, pages, applied layers, session locks, and export jobs |
-| `backend/storage/` | Structured Asset Store (`asset_store.py`) | Deterministic session storage (`data/storage/{session_id}/raw|thumb|exports/`) |
+| `backend/storage/` | Structured Asset Store (`asset_store.py`) | Tiered blob storage (`data/storage/originals/`, `sessions/{session_id}/`, `cache/{session_id}/`, `exports/{job_id}`) |
 | *Shared Engine Utilities* | Cross-engine helpers, geometry/unit math, Pydantic models | `schemas.py`, `units.py`, `thumbnails.py` |
 
 ### 2. Frontend: Studio Page Routes (`frontend/src/app/`) $\leftrightarrow$ Component Folders (`frontend/src/components/`)
