@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { apiFetch, getApiUrl } from "@/lib/api";
-import { isPageInScope, isPageInAppliedEntries } from "@/lib/pageScope";
+import { isPageInScope, getAppliedEntryForPage } from "@/lib/pageScope";
 import {
   BookIntakeMode,
   MultiFileStrategy,
@@ -419,6 +419,51 @@ export function useBookSession() {
     return null;
   }, [sessionId, pages]);
 
+  // Stable thumbnail URL generator for Deck Cards in the Left Panel.
+  // Represents strictly the committed page state (crops, masks, rotations, deskew angle, color mode)
+  // and is completely decoupled from selectedPageId and uncommitted draft sliders.
+  const buildDeckThumbnailUrl = useCallback((
+    pageId: string,
+    dpi: number = 80
+  ): string => {
+    if (!sessionId) return "";
+    const pageIdx = pages.findIndex((p) => p.id === pageId);
+    const page = pageIdx >= 0 ? pages[pageIdx] : undefined;
+    const hasPageAngle = page?.deskew_angle !== undefined && page?.deskew_angle !== null;
+    const effectiveColorMode = page?.color_mode || "original";
+
+    const params = new URLSearchParams({
+      preview_clean: "true",
+      clean_borders: "false",
+      border_margin_px: "0",
+      border_threshold: "210",
+      enhance_colors: String(Boolean(page?.color_mode)),
+      saturation: "1.0",
+      contrast: "1.0",
+      color_mode: effectiveColorMode,
+      bw_threshold: "180",
+      whiten_bg: "false",
+      deskew: "false",
+      dpi: String(dpi),
+      rev: String(page?.rev ?? 0),
+      deskew_module_enabled: String(hasPageAngle),
+      deskew_mode: hasPageAngle ? "manual" : "auto",
+      deskew_angle: hasPageAngle ? String(page?.deskew_angle) : "0",
+      deskew_max_angle: "10.0",
+      deskew_ignore_borders: "true",
+      flatten_illumination: "false",
+      spine_strength: "1.0",
+      despeckle_level: "0",
+      bleed_mm: "0",
+      bleed_mode: "mirror",
+      bleed_color: "#ffffff",
+      bleed_placement: "outside",
+      show_crop_marks: "false",
+    });
+
+    return getApiUrl(`/api/book-scan/page-thumbnail/${sessionId}/${pageId}?${params.toString()}`);
+  }, [sessionId, pages]);
+
   // Debounced URL generator for thumbnails & high-res inspector.
   // Module-derived render values arrive via opts so this builder stays pure.
   const buildThumbnailUrl = useCallback((
@@ -434,59 +479,140 @@ export function useBookSession() {
     const activeIdx = selectedPageId ? pages.findIndex((p) => p.id === selectedPageId) : -1;
     const activePageNum = activeIdx >= 0 ? activeIdx + 1 : pageNum;
 
-    // Check scope applicability for this specific page (prioritize committed applied entries over dynamic draft scope)
-    const inDeskewScope = opts.deskewAppliedEntries && opts.deskewAppliedEntries.length > 0
-      ? isPageInAppliedEntries(pageNum, pageId, opts.deskewAppliedEntries)
-      : isPageInScope(pageNum, opts.deskewScope, activePageNum);
+    // Deskew Layer Resolution
+    const deskewEntry = opts.deskewAppliedEntries && opts.deskewAppliedEntries.length > 0
+      ? getAppliedEntryForPage(pageNum, pageId, opts.deskewAppliedEntries)
+      : undefined;
+    const inDeskewScope = deskewEntry
+      ? true
+      : (!opts.deskewAppliedEntries || opts.deskewAppliedEntries.length === 0) && isPageInScope(pageNum, opts.deskewScope, activePageNum);
     const hasPageAngle = page?.deskew_angle !== undefined && page?.deskew_angle !== null;
     const applyDeskew = inDeskewScope && (opts.deskewEnabled || hasPageAngle);
-    const effectiveDeskewMode = hasPageAngle ? "manual" : opts.deskewMode;
-    const effectiveDeskewAngle = hasPageAngle ? Number(page.deskew_angle) : opts.deskewAngle;
+    const effectiveDeskewAngle = hasPageAngle
+      ? Number(page.deskew_angle)
+      : deskewEntry?.params?.angle !== undefined
+        ? Number(deskewEntry.params.angle)
+        : opts.deskewAngle;
+    const effectiveDeskewMode = hasPageAngle
+      ? "manual"
+      : (deskewEntry?.params?.mode || opts.deskewMode);
+    const effectiveDeskewMaxAngle = deskewEntry?.params?.maxAngle !== undefined
+      ? Number(deskewEntry.params.maxAngle)
+      : opts.deskewMaxAngle;
+    const effectiveDeskewIgnoreBorders = deskewEntry?.params?.ignoreBorders !== undefined
+      ? Boolean(deskewEntry.params.ignoreBorders)
+      : opts.deskewIgnoreBorders;
 
-    const inCleanupScope = opts.cleanupAppliedEntries && opts.cleanupAppliedEntries.length > 0
-      ? isPageInAppliedEntries(pageNum, pageId, opts.cleanupAppliedEntries)
-      : isPageInScope(pageNum, opts.cleanupScope, activePageNum);
+    // Cleanup Layer Resolution
+    // Mask entries are overlays (rendered separately); only filter entries drive cleanup params.
+    const cleanupFilterEntries = (opts.cleanupAppliedEntries || []).filter(
+      (e) => !(e.params?.isMaskEntry || e.id.startsWith("mask_"))
+    );
+    const cleanupEntry = cleanupFilterEntries.length > 0
+      ? getAppliedEntryForPage(pageNum, pageId, cleanupFilterEntries)
+      : undefined;
+    const inCleanupScope = cleanupEntry
+      ? true
+      : cleanupFilterEntries.length === 0 && isPageInScope(pageNum, opts.cleanupScope, activePageNum);
     const applyCleanup = isClean && opts.cleanupEnabled && inCleanupScope;
+    const effectiveFlattenIllumination = cleanupEntry?.params?.flattenIllumination !== undefined
+      ? Boolean(cleanupEntry.params.flattenIllumination)
+      : opts.flattenIllumination;
+    const effectiveSpineStrength = cleanupEntry?.params?.spineStrength !== undefined
+      ? Number(cleanupEntry.params.spineStrength)
+      : (opts.spineStrength ?? 1.0);
+    const effectiveSpineBox = cleanupEntry?.params?.spineBox !== undefined
+      ? cleanupEntry.params.spineBox
+      : opts.spineBox;
+    const effectiveDespeckleLevel = cleanupEntry?.params?.despeckleLevel !== undefined
+      ? Number(cleanupEntry.params.despeckleLevel)
+      : opts.despeckleLevel;
 
-    const inRestorationScope = opts.restorationAppliedEntries && opts.restorationAppliedEntries.length > 0
-      ? isPageInAppliedEntries(pageNum, pageId, opts.restorationAppliedEntries)
-      : isPageInScope(pageNum, opts.restorationScope, activePageNum);
+    // Restoration (Colors) Layer Resolution
+    const restorationEntry = opts.restorationAppliedEntries && opts.restorationAppliedEntries.length > 0
+      ? getAppliedEntryForPage(pageNum, pageId, opts.restorationAppliedEntries)
+      : undefined;
+    const inRestorationScope = restorationEntry
+      ? true
+      : (!opts.restorationAppliedEntries || opts.restorationAppliedEntries.length === 0) && isPageInScope(pageNum, opts.restorationScope, activePageNum);
     const applyRestoration = isClean && opts.restorationEnabled && inRestorationScope;
     const hasPageColorOverride = isClean && Boolean(page?.color_mode);
-    const effectiveColorMode = page?.color_mode || (applyRestoration ? opts.colorMode : "original");
+    const effectiveColorMode = page?.color_mode || (applyRestoration ? (restorationEntry?.params?.colorMode || opts.colorMode) : "original");
+    const effectiveCleanBorders = restorationEntry?.params?.cleanBorders !== undefined
+      ? Boolean(restorationEntry.params.cleanBorders)
+      : opts.cleanBorders;
+    const effectiveBorderMarginPx = restorationEntry?.params?.borderMarginPx !== undefined
+      ? Number(restorationEntry.params.borderMarginPx)
+      : opts.borderMarginPx;
+    const effectiveBorderThreshold = restorationEntry?.params?.borderThreshold !== undefined
+      ? Number(restorationEntry.params.borderThreshold)
+      : opts.borderThreshold;
+    const effectiveEnhanceColors = restorationEntry?.params?.enhanceColors !== undefined
+      ? Boolean(restorationEntry.params.enhanceColors)
+      : opts.enhanceColors;
+    const effectiveSaturation = restorationEntry?.params?.saturation !== undefined
+      ? Number(restorationEntry.params.saturation)
+      : opts.saturation;
+    const effectiveContrast = restorationEntry?.params?.contrast !== undefined
+      ? Number(restorationEntry.params.contrast)
+      : opts.contrast;
+    const effectiveBwThreshold = restorationEntry?.params?.bwThreshold !== undefined
+      ? Number(restorationEntry.params.bwThreshold)
+      : opts.bwThreshold;
+    const effectiveWhitenBg = restorationEntry?.params?.whitenBg !== undefined
+      ? Boolean(restorationEntry.params.whitenBg)
+      : opts.whitenBg;
 
-    const inBleedScope = opts.bleedAppliedEntries && opts.bleedAppliedEntries.length > 0
-      ? isPageInAppliedEntries(pageNum, pageId, opts.bleedAppliedEntries)
-      : isPageInScope(pageNum, opts.bleedScope, activePageNum);
+    // Bleed Layer Resolution
+    const bleedEntry = opts.bleedAppliedEntries && opts.bleedAppliedEntries.length > 0
+      ? getAppliedEntryForPage(pageNum, pageId, opts.bleedAppliedEntries)
+      : undefined;
+    const inBleedScope = bleedEntry
+      ? true
+      : (!opts.bleedAppliedEntries || opts.bleedAppliedEntries.length === 0) && isPageInScope(pageNum, opts.bleedScope, activePageNum);
     const applyBleed = isClean && opts.bleedEnabled && inBleedScope;
+    const effectiveBleedMm = bleedEntry ? Number(bleedEntry.bleedMm ?? 0) : opts.bleedMm;
+    const effectiveBleedMode = bleedEntry?.mode || opts.bleedMode;
+    const effectiveBleedColor = bleedEntry?.solidColor || opts.bleedColor;
+    const effectiveBleedPlacement = bleedEntry?.placement || opts.bleedPlacement;
+    const effectiveShowCropMarks = bleedEntry ? Boolean(bleedEntry.showCropMarks) : opts.showCropMarks;
 
     const params = new URLSearchParams({
       preview_clean: String(isClean),
-      clean_borders: String(applyRestoration ? opts.cleanBorders : false),
-      border_margin_px: String(opts.borderMarginPx),
-      border_threshold: String(opts.borderThreshold),
-      enhance_colors: String((applyRestoration && opts.enhanceColors) || hasPageColorOverride),
-      saturation: String(applyRestoration || hasPageColorOverride ? opts.saturation : 1.0),
-      contrast: String(applyRestoration || hasPageColorOverride ? opts.contrast : 1.0),
+      clean_borders: String(applyRestoration ? effectiveCleanBorders : false),
+      border_margin_px: String(effectiveBorderMarginPx),
+      border_threshold: String(effectiveBorderThreshold),
+      enhance_colors: String((applyRestoration && effectiveEnhanceColors) || hasPageColorOverride),
+      saturation: String(applyRestoration || hasPageColorOverride ? effectiveSaturation : 1.0),
+      contrast: String(applyRestoration || hasPageColorOverride ? effectiveContrast : 1.0),
       color_mode: effectiveColorMode,
-      bw_threshold: String(opts.bwThreshold),
-      whiten_bg: String(applyRestoration ? opts.whitenBg : false),
+      bw_threshold: String(effectiveBwThreshold),
+      whiten_bg: String(applyRestoration ? effectiveWhitenBg : false),
       deskew: "false",
       dpi: String(dpi),
       rev: String(page?.rev ?? 0),
       deskew_module_enabled: String(isClean && applyDeskew),
       deskew_mode: effectiveDeskewMode,
       deskew_angle: String(effectiveDeskewAngle),
-      deskew_max_angle: String(opts.deskewMaxAngle),
-      deskew_ignore_borders: String(opts.deskewIgnoreBorders),
-      flatten_illumination: String(applyCleanup ? opts.flattenIllumination : false),
-      despeckle_level: String(applyCleanup ? opts.despeckleLevel : 0),
-      bleed_mm: String(applyBleed ? opts.bleedMm : 0),
-      bleed_mode: opts.bleedMode,
-      bleed_color: opts.bleedColor,
-      bleed_placement: opts.bleedPlacement,
-      show_crop_marks: String(applyBleed ? opts.showCropMarks : false),
+      deskew_max_angle: String(effectiveDeskewMaxAngle),
+      deskew_ignore_borders: String(effectiveDeskewIgnoreBorders),
+      flatten_illumination: String(applyCleanup ? effectiveFlattenIllumination : false),
+      spine_strength: String(applyCleanup ? effectiveSpineStrength : 1.0),
+      despeckle_level: String(applyCleanup ? effectiveDespeckleLevel : 0),
+      bleed_mm: String(applyBleed ? effectiveBleedMm : 0),
+      bleed_mode: effectiveBleedMode,
+      bleed_color: effectiveBleedColor,
+      bleed_placement: effectiveBleedPlacement,
+      show_crop_marks: String(applyBleed ? effectiveShowCropMarks : false),
     });
+
+    if (applyCleanup && effectiveSpineBox) {
+      params.set("spine_box", `${effectiveSpineBox.x1},${effectiveSpineBox.y1},${effectiveSpineBox.x2},${effectiveSpineBox.y2}`);
+    }
+
+    if (opts.excludeMaskIds && opts.excludeMaskIds.length > 0) {
+      params.set("exclude_mask_ids", opts.excludeMaskIds.join(","));
+    }
 
     return getApiUrl(`/api/book-scan/page-thumbnail/${sessionId}/${pageId}?${params.toString()}`);
   }, [sessionId, pages, selectedPageId]);
@@ -523,6 +649,7 @@ export function useBookSession() {
     cropDetectProgress,
     detectCrop,
     detectAllCrops,
+    buildDeckThumbnailUrl,
     buildThumbnailUrl,
     resetSession,
     initSession,

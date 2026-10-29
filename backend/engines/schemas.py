@@ -109,6 +109,14 @@ class SplitSpreadRequest(BaseModel):
 class RevertSpreadRequest(BaseModel):
     page_id: Optional[str] = None
     revert_all: bool = False
+    single_level: bool = False
+    target_page_ids: Optional[List[str]] = None
+
+
+class RevertCropRequest(BaseModel):
+    page_id: Optional[str] = None
+    mode: str = "level"  # "level" or "reset"
+    apply_to_all: bool = False
     target_page_ids: Optional[List[str]] = None
 
 
@@ -200,10 +208,15 @@ class ExportRequest(BaseModel):
     per_page_deskew_angles: Optional[Dict[str, float]] = None
     per_page_crops: Optional[Dict[str, CropBoxModel]] = None
     per_page_color_modes: Optional[Dict[str, str]] = None
+    per_page_cleanup: Optional[Dict[str, Dict[str, Any]]] = None
+    per_page_restoration: Optional[Dict[str, Dict[str, Any]]] = None
+    per_page_bleed: Optional[Dict[str, Dict[str, Any]]] = None
 
     cleanup_module_enabled: bool = False
     flatten_illumination: bool = False
-    despeckle_level: int = 0  # 0=off, 1=light, 2=medium, 3=strong
+    spine_strength: float = 1.0
+    spine_box: Optional[Dict[str, float]] = None
+    despeckle_level: float = 0.0  # continuous float: 0.0 = off, 0.1..10.0 dust filter
     cleanup_scope_mode: str = "all"
     cleanup_custom_range: str = ""
 

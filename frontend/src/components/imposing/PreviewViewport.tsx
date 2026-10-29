@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Loader2, Eye, EyeOff, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, SlidersHorizontal, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { Loader2, Eye, EyeOff, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, SlidersHorizontal, ZoomIn, ZoomOut, Maximize2, Hand, LayoutGrid } from "lucide-react";
 import { ImpositionPreviewResponse, ImposingItem } from "@/types/prepress";
 import { SheetCanvas } from "./SheetCanvas";
 
@@ -21,16 +21,20 @@ export interface PreviewViewportProps {
   error: string | null;
   currentPage: number;
   setCurrentPage: React.Dispatch<React.SetStateAction<number>>;
+  isDeckOpen?: boolean;
+  onToggleDeck?: () => void;
 }
 
 export function PreviewViewport({
-  previewData, items, jobMode, bookStep, isPreviewing, sheetW, sheetH,
+  previewData, items, isPreviewing, sheetW, sheetH,
   margin, drawBorder, borderColor, cropMarks, regMarks = false,
   error, currentPage, setCurrentPage,
+  isDeckOpen = false, onToggleDeck,
 }: PreviewViewportProps): React.JSX.Element {
   const [scale, setScale] = useState<number>(1);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [isPanMode, setIsPanMode] = useState<boolean>(true);
   const [showPageOverlay, setShowPageOverlay] = useState<boolean>(false);
 
   const dragStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -108,57 +112,58 @@ export function PreviewViewport({
   const showEmptyHint = !sheetW || !sheetH || sheetW <= 0 || sheetH <= 0;
 
   return (
-    <div className="flex-1 min-w-0 w-full h-full flex flex-col space-y-2">
+    <div className="flex-1 min-w-0 w-full h-full flex flex-col">
       {error && (
-        <div className="p-3 bg-red-500/10 text-red-400 rounded-xl border border-red-500/30 text-xs">{error}</div>
+        <div className="px-3 py-1.5 bg-red-500/10 text-red-400 border-b border-red-500/30 text-xs">{error}</div>
       )}
-      <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex flex-col overflow-hidden h-full shadow-sm relative">
-        <div className="p-2.5 border-b border-[#242A38] flex flex-wrap justify-between items-center bg-[#141822] gap-2">
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2">
-              <span className="text-xs font-bold text-slate-300">
-                {jobMode === "book" && bookStep === 1 ? "Step 1: Page Trim & Bleed View" : "Step 2: Live Press Sheet View"}
-              </span>
-              {isPreviewing && (
-                <span className="text-xs text-emerald-400 flex items-center font-medium ml-2">
-                  <Loader2 className="animate-spin mr-1.5" size={13} />Calculating...
-                </span>
-              )}
-            </div>
+      <div className="bg-[#14171F] flex flex-col overflow-hidden h-full relative">
+        {/* Minimal Borderless Top Toolbar: Hand Tool + Page Deck Toggle */}
+        <div className="px-3 py-1.5 border-b border-[#1E232E] bg-[#14171F] flex items-center justify-center relative select-none z-20 shrink-0">
+          <div className="flex items-center space-x-1">
             <button
               type="button"
-              onClick={() => setShowPageOverlay(!showPageOverlay)}
-              className={`text-[10px] px-2 py-1 rounded border flex items-center space-x-1.5 transition-colors font-medium ${showPageOverlay ? "bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold" : "bg-[#1A202C] text-slate-400 border-[#2E3648] hover:text-white"}`}
-              title={showPageOverlay ? "Page labels visible" : "Page labels hidden"}
+              onClick={() => setIsPanMode((prev) => !prev)}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                isPanMode
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
+              }`}
+              title="Hand Tool (Drag to Pan Sheet)"
             >
-              {showPageOverlay ? <Eye size={12} className="text-emerald-400" /> : <EyeOff size={12} />}
-              <span>{showPageOverlay ? "Labels On" : "Labels Off"}</span>
+              <Hand size={15} />
             </button>
+
+            <div className="w-px h-4 bg-[#1E232E] mx-1.5" />
+
+            {onToggleDeck && (
+              <button
+                type="button"
+                onClick={onToggleDeck}
+                className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                  isDeckOpen
+                    ? "bg-white/[0.1] text-white"
+                    : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
+                }`}
+                title={isDeckOpen ? "Hide Page Deck" : "Show Page Deck"}
+              >
+                <LayoutGrid size={15} />
+                <span className="text-[11px] font-medium hidden sm:inline">Pages</span>
+              </button>
+            )}
           </div>
-          {showNav && previewData && (
-            <div className="flex items-center space-x-1.5 bg-[#1A202C] rounded-lg border border-[#2E3648] px-2 py-1">
-              <button type="button" title="First Sheet" disabled={currentPage === 0} onClick={() => setCurrentPage(0)} className="p-1 hover:bg-[#2E3648] rounded text-slate-300 disabled:opacity-30 transition-colors"><ChevronsLeft size={14} /></button>
-              <button type="button" title="Previous Sheet" disabled={currentPage === 0} onClick={() => setCurrentPage((p) => Math.max(0, p - 1))} className="p-1 hover:bg-[#2E3648] rounded text-slate-300 disabled:opacity-30 transition-colors"><ChevronLeft size={14} /></button>
-              <div className="flex items-center space-x-1 px-1">
-                <span className="text-xs text-slate-400 font-medium">Sheet</span>
-                <input
-                  type="number" min={1} max={pageCount} value={currentPage + 1}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= pageCount) setCurrentPage(val - 1);
-                  }}
-                  className="w-12 text-xs font-mono font-bold bg-[#131720] border border-[#2E3648] text-white text-center rounded px-1 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <span className="text-xs font-mono font-semibold text-slate-400 whitespace-nowrap">/ {pageCount}</span>
-              </div>
-              <button type="button" title="Next Sheet" disabled={currentPage >= pageCount - 1} onClick={() => setCurrentPage((p) => Math.min(pageCount - 1, p + 1))} className="p-1 hover:bg-[#2E3648] rounded text-slate-300 disabled:opacity-30 transition-colors"><ChevronRight size={14} /></button>
-              <button type="button" title="Last Sheet" disabled={currentPage >= pageCount - 1} onClick={() => setCurrentPage(pageCount - 1)} className="p-1 hover:bg-[#2E3648] rounded text-slate-300 disabled:opacity-30 transition-colors"><ChevronsRight size={14} /></button>
-            </div>
+
+          {isPreviewing && (
+            <span className="absolute right-3 text-[11px] text-emerald-400 flex items-center font-medium">
+              <Loader2 className="animate-spin mr-1.5" size={12} />Calculating...
+            </span>
           )}
         </div>
+
         <div
           ref={canvasRef}
-          className="flex-1 bg-[#0F1218] flex items-center justify-center overflow-hidden relative cursor-grab active:cursor-grabbing select-none"
+          className={`flex-1 bg-[#14171F] flex items-center justify-center overflow-hidden relative select-none ${
+            isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+          }`}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeave}
         >
           {!previewData && (
@@ -186,11 +191,68 @@ export function PreviewViewport({
               scale={scale} position={position} isDragging={isDragging}
             />
           )}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-1 bg-[#181D27]/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-[#2E3648] shadow-lg z-10">
-            <button type="button" onClick={() => setScale((s) => Math.min(15, s * 1.25))} className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors" title="Zoom In"><ZoomIn size={15} /></button>
-            <button type="button" onClick={() => setScale((s) => Math.max(0.1, s * 0.8))} className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors" title="Zoom Out"><ZoomOut size={15} /></button>
-            <div className="w-px h-3.5 bg-[#2E3648] mx-1" />
-            <button type="button" onClick={fitCurrentSheet} className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors" title="Fit to Screen"><Maximize2 size={15} /></button>
+
+          {/* Floating Bottom Pill HUD (Matches reference screenshot) */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-2 bg-[#14171F]/95 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-[#242A38] shadow-2xl z-30 text-xs select-none">
+            {showNav && previewData && (
+              <>
+                <div className="flex items-center space-x-1">
+                  <button type="button" title="First Sheet" disabled={currentPage === 0} onClick={() => setCurrentPage(0)} className="p-1 hover:bg-white/[0.06] rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors cursor-pointer"><ChevronsLeft size={14} /></button>
+                  <button type="button" title="Previous Sheet" disabled={currentPage === 0} onClick={() => setCurrentPage((p) => Math.max(0, p - 1))} className="p-1 hover:bg-white/[0.06] rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors cursor-pointer"><ChevronLeft size={14} /></button>
+                  <div className="flex items-center space-x-1 px-1">
+                    <input
+                      type="number" min={1} max={pageCount} value={currentPage + 1}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        if (!isNaN(val) && val >= 1 && val <= pageCount) setCurrentPage(val - 1);
+                      }}
+                      className="w-10 text-xs font-mono font-bold bg-[#1C212C] border border-[#2B3242] text-white text-center rounded px-1 py-0.5 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">/ {pageCount}</span>
+                  </div>
+                  <button type="button" title="Next Sheet" disabled={currentPage >= pageCount - 1} onClick={() => setCurrentPage((p) => Math.min(pageCount - 1, p + 1))} className="p-1 hover:bg-white/[0.06] rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors cursor-pointer"><ChevronRight size={14} /></button>
+                  <button type="button" title="Last Sheet" disabled={currentPage >= pageCount - 1} onClick={() => setCurrentPage(pageCount - 1)} className="p-1 hover:bg-white/[0.06] rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors cursor-pointer"><ChevronsRight size={14} /></button>
+                </div>
+                <div className="w-px h-4 bg-[#242A38] mx-1" />
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowPageOverlay(!showPageOverlay)}
+              className={`p-1 rounded transition-colors cursor-pointer ${
+                showPageOverlay ? "text-blue-400 bg-blue-500/15" : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
+              }`}
+              title={showPageOverlay ? "Hide Page Labels" : "Show Page Labels"}
+            >
+              {showPageOverlay ? <Eye size={14} /> : <EyeOff size={14} />}
+            </button>
+
+            <div className="w-px h-4 bg-[#242A38] mx-1" />
+
+            <div className="flex items-center space-x-2">
+              <button type="button" onClick={() => setScale((s) => Math.max(0.1, s * 0.85))} className="p-1 text-slate-400 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer" title="Zoom Out"><ZoomOut size={14} /></button>
+              <input
+                type="range"
+                min={10}
+                max={400}
+                step={5}
+                value={Math.min(400, Math.max(10, Math.round(scale * 100)))}
+                onChange={(e) => setScale(Number(e.target.value) / 100)}
+                className="w-24 h-1 bg-[#2B3242] rounded-lg appearance-none cursor-pointer accent-blue-500"
+                title="Zoom Level"
+              />
+              <button type="button" onClick={() => setScale((s) => Math.min(15, s * 1.2))} className="p-1 text-slate-400 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer" title="Zoom In"><ZoomIn size={14} /></button>
+              <button
+                type="button"
+                onClick={fitCurrentSheet}
+                className="px-1.5 py-0.5 text-[11px] font-mono text-slate-300 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer min-w-[42px] text-center"
+                title="Click to Fit Sheet"
+              >
+                {Math.round(scale * 100)}%
+              </button>
+              <button type="button" onClick={fitCurrentSheet} className="p-1 text-slate-400 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer" title="Fit to Screen"><Maximize2 size={13} /></button>
+            </div>
           </div>
         </div>
       </div>

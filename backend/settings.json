@@ -60,6 +60,56 @@
             "unit": "mm"
         }
     ],
+    "book_trims": [
+        {
+            "name": "A4",
+            "width": 210.0,
+            "height": 297.0,
+            "unit": "mm"
+        },
+        {
+            "name": "A5",
+            "width": 148.0,
+            "height": 210.0,
+            "unit": "mm"
+        },
+        {
+            "name": "B5 (JIS)",
+            "width": 182.0,
+            "height": 257.0,
+            "unit": "mm"
+        },
+        {
+            "name": "US Trade (6\" \u00d7 9\")",
+            "width": 152.4,
+            "height": 228.6,
+            "unit": "mm"
+        },
+        {
+            "name": "US Digest (5.5\" \u00d7 8.5\")",
+            "width": 139.7,
+            "height": 215.9,
+            "unit": "mm"
+        },
+        {
+            "name": "Pocket Book (4.25\" \u00d7 6.87\")",
+            "width": 108.0,
+            "height": 174.5,
+            "unit": "mm"
+        },
+        {
+            "name": "Royal (6.14\" \u00d7 9.21\")",
+            "width": 156.0,
+            "height": 234.0,
+            "unit": "mm"
+        },
+        {
+            "name": "Square Large (8.25\" \u00d7 8.25\")",
+            "width": 210.0,
+            "height": 210.0,
+            "unit": "mm"
+        }
+    ],
     "imposing": {
         "default_sheet_unit": "cm",
         "default_margin": 0.0,
@@ -88,7 +138,7 @@
         "eco_mode": true
     },
     "book_studio": {
-        "history_limit": 10,
+        "history_limit": 70,
         "shortcuts": {
             "undo": "ctrl+z",
             "redo": "ctrl+y",

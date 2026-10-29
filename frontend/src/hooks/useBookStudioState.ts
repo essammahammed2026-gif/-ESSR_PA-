@@ -8,7 +8,7 @@ import { useBookModules } from "./useBookModules";
 import { useBookPageOps } from "./useBookPageOps";
 import { useBookHistory } from "./useBookHistory";
 import { useBookShortcuts, DEFAULT_BOOK_SHORTCUTS } from "./useBookShortcuts";
-import type { CropBox, DetectCropResult, FocusedModuleId, ExportOptions } from "@/types/book_studio";
+import type { CropBox, MaskBox, DetectCropResult, FocusedModuleId, ExportOptions } from "@/types/book_studio";
 
 /**
  * Composer for Book Studio state.
@@ -66,12 +66,15 @@ export function useBookStudioState() {
     });
   }, [session.pages, session.selectedPageId]);
 
+  const onStepRestoredRef = useRef<() => void>(() => {});
+
   const history = useBookHistory({
     sessionId: session.sessionId,
     pages: session.pages,
     setPages: session.setPages,
     selectedPageId: session.selectedPageId,
     setSelectedPageId: session.setSelectedPageId,
+    onStepRestored: () => onStepRestoredRef.current(),
     maxLimit: historyLimit,
   });
 
@@ -93,6 +96,22 @@ export function useBookStudioState() {
     recordStep: history.recordStep,
   });
 
+  useEffect(() => {
+    onStepRestoredRef.current = () => {
+      modules.clearPageCrops();
+      modules.setCropModule((prev) => ({
+        ...prev,
+        cropBox: { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 },
+        splitLines: [],
+      }));
+      modules.setCleanupModule((prev) => ({
+        ...prev,
+        draftMaskBox: null,
+        editingMaskId: null,
+      }));
+    };
+  }, [modules]);
+
   const jumpToStep = useCallback(async (index: number) => {
     modules.clearPageCrops();
     await history.jumpToStep(index);
@@ -110,6 +129,7 @@ export function useBookStudioState() {
 
   const revertToOriginal = useCallback(() => {
     modules.clearPageCrops();
+    modules.resetModules();
     history.revertToOriginal();
   }, [modules, history]);
 
@@ -245,8 +265,19 @@ export function useBookStudioState() {
 
   const openModule = useCallback((mod: FocusedModuleId | null) => {
     setFocusedModule(mod);
-    // Explicitly toggle crop guide overlay ONLY when in the Crop module
-    modules.setCropModule((prev) => ({ ...prev, enabled: mod === "crop" }));
+    // Toggle crop guide overlay when in the Crop or Split module
+    modules.setCropModule((prev) => {
+      const nextEnabled = mod === "crop" || mod === "split";
+      if (mod === "split" && prev.splitLines.length === 0) {
+        return {
+          ...prev,
+          enabled: true,
+          splitLines: [{ pos: 0.5, direction: "vertical" }],
+          splitPos: 0.5,
+        };
+      }
+      return { ...prev, enabled: nextEnabled };
+    });
     if (mod === null) {
       setStraightenActive(false);
       setMaskToolActive(false);
@@ -254,7 +285,7 @@ export function useBookStudioState() {
       return;
     }
     // We do NOT auto-enable deskew, cleanup, restore, or bleed on enter.
-    // They are only enabled when the user explicitly clicks "Apply" in each module.
+    // They are only enabled when the user modifies controls or clicks "Apply" in each module.
   }, [modules]);
 
   const { formatCombo } = useBookShortcuts({
@@ -286,7 +317,7 @@ export function useBookStudioState() {
         modules.setCropModule((prev) => ({ ...prev, enabled: !prev.enabled }));
       },
       addCutLine: () => {
-        openModule("crop");
+        openModule("split");
         modules.setCropModule((prev) => {
           const nextLine = getNextCutLine(prev.splitLines);
           return {
@@ -323,16 +354,14 @@ export function useBookStudioState() {
         }
       },
       applyAction: () => {
-        if (focusedModule === "crop" || modules.cropModule.enabled) {
-          if (modules.cropModule.splitLines.length > 0) {
-            void modules.splitSpread();
-          } else {
-            void modules.applyCrop();
-          }
+        if (focusedModule === "split") {
+          void modules.splitSpread();
+        } else if (focusedModule === "crop" || modules.cropModule.enabled) {
+          void modules.applyCrop();
         }
       },
       focusModule: (idx: number) => {
-        const order: FocusedModuleId[] = ["crop", "deskew", "cleanup", "restore", "bleed"];
+        const order: FocusedModuleId[] = ["crop", "split", "deskew", "cleanup", "restore"];
         const picked = order[idx - 1];
         if (picked) openModule(picked);
       },
@@ -389,8 +418,45 @@ export function useBookStudioState() {
     modules.setExportError(resolved);
   }, [session, modules]);
 
-  // Thumbnail URL builder wired with debounced module values
+  // Stable thumbnail builder for Deck Cards in the Left Panel.
+  // Represents strictly the committed page state without depending on selectedPageId or draft sliders.
+  const getDeckThumbnailUrl = useCallback((pageId: string, isCleanOrDpi?: boolean | number, dpi?: number): string => {
+    const resolvedDpi = typeof isCleanOrDpi === "number" ? isCleanOrDpi : (dpi ?? 80);
+    return session.buildDeckThumbnailUrl(pageId, resolvedDpi);
+  }, [session]);
+
+  // Thumbnail URL builder wired with debounced module values (for Center Canvas Preview)
   const getThumbnailUrl = useCallback((pageId: string, isClean: boolean, dpi: number = 100): string => {
+    const hiddenMaskIds: string[] = [];
+    const editingMaskId = modules.cleanupModule.draftMaskBox?.id;
+    if (editingMaskId) {
+      hiddenMaskIds.push(editingMaskId);
+    }
+    const pageIdx = session.pages.findIndex((p) => p.id === pageId);
+    const pageNum = pageIdx >= 0 ? pageIdx + 1 : 1;
+
+    if (!modules.cleanupModule.enabled) {
+      hiddenMaskIds.push("*");
+    } else {
+      for (const e of modules.cleanupModule.appliedEntries || []) {
+        if (e.visible === false) {
+          const isMask = Boolean(e.params?.isMaskEntry || e.id.startsWith("mask_"));
+          if (isMask) {
+            const appliesToPage =
+              (!e.excludedPages || !e.excludedPages.includes(pageNum)) &&
+              ((!e.targetPageIds || e.targetPageIds.length === 0 || e.targetPageIds.includes(pageId)) &&
+               (!e.targetPages || e.targetPages.length === 0 || e.targetPages.includes(pageNum)));
+            if (appliesToPage) {
+              const maskId = e.params?.maskBox?.id || (e.id.startsWith("mask_") ? e.id.slice(5) : null);
+              if (maskId) {
+                hiddenMaskIds.push(maskId);
+              }
+            }
+          }
+        }
+      }
+    }
+
     return session.buildThumbnailUrl(pageId, isClean, dpi, {
       deskewEnabled: modules.deskewModule.enabled,
       deskewScope: modules.deskewModule.scope,
@@ -401,7 +467,9 @@ export function useBookStudioState() {
       cleanupEnabled: modules.cleanupModule.enabled,
       cleanupScope: modules.cleanupModule.scope,
       flattenIllumination: modules.cleanupModule.flattenIllumination,
-      despeckleLevel: modules.cleanupModule.despeckleLevel,
+      spineStrength: modules.debouncedSpineStrength ?? modules.cleanupModule.spineStrength ?? 1.0,
+      spineBox: modules.cleanupModule.spineBox,
+      despeckleLevel: modules.debouncedDespeckle ?? modules.cleanupModule.despeckleLevel,
       restorationEnabled: modules.restorationModule.enabled,
       restorationScope: modules.restorationModule.scope,
       cleanBorders: modules.restorationModule.cleanBorders,
@@ -424,6 +492,7 @@ export function useBookStudioState() {
       cleanupAppliedEntries: modules.cleanupModule.appliedEntries,
       restorationAppliedEntries: modules.restorationModule.appliedEntries,
       bleedAppliedEntries: modules.bleedModule.appliedBleeds,
+      excludeMaskIds: hiddenMaskIds.length > 0 ? hiddenMaskIds : undefined,
     });
   }, [session, modules]);
 
@@ -432,8 +501,18 @@ export function useBookStudioState() {
     await modules.exportPdf(session.intakeMode, options);
   }, [session, modules]);
 
-  const applyMaskBox = useCallback(async (box: CropBox): Promise<void> => {
-    await modules.applyMaskBox(box, selectedPageIds);
+  const applyMaskBox = useCallback(async (
+    box: CropBox,
+    targetPageIds?: string[],
+    customColor?: string,
+    existingMaskId?: string
+  ): Promise<MaskBox | undefined> => {
+    return await modules.applyMaskBox(
+      box,
+      targetPageIds && targetPageIds.length > 0 ? targetPageIds : selectedPageIds,
+      customColor,
+      existingMaskId
+    );
   }, [modules, selectedPageIds]);
 
   // Reset session + module configs + history
@@ -537,13 +616,18 @@ export function useBookStudioState() {
     restorationModule: modules.restorationModule, setRestorationModule: modules.setRestorationModule,
     cropModule: modules.cropModule, setCropModule: modules.setCropModule,
     pageCrops: modules.pageCrops,
+    focusCropPage: modules.focusCropPage,
     clearPageCrops: modules.clearPageCrops,
     isDetectingCrop: session.isDetectingCrop,
     detectCrop,
     detectAllCrops,
     splitSpread: modules.splitSpread,
     revertSpread: modules.revertSpread,
+    revertSplitLevel: modules.revertSplitLevel,
     applyCrop: modules.applyCrop,
+    revertCropLevel: modules.revertCropLevel,
+    resetCrop: modules.resetCrop,
+    resetDeskew: modules.resetDeskew,
     removeAppliedCrop: modules.removeAppliedCrop,
     removeAllAppliedCrops: modules.removeAllAppliedCrops,
     clearAllDeskewAngles,
@@ -574,6 +658,7 @@ export function useBookStudioState() {
     exportPdf,
     exportProgress: modules.exportProgress,
     dismissExportProgress: modules.dismissExportProgress,
+    getDeckThumbnailUrl,
     getThumbnailUrl,
     // History & Safety Journal API
     history: history.history,

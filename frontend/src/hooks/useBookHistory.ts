@@ -19,6 +19,7 @@ export interface UseBookHistoryArgs {
   selectedPageId: string | null;
   setSelectedPageId: Dispatch<SetStateAction<string | null>>;
   clearPageCrops?: (ids?: string[]) => void;
+  onStepRestored?: (target: HistoryEntry) => void;
   maxLimit?: number;
 }
 
@@ -27,6 +28,7 @@ export function useBookHistory({
   setPages,
   setSelectedPageId,
   clearPageCrops,
+  onStepRestored,
   maxLimit = 50,
 }: UseBookHistoryArgs) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -96,17 +98,22 @@ export function useBookHistory({
 
     isSyncingRef.current = true;
     setCurrentIndex(index);
-    setPages(structuredClone(target.pages));
+    const bumpedPages = target.pages.map((p) => ({
+      ...p,
+      rev: (p.rev ?? 0) + 1,
+    }));
+    setPages(bumpedPages);
     if (target.selectedPageId) {
       setSelectedPageId(target.selectedPageId);
-    } else if (target.pages.length > 0) {
-      setSelectedPageId(target.pages[0].id);
+    } else if (bumpedPages.length > 0) {
+      setSelectedPageId(bumpedPages[0].id);
     }
     clearPageCrops?.();
+    onStepRestored?.(target);
 
-    await syncToBackend(target.pages);
+    await syncToBackend(bumpedPages);
     isSyncingRef.current = false;
-  }, [history, currentIndex, setPages, setSelectedPageId, clearPageCrops, syncToBackend]);
+  }, [history, currentIndex, setPages, setSelectedPageId, clearPageCrops, onStepRestored, syncToBackend]);
 
   const undo = useCallback(() => {
     if (currentIndex > 0) {

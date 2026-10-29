@@ -1,17 +1,23 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { ImposingPageMeta } from "@/types/prepress";
-import { useImpositionStudio, buildImposingPagesFromMeta } from "@/hooks/useImpositionStudio";
+import {
+  useImpositionStudio,
+  buildImposingPagesFromMeta,
+} from "@/hooks/useImpositionStudio";
 import { StudioLayout } from "@/components/layout/StudioLayout";
 import { LeftAssetPanel } from "@/components/imposing/LeftAssetPanel";
 import { RightControlPanel } from "@/components/imposing/RightControlPanel";
 
 const PreviewViewport = dynamic(
-  () => import("@/components/imposing/PreviewViewport").then((mod) => mod.PreviewViewport),
+  () =>
+    import("@/components/imposing/PreviewViewport").then(
+      (mod) => mod.PreviewViewport,
+    ),
   {
     ssr: false,
     loading: () => (
@@ -19,7 +25,7 @@ const PreviewViewport = dynamic(
         Loading imposing canvas...
       </div>
     ),
-  }
+  },
 );
 
 interface PreloadPagesResponse {
@@ -29,31 +35,44 @@ interface PreloadPagesResponse {
 
 function ImposingStudioContent() {
   const {
-    jobMode, setJobMode,
-    items, setItems,
-    pages, setPages,
+    jobMode,
+    setJobMode,
+    items,
+    setItems,
+    pages,
+    setPages,
     reorderPages,
     rotatePage,
     toggleDeletePage,
     duplicatePage,
     clearAllPages,
     unit,
-    sheetW, setSheetW,
-    sheetH, setSheetH,
-    sheetPreset, setSheetPreset,
-    margin, setMargin,
-    gap, setGap,
+    sheetW,
+    setSheetW,
+    sheetH,
+    setSheetH,
+    sheetPreset,
+    setSheetPreset,
+    margin,
+    setMargin,
+    gap,
+    setGap,
     drawBorder,
     borderColor,
-    cropMarks, setCropMarks,
-    regMarks, setRegMarks,
-    rows, setRows,
-    cols, setCols,
+    cropMarks,
+    setCropMarks,
+    regMarks,
+    setRegMarks,
+    rows,
+    setRows,
+    cols,
+    setCols,
     isUploading,
     isPreviewing,
     isExporting,
     previewData,
-    currentPage, setCurrentPage,
+    currentPage,
+    setCurrentPage,
     error,
     handleFileUpload,
     handlePreview,
@@ -61,6 +80,7 @@ function ImposingStudioContent() {
   } = useImpositionStudio();
 
   const searchParams = useSearchParams();
+  const preloadedFileIdRef = useRef<string | null>(null);
 
   // Preload file if directed from Command Center / Hub
   useEffect(() => {
@@ -71,7 +91,18 @@ function ImposingStudioContent() {
     const pageCountParam = parseInt(searchParams.get("page_count") || "1", 10);
     const modeParam = searchParams.get("job_mode");
 
-    if (fileIdParam && wParam > 0 && hParam > 0) {
+    if (
+      fileIdParam &&
+      fileIdParam !== preloadedFileIdRef.current &&
+      wParam > 0 &&
+      hParam > 0
+    ) {
+      preloadedFileIdRef.current = fileIdParam;
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {
+        // ignore
+      }
       const isBook = pageCountParam > 1;
       if (modeParam === "gang" || modeParam === "book") setJobMode(modeParam);
       else setJobMode(isBook ? "book" : "gang");
@@ -114,17 +145,34 @@ function ImposingStudioContent() {
               wParam,
               hParam,
               pageCountParam,
-              data.success ? data.pages : undefined
-            )
+              data.success ? data.pages : undefined,
+            ),
           );
         })
         .catch(() => {
-          setPages(buildImposingPagesFromMeta(fileIdParam, nameParam, wParam, hParam, pageCountParam));
+          setPages(
+            buildImposingPagesFromMeta(
+              fileIdParam,
+              nameParam,
+              wParam,
+              hParam,
+              pageCountParam,
+            ),
+          );
         });
     }
-  }, [searchParams, setJobMode, setItems, setPages, setSheetH, setSheetPreset, setSheetW]);
+  }, [
+    searchParams,
+    setJobMode,
+    setItems,
+    setPages,
+    setSheetH,
+    setSheetPreset,
+    setSheetW,
+  ]);
 
   const bookStep = 2;
+  const [isDeckOpen, setIsDeckOpen] = useState<boolean>(true);
 
   return (
     <StudioLayout
@@ -139,12 +187,19 @@ function ImposingStudioContent() {
       }
       statusBadge={
         <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#181D27] border border-[#242A38] text-xs">
-          <span className="text-slate-400 font-mono font-medium">{sheetW}×{sheetH}{unit}</span>
+          <span className="text-slate-400 font-mono font-medium">
+            {sheetW}×{sheetH}
+            {unit}
+          </span>
           <span className="text-slate-600">•</span>
-          <span className="text-cyan-400 font-semibold uppercase text-[11px]">{jobMode}</span>
+          <span className="text-cyan-400 font-semibold uppercase text-[11px]">
+            {jobMode}
+          </span>
         </div>
       }
       leftLabel="Deck"
+      isLeftCollapsed={!isDeckOpen}
+      onToggleLeft={() => setIsDeckOpen((prev) => !prev)}
       leftPanel={
         <LeftAssetPanel
           items={items}
@@ -156,6 +211,7 @@ function ImposingStudioContent() {
           toggleDeletePage={toggleDeletePage}
           duplicatePage={duplicatePage}
           clearAllPages={clearAllPages}
+          onCollapse={() => setIsDeckOpen(false)}
         />
       }
       centerViewport={
@@ -175,6 +231,8 @@ function ImposingStudioContent() {
           error={error}
           currentPage={currentPage}
           setCurrentPage={setCurrentPage}
+          isDeckOpen={isDeckOpen}
+          onToggleDeck={() => setIsDeckOpen((prev) => !prev)}
         />
       }
       rightLabel="Controls"

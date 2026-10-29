@@ -7,6 +7,7 @@ import {
   IconImposingStudio,
   IconFlipbookStudio,
   IconToolCropSplit,
+  IconSplitVertical,
   IconToolDeskew,
   IconToolCleanup,
   IconToolBleed,
@@ -18,20 +19,24 @@ import {
   RestorationModuleConfig,
   CropModuleConfig,
   CropBox,
+  MaskBox,
   CleanupColorMode,
   FocusedModuleId,
   BookStudioPage,
   ModuleTaskProgress,
 } from "@/types/book_studio";
-import { LengthUnit, mmToUnit, UNIT_OPTIONS } from "@/lib/units";
+import { LengthUnit } from "@/lib/units";
 import { CropSplitPanel } from "./modules/CropSplitPanel";
 import { DeskewPanel } from "./modules/DeskewPanel";
 import { BleedPanel } from "./modules/BleedPanel";
-import { CleanupPanel, RestorePanel } from "./modules/RestorePanel";
+import { CleanupPanel } from "./modules/CleanupPanel";
+import { RestorePanel } from "./modules/RestorePanel";
 import { ModuleProgressBar } from "./modules/PageScopeSelector";
 
 interface BookRightPanelProps {
   cropModule: CropModuleConfig;
+  isDualPage?: boolean;
+  focusCropPage?: (pageId: string, visibleIds: string[]) => void;
   setCropModule: React.Dispatch<React.SetStateAction<CropModuleConfig>>;
   isDetectingCrop?: boolean;
   detectCrop?: (pageId?: string) => Promise<{ crop_box: CropBox; split_pos: number; confidence: number } | null>;
@@ -41,7 +46,11 @@ interface BookRightPanelProps {
   clearPageCrops?: () => void;
   splitSpread?: () => Promise<void>;
   revertSpread?: (mode?: "current" | "all", pageId?: string) => Promise<void>;
+  revertSplitLevel?: (pageId?: string) => Promise<void>;
   applyCrop?: () => Promise<void>;
+  revertCropLevel?: (scopeMode?: "current" | "all") => Promise<void> | void;
+  resetCrop?: (scopeMode?: "current" | "all") => Promise<void> | void;
+  resetDeskew?: (scopeMode?: "current" | "all") => Promise<void> | void;
   removeAppliedCrop?: (id: string) => Promise<void> | void;
   removeAllAppliedCrops?: () => Promise<void> | void;
   pages: BookStudioPage[];
@@ -57,10 +66,12 @@ interface BookRightPanelProps {
   maskToolActive?: boolean;
   onToggleMaskTool?: () => void;
   onActivateMaskEyedropper?: () => void;
-  onClearPageMasks?: () => void;
+  onClearPageMasks?: (targetIds?: string[]) => void;
   onClearAllMasks?: () => void;
+  applyMaskBox?: (box: CropBox, selectedPageIds?: string[], customColor?: string, existingMaskId?: string) => Promise<MaskBox | undefined>;
+  removeMaskBox?: (maskId: string) => Promise<void>;
   pageColorMode?: CleanupColorMode | null;
-  onSetPageColorMode?: (mode: CleanupColorMode | null, clearAll?: boolean) => void;
+  onSetPageColorMode?: (mode: CleanupColorMode | null, targetIds?: string[], clearAll?: boolean) => void;
   focusedModule: FocusedModuleId | null;
   onFocusModule?: (mod: FocusedModuleId | null) => void;
   isDetectingAngle?: boolean;
@@ -88,6 +99,8 @@ interface BookRightPanelProps {
 export function BookRightPanel({
   cropModule,
   setCropModule,
+  isDualPage,
+  focusCropPage,
   isDetectingCrop,
   detectCrop,
   detectAllCrops,
@@ -96,7 +109,11 @@ export function BookRightPanel({
   clearPageCrops,
   splitSpread,
   revertSpread,
+  revertSplitLevel,
   applyCrop,
+  revertCropLevel,
+  resetCrop,
+  resetDeskew,
   removeAppliedCrop,
   removeAllAppliedCrops,
   pages,
@@ -114,6 +131,8 @@ export function BookRightPanel({
   onActivateMaskEyedropper,
   onClearPageMasks,
   onClearAllMasks,
+  applyMaskBox,
+  removeMaskBox,
   pageColorMode = null,
   onSetPageColorMode,
   focusedModule = null,
@@ -145,73 +164,10 @@ export function BookRightPanel({
   const pageMasksCount = activePage?.masks?.length ?? 0;
   const totalMasksCount = pages.reduce((acc, p) => acc + (p.masks?.length ?? 0), 0);
   const colorOverridePagesCount = pages.filter((p) => Boolean(p.color_mode)).length;
-  const unitShort = UNIT_OPTIONS.find((o) => o.value === unit)?.short || "mm";
-
-  // Build concise live summaries for the Hub Cards
-  const cropSummary = (() => {
-    const parts: string[] = [];
-    if (cropModule.splitLines.length > 0) {
-      parts.push(`${cropModule.splitLines.length} cut${cropModule.splitLines.length > 1 ? "s" : ""}`);
-    }
-    if (pageCropsCount > 0) {
-      parts.push(`${pageCropsCount}p ready`);
-    }
-    parts.push((cropModule.detectMode || "paper") === "content" ? "Tight Content" : "Paper Sheet");
-    return parts.join(" • ");
-  })();
-
-  const deskewSummary = (() => {
-    const parts: string[] = [];
-    if (deskewedPagesCount > 0) {
-      parts.push(`${deskewedPagesCount}p straightened`);
-    }
-    const effAngle =
-      pageDeskewAngle !== null && pageDeskewAngle !== undefined
-        ? pageDeskewAngle
-        : detectedAngle !== null && detectedAngle !== undefined
-          ? detectedAngle
-          : deskewModule.angle;
-    if (Math.abs(effAngle) > 0.01) {
-      parts.push(`Page ${effAngle > 0 ? "+" : ""}${effAngle.toFixed(2)}°`);
-    }
-    if (parts.length === 0) {
-      parts.push(`Auto (±${deskewModule.maxAngle}°) & Ruler`);
-    }
-    return parts.join(" • ");
-  })();
-
-  const cleanupSummary = (() => {
-    const parts: string[] = [];
-    if (totalMasksCount > 0) parts.push(`${totalMasksCount} box${totalMasksCount > 1 ? "es" : ""}`);
-    if (cleanupModule.flattenIllumination) parts.push("Spine");
-    if (cleanupModule.despeckleLevel > 0) parts.push(`Despeckle L${cleanupModule.despeckleLevel}`);
-    return parts.length > 0 ? parts.join(" • ") : "Erase & clean";
-  })();
-
-  const restoreSummary = (() => {
-    const modeMap: Record<CleanupColorMode, string> = {
-      auto: "Auto",
-      color: "Color",
-      grayscale: "Gray",
-      bw: `B&W (${restorationModule.bwThreshold ?? 180})`,
-    };
-    const parts: string[] = [modeMap[restorationModule.colorMode || "auto"]];
-    if (restorationModule.whitenBg) parts.push("Whiten BG");
-    if (colorOverridePagesCount > 0) parts.push(`${colorOverridePagesCount}p`);
-    return parts.join(" • ");
-  })();
-
-  const bleedSummary = (() => {
-    if (bleedModule.bleedMm <= 0 && (!bleedModule.appliedBleeds || bleedModule.appliedBleeds.length === 0)) {
-      return "Bleed & marks";
-    }
-    const pl = (bleedModule.placement || "outside") === "inside" ? "Inside" : "Outside";
-    const md = bleedModule.mode === "solid" ? "Solid" : "Mirror";
-    return `${pl} ${mmToUnit(bleedModule.bleedMm, unit)}${unitShort} • ${md}`;
-  })();
 
   const moduleShortcuts: Record<FocusedModuleId, string> = {
     crop: shortcutLabels.module_crop || "1",
+    split: shortcutLabels.add_cut || "X",
     deskew: shortcutLabels.module_deskew || "2",
     cleanup: shortcutLabels.module_cleanup || "3",
     restore: shortcutLabels.module_restore || "4",
@@ -222,380 +178,271 @@ export function BookRightPanel({
     id: FocusedModuleId;
     shortcut: string;
     title: string;
-    summary: string;
-    enabled: boolean;
-    onToggleEnabled: (next: boolean) => void;
     icon: React.ReactNode;
-    badge?: string | null;
     progress?: ModuleTaskProgress;
   }[] = [
     {
       id: "crop",
       shortcut: moduleShortcuts.crop,
-      title: "Crop & Split",
-      summary: cropSummary,
-      enabled: cropModule.enabled,
-      onToggleEnabled: (next) => setCropModule((p) => ({ ...p, enabled: next })),
-      icon: <IconToolCropSplit size={16} />,
-      badge: pageCropsCount > 0 ? `${pageCropsCount}p` : cropModule.splitLines.length > 0 ? `${cropModule.splitLines.length} cut` : null,
+      title: "Crop",
+      icon: <IconToolCropSplit size={15} />,
+      progress: cropProgress,
+    },
+    {
+      id: "split",
+      shortcut: moduleShortcuts.split,
+      title: "Split",
+      icon: <IconSplitVertical size={15} />,
       progress: cropProgress,
     },
     {
       id: "deskew",
       shortcut: moduleShortcuts.deskew,
       title: "Deskew",
-      summary: deskewSummary,
-      enabled: deskewModule.enabled,
-      onToggleEnabled: (next) => setDeskewModule((p) => ({ ...p, enabled: next })),
-      icon: <IconToolDeskew size={16} />,
-      badge: deskewedPagesCount > 0 ? `${deskewedPagesCount}p` : null,
+      icon: <IconToolDeskew size={15} />,
       progress: deskewProgress,
     },
     {
       id: "cleanup",
       shortcut: moduleShortcuts.cleanup,
-      title: "Cleanup",
-      summary: cleanupSummary,
-      enabled: cleanupModule.enabled,
-      onToggleEnabled: (next) => setCleanupModule((p) => ({ ...p, enabled: next })),
-      icon: <Eraser size={16} />,
-      badge: totalMasksCount > 0 ? `${totalMasksCount}` : null,
+      title: "Cleanup & Erase",
+      icon: <Eraser size={15} />,
       progress: cleanupProgress,
     },
     {
       id: "restore",
       shortcut: moduleShortcuts.restore,
-      title: "Colors",
-      summary: restoreSummary,
-      enabled: restorationModule.enabled,
-      onToggleEnabled: (next) => setRestorationModule((p) => ({ ...p, enabled: next })),
-      icon: <IconToolCleanup size={16} />,
-      badge: colorOverridePagesCount > 0 ? `${colorOverridePagesCount}p` : null,
+      title: "Colors & Tone",
+      icon: <IconToolCleanup size={15} />,
       progress: restoreProgress,
     },
     {
       id: "bleed",
       shortcut: moduleShortcuts.bleed,
-      title: "Bleed",
-      summary: bleedSummary,
-      enabled: bleedModule.enabled,
-      onToggleEnabled: (next) => setBleedModule((p) => ({ ...p, enabled: next })),
-      icon: <IconToolBleed size={16} />,
-      badge:
-        bleedModule.appliedBleeds && bleedModule.appliedBleeds.length > 0
-          ? `${bleedModule.appliedBleeds.length}`
-          : null,
+      title: "Print Bleed",
+      icon: <IconToolBleed size={15} />,
       progress: bleedProgress,
     },
   ];
 
-  const activeLayerCount = moduleDescriptors.filter((m) => m.enabled).length;
-
   // ---------------------------------------------------------------------------
-  // VIEW 1: MODULES HUB (Overview of all 5 modules as rich button cards)
+  // VIEW 1: SIMPLE COLUMN FIELD WITH TOOL NAMES (No borders, no card boxes)
   // ---------------------------------------------------------------------------
   if (focusedModule === null) {
     return (
-      <div className="flex flex-col space-y-2.5 pb-2 select-none">
-        {/* Hub Header */}
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center space-x-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Prepress Modules
-            </span>
-            <span
-              className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--surface-inset,#131720)] border border-[var(--border-subtle,#242A38)] text-slate-300"
-              title="Number of active processing layers"
-            >
-              <strong style={{ color: "var(--app-accent-text, var(--app-accent, #f59e0b))" }}>
-                {activeLayerCount}
-              </strong>{" "}
-              Active
-            </span>
-          </div>
+      <div className="flex flex-col h-full select-none">
+        {/* Top Header */}
+        <div className="h-10 px-4 border-b border-[#1E232E] flex items-center justify-between shrink-0">
+          <span className="text-xs font-bold text-slate-100">PDF Tools</span>
           {onCollapse && (
             <button
               type="button"
               onClick={onCollapse}
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
-              title="Collapse Controls Panel"
+              className="p-1 text-slate-400 hover:text-white rounded transition-colors cursor-pointer"
+              title="Collapse Tools Panel"
             >
               <ChevronRight size={14} />
             </button>
           )}
         </div>
 
-        {/* 5 Rich Module Button Cards */}
-        <div className="space-y-2">
-          {moduleDescriptors.map((mod) => (
-            <div
-              key={mod.id}
-              onClick={() => onFocusModule?.(mod.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onFocusModule?.(mod.id);
-                }
-              }}
-              className={`group rounded-xl border p-2.5 transition-all cursor-pointer ${
-                mod.enabled
-                  ? "bg-[var(--surface-card,#181D27)] border-[var(--border-strong,#333D52)] hover:border-amber-500/60 shadow-2xs"
-                  : "bg-[var(--surface-card,#181D27)]/80 border-[var(--border-subtle,#242A38)] hover:border-slate-600"
-              }`}
-              title={`Open ${mod.title} options (${mod.shortcut})`}
-            >
-              <div className="flex items-center justify-between gap-2.5">
-                {/* Left Icon */}
-                <div
-                  className={`p-2 rounded-lg border transition-colors shrink-0 ${
-                    mod.enabled
-                      ? "bg-[var(--surface-inset,#131720)] border-amber-500/30"
-                      : "bg-[var(--surface-inset,#131720)] border-[var(--border-subtle,#242A38)] text-slate-400 group-hover:text-slate-200"
-                  }`}
-                  style={mod.enabled ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-                >
-                  {mod.icon}
-                </div>
-
-                {/* Center Title & Live Summary */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-1.5">
-                    <span className="text-xs font-bold text-[var(--text-primary,#f1f5f9)] truncate">
-                      {mod.title}
-                    </span>
-                    {mod.badge && (
-                      <span
-                        className="text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0"
-                      >
-                        {mod.badge}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-slate-400 truncate mt-0.5">{mod.summary}</p>
-                </div>
-
-                {/* Right: Inline Layer Toggle + Drill-In Chevron */}
-                <div
-                  className="flex items-center space-x-2 shrink-0"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <label
-                    className="relative inline-flex items-center cursor-pointer"
-                    title={`Toggle ${mod.title} Layer ON/OFF`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={mod.enabled}
-                      onChange={(e) => mod.onToggleEnabled(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div
-                      className="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"
-                      style={mod.enabled ? { backgroundColor: "var(--app-accent, #f59e0b)" } : undefined}
-                    />
-                  </label>
+        {/* Simple Flat Tool List */}
+        <div className="flex-1 overflow-y-auto py-3 px-2 space-y-5">
+          <div>
+            <div className="px-2.5 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Prepress Tools
+            </div>
+            <div className="space-y-0.5">
+              {moduleDescriptors.map((mod) => (
+                <div key={mod.id}>
                   <button
                     type="button"
                     onClick={() => onFocusModule?.(mod.id)}
-                    className="p-0.5 text-slate-500 group-hover:text-slate-200 transition-colors cursor-pointer"
-                    title={`Configure ${mod.title}`}
+                    className="w-full flex items-center space-x-3 px-2.5 py-2 rounded-md text-slate-300 hover:text-white hover:bg-[#191D26] transition-colors text-left cursor-pointer group"
+                    title={`Open ${mod.title} (${mod.shortcut})`}
                   >
-                    <ChevronRight size={14} />
+                    <span className="text-slate-400 group-hover:text-slate-200 shrink-0">
+                      {mod.icon}
+                    </span>
+                    <span className="text-xs font-medium truncate flex-1">{mod.title}</span>
                   </button>
+                  <ModuleProgressBar task={mod.progress} />
                 </div>
-              </div>
-
-              <ModuleProgressBar task={mod.progress} />
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
 
-        {/* Compact Studio Handoff Links */}
-        <div className="pt-1 flex items-center gap-1.5">
-          <Link
-            href="/imposing"
-            className="flex-1 flex items-center justify-between px-2.5 py-2 rounded-xl bg-[var(--surface-card,#181D27)] hover:bg-[#1E2432] border border-[var(--border-subtle,#242A38)] hover:border-slate-600 text-slate-400 hover:text-slate-100 transition-colors text-[11px]"
-            title="Open Imposing Studio for Booklet Signatures & Gang Nesting"
-          >
-            <span className="flex items-center space-x-1.5 truncate">
-              <IconImposingStudio size={13} className="shrink-0" style={{ color: "var(--app-accent, #f59e0b)" }} />
-              <span className="truncate font-medium">Imposing</span>
-            </span>
-            <ArrowUpRight size={11} className="text-slate-500 shrink-0" />
-          </Link>
-          <Link
-            href="/flipbook"
-            className="flex-1 flex items-center justify-between px-2.5 py-2 rounded-xl bg-[var(--surface-card,#181D27)] hover:bg-[#1E2432] border border-[var(--border-subtle,#242A38)] hover:border-slate-600 text-slate-400 hover:text-slate-100 transition-colors text-[11px]"
-            title="Open 3D Flipbook Studio for Interactive Proofing"
-          >
-            <span className="flex items-center space-x-1.5 truncate">
-              <IconFlipbookStudio size={13} className="shrink-0" style={{ color: "var(--app-accent, #f59e0b)" }} />
-              <span className="truncate font-medium">3D Flipbook</span>
-            </span>
-            <ArrowUpRight size={11} className="text-slate-500 shrink-0" />
-          </Link>
+          <div>
+            <div className="px-2.5 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Workflow Handoff
+            </div>
+            <div className="space-y-0.5">
+              <Link
+                href="/imposing"
+                className="w-full flex items-center justify-between px-2.5 py-2 rounded-md text-slate-300 hover:text-white hover:bg-[#191D26] transition-colors text-xs group"
+                title="Open Imposing Studio for Booklet Signatures & Gang Nesting"
+              >
+                <span className="flex items-center space-x-3 truncate">
+                  <IconImposingStudio size={15} className="text-slate-400 group-hover:text-slate-200 shrink-0" />
+                  <span className="truncate font-medium">Imposing Studio</span>
+                </span>
+                <ArrowUpRight size={13} className="text-slate-500 group-hover:text-slate-300 shrink-0" />
+              </Link>
+              <Link
+                href="/flipbook"
+                className="w-full flex items-center justify-between px-2.5 py-2 rounded-md text-slate-300 hover:text-white hover:bg-[#191D26] transition-colors text-xs group"
+                title="Open 3D Flipbook Studio for Interactive Proofing"
+              >
+                <span className="flex items-center space-x-3 truncate">
+                  <IconFlipbookStudio size={15} className="text-slate-400 group-hover:text-slate-200 shrink-0" />
+                  <span className="truncate font-medium">3D Flipbook</span>
+                </span>
+                <ArrowUpRight size={13} className="text-slate-500 group-hover:text-slate-300 shrink-0" />
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
+  const activeDescriptor = moduleDescriptors.find((m) => m.id === focusedModule);
+
   // ---------------------------------------------------------------------------
-  // VIEW 2: DEDICATED MODULE WORKSPACE (Back Button + Quick-Jump Bar + Options)
+  // VIEW 2: OPENED TOOL OPTIONS (Clean borderless header + options)
   // ---------------------------------------------------------------------------
   return (
-    <div className="flex flex-col space-y-2.5 pb-2 select-none">
-      {/* Top Navigation Bar: Back to Hub + 5-Icon Quick-Jump Bar */}
-      <div className="flex items-center justify-between gap-1.5 p-1 rounded-xl bg-[var(--surface-card,#181D27)] border border-[var(--border-subtle,#242A38)]">
+    <div className="flex flex-col h-full select-none">
+      {/* Top Header: Back to Tools */}
+      <div className="h-10 px-3 border-b border-[#1E232E] flex items-center justify-between shrink-0">
         <button
           type="button"
           onClick={() => onFocusModule?.(null)}
-          className="flex items-center space-x-1.5 px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--text-primary,#e2e8f0)] hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-          title={`Return to All Modules (${shortcutLabels.exit_module || "Esc"})`}
+          className="flex items-center space-x-2 text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer"
+          title={`Return to Tools (${shortcutLabels.exit_module || "Esc"})`}
         >
-          <ArrowLeft size={13} style={{ color: "var(--app-accent, #f59e0b)" }} />
-          <span>All Modules</span>
+          <ArrowLeft size={14} className="text-slate-400" />
+          <span>{activeDescriptor?.title || "Tool Options"}</span>
         </button>
 
-        <div className="flex items-center space-x-1">
-          {/* 5-Icon Quick-Jump Strip */}
-          <div className="flex items-center bg-[var(--surface-inset,#131720)] p-0.5 rounded-lg border border-[var(--border-subtle,#242A38)]">
-            {moduleDescriptors.map((mod) => {
-              const isCurrent = focusedModule === mod.id;
-              return (
-                <button
-                  key={mod.id}
-                  type="button"
-                  onClick={() => onFocusModule?.(mod.id)}
-                  className={`relative p-1.5 rounded-md transition-colors cursor-pointer ${
-                    isCurrent
-                      ? "bg-slate-800 text-white"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                  style={isCurrent ? { color: "var(--app-accent, #f59e0b)" } : undefined}
-                  title={`Jump to ${mod.title} (${mod.shortcut})`}
-                >
-                  {React.cloneElement(mod.icon as React.ReactElement<{ size?: number }>, { size: 13 })}
-                  {mod.enabled && (
-                    <span
-                      className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: "var(--app-accent, #f59e0b)" }}
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {onCollapse && (
-            <button
-              type="button"
-              onClick={onCollapse}
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-              title="Collapse Controls Panel"
-            >
-              <ChevronRight size={14} />
-            </button>
-          )}
-        </div>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="p-1 text-slate-400 hover:text-white rounded transition-colors cursor-pointer"
+            title="Collapse Tools Panel"
+          >
+            <ChevronRight size={14} />
+          </button>
+        )}
       </div>
 
-      {/* Active Module Workspace */}
-      {focusedModule === "crop" && (
-        <CropSplitPanel
-          cropModule={cropModule}
-          setCropModule={setCropModule}
-          isDetectingCrop={isDetectingCrop}
-          detectCrop={detectCrop}
-          detectAllCrops={detectAllCrops}
-          pageCropsCount={pageCropsCount}
-          hasActivePageDraftCrop={hasActivePageDraftCrop}
-          clearPageCrops={clearPageCrops}
-          splitSpread={splitSpread}
-          revertSpread={revertSpread}
-          applyCrop={applyCrop}
-          removeAppliedCrop={removeAppliedCrop}
-          removeAllAppliedCrops={removeAllAppliedCrops}
-          taskProgress={cropProgress}
-          selectedPageId={selectedPageId}
-          sessionId={sessionId}
-          pages={pages}
-          activePageNum={activePageNum}
-          shortcutLabels={shortcutLabels}
-        />
-      )}
+      {/* Active Tool Options Body */}
+      <div className="flex-1 overflow-y-auto p-3.5">
+        {(focusedModule === "crop" || focusedModule === "split") && (
+          <CropSplitPanel
+            mode={focusedModule}
+            cropModule={cropModule}
+            isDualPage={isDualPage}
+            focusCropPage={focusCropPage}
+            setCropModule={setCropModule}
+            isDetectingCrop={isDetectingCrop}
+            detectCrop={detectCrop}
+            detectAllCrops={detectAllCrops}
+            pageCropsCount={pageCropsCount}
+            hasActivePageDraftCrop={hasActivePageDraftCrop}
+            clearPageCrops={clearPageCrops}
+            splitSpread={splitSpread}
+            revertSpread={revertSpread}
+            revertSplitLevel={revertSplitLevel}
+            applyCrop={applyCrop}
+            revertCropLevel={revertCropLevel}
+            resetCrop={resetCrop}
+            removeAppliedCrop={removeAppliedCrop}
+            removeAllAppliedCrops={removeAllAppliedCrops}
+            taskProgress={cropProgress}
+            selectedPageId={selectedPageId}
+            sessionId={sessionId}
+            pages={pages}
+            activePageNum={activePageNum}
+            shortcutLabels={shortcutLabels}
+          />
+        )}
 
-      {focusedModule === "deskew" && (
-        <DeskewPanel
-          deskewModule={deskewModule}
-          setDeskewModule={setDeskewModule}
-          isDetectingAngle={isDetectingAngle}
-          detectedAngle={detectedAngle}
-          detectPageAngle={detectPageAngle}
-          detectAllPageAngles={detectAllPageAngles}
-          pageDeskewAngle={pageDeskewAngle}
-          onChangePageAngle={onChangePageAngle}
-          onClearAllAngles={clearAllDeskewAngles}
-          straightenActive={straightenActive}
-          onToggleStraighten={onToggleStraighten}
-          deskewedPagesCount={deskewedPagesCount}
-          taskProgress={deskewProgress}
-          selectedPageId={selectedPageId}
-          sessionId={sessionId}
-          pages={pages}
-          activePageNum={activePageNum}
-          shortcutLabels={shortcutLabels}
-        />
-      )}
+        {focusedModule === "deskew" && (
+          <DeskewPanel
+            deskewModule={deskewModule}
+            setDeskewModule={setDeskewModule}
+            isDetectingAngle={isDetectingAngle}
+            detectedAngle={detectedAngle}
+            detectPageAngle={detectPageAngle}
+            detectAllPageAngles={detectAllPageAngles}
+            pageDeskewAngle={pageDeskewAngle}
+            onChangePageAngle={onChangePageAngle}
+            onClearAllAngles={clearAllDeskewAngles}
+            resetDeskew={resetDeskew}
+            straightenActive={straightenActive}
+            onToggleStraighten={onToggleStraighten}
+            deskewedPagesCount={deskewedPagesCount}
+            taskProgress={deskewProgress}
+            selectedPageId={selectedPageId}
+            sessionId={sessionId}
+            pages={pages}
+            activePageNum={activePageNum}
+            shortcutLabels={shortcutLabels}
+          />
+        )}
 
-      {focusedModule === "cleanup" && (
-        <CleanupPanel
-          cleanupModule={cleanupModule}
-          setCleanupModule={setCleanupModule}
-          maskToolActive={maskToolActive}
-          onToggleMaskTool={() => onToggleMaskTool?.()}
-          onActivateMaskEyedropper={onActivateMaskEyedropper}
-          pageMasksCount={pageMasksCount}
-          totalMasksCount={totalMasksCount}
-          onClearPageMasks={() => onClearPageMasks?.()}
-          onClearAllMasks={() => onClearAllMasks?.()}
-          taskProgress={cleanupProgress}
-          pages={pages}
-          selectedPageId={selectedPageId}
-          activePageNum={activePageNum}
-          shortcutLabels={shortcutLabels}
-        />
-      )}
+        {focusedModule === "cleanup" && (
+          <CleanupPanel
+            cleanupModule={cleanupModule}
+            setCleanupModule={setCleanupModule}
+            maskToolActive={maskToolActive}
+            onToggleMaskTool={() => onToggleMaskTool?.()}
+            onActivateMaskEyedropper={onActivateMaskEyedropper}
+            pageMasksCount={pageMasksCount}
+            totalMasksCount={totalMasksCount}
+            onClearPageMasks={(ids) => onClearPageMasks?.(ids)}
+            onClearAllMasks={() => onClearAllMasks?.()}
+            applyMaskBox={applyMaskBox}
+            removeMaskBox={removeMaskBox}
+            taskProgress={cleanupProgress}
+            pages={pages}
+            selectedPageId={selectedPageId}
+            activePageNum={activePageNum}
+            shortcutLabels={shortcutLabels}
+          />
+        )}
 
-      {focusedModule === "restore" && (
-        <RestorePanel
-          restorationModule={restorationModule}
-          setRestorationModule={setRestorationModule}
-          pageColorMode={pageColorMode}
-          onSetPageColorMode={onSetPageColorMode}
-          colorOverridePagesCount={colorOverridePagesCount}
-          taskProgress={restoreProgress}
-          pages={pages}
-          selectedPageId={selectedPageId}
-          activePageNum={activePageNum}
-          shortcutLabels={shortcutLabels}
-        />
-      )}
+        {focusedModule === "restore" && (
+          <RestorePanel
+            restorationModule={restorationModule}
+            setRestorationModule={setRestorationModule}
+            pageColorMode={pageColorMode}
+            onSetPageColorMode={onSetPageColorMode}
+            colorOverridePagesCount={colorOverridePagesCount}
+            taskProgress={restoreProgress}
+            pages={pages}
+            selectedPageId={selectedPageId}
+            activePageNum={activePageNum}
+            shortcutLabels={shortcutLabels}
+          />
+        )}
 
-      {focusedModule === "bleed" && (
-        <BleedPanel
-          bleedModule={bleedModule}
-          setBleedModule={setBleedModule}
-          taskProgress={bleedProgress}
-          unit={unit}
-          onActivateEyedropper={onActivateEyedropper}
-          pages={pages}
-          selectedPageId={selectedPageId}
-          activePageNum={activePageNum}
-          shortcutLabels={shortcutLabels}
-        />
-      )}
+        {focusedModule === "bleed" && (
+          <BleedPanel
+            bleedModule={bleedModule}
+            setBleedModule={setBleedModule}
+            unit={unit}
+            onActivateEyedropper={onActivateEyedropper}
+            taskProgress={bleedProgress}
+            pages={pages}
+            selectedPageId={selectedPageId}
+            activePageNum={activePageNum}
+            shortcutLabels={shortcutLabels}
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -1,8 +1,10 @@
 import os
 import uuid
 import shutil
+import threading
+from collections import OrderedDict
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session as DBSession
 from db.session import get_db, db_session
@@ -12,7 +14,7 @@ from engines.book_scan_engine import BookScanEngine, PageOpError
 from engines.units import mm_to_px
 from engines.schemas import (
     ReorderRequest, PageRotateRequest,
-    SplitSpreadRequest, RevertSpreadRequest, CropPageRequest,
+    SplitSpreadRequest, RevertSpreadRequest, CropPageRequest, RevertCropRequest,
     BatchDetectCropRequest, BatchDetectAngleRequest, PageDeskewRequest,
     MaskPageRequest, PageColorModeRequest,
     ExportRequest, DuplicatePageRequest, InsertBlankPageRequest, RestorePagesRequest,
@@ -26,6 +28,60 @@ router = APIRouter(prefix="/api/book-scan", tags=["Book Scan Studio"])
 SESSIONS: Dict[str, Dict[str, Any]] = {}
 SESSION_TIMESTAMPS: Dict[str, float] = {}
 SESSION_TTL_SECONDS = 7200  # 2 hours
+
+# Fast in-memory LRU thumbnail cache
+_THUMB_RAM_CACHE: OrderedDict[str, bytes] = OrderedDict()
+_THUMB_RAM_LOCK = threading.Lock()
+MAX_THUMB_RAM_ITEMS = 128
+
+def get_ram_thumbnail(cache_tag: str) -> Optional[bytes]:
+    with _THUMB_RAM_LOCK:
+        if cache_tag in _THUMB_RAM_CACHE:
+            _THUMB_RAM_CACHE.move_to_end(cache_tag)
+            return _THUMB_RAM_CACHE[cache_tag]
+    return None
+
+def put_ram_thumbnail(cache_tag: str, data: bytes) -> None:
+    if not data:
+        return
+    with _THUMB_RAM_LOCK:
+        _THUMB_RAM_CACHE[cache_tag] = data
+        _THUMB_RAM_CACHE.move_to_end(cache_tag)
+        while len(_THUMB_RAM_CACHE) > MAX_THUMB_RAM_ITEMS:
+            _THUMB_RAM_CACHE.popitem(last=False)
+
+# Session open document handles cache (avoids repeated fitz.open/close per thumbnail)
+_SESSION_DOCS: Dict[str, Dict[str, Any]] = {}
+_SESSION_DOCS_LOCK = threading.Lock()
+_DOC_RENDER_LOCK = threading.Lock()
+
+def get_session_docs(session: Dict[str, Any], session_id: Optional[str] = None) -> Dict[str, Any]:
+    sid = session_id or session.get("id") or ""
+    if not sid:
+        return BookScanEngine.open_session_docs(session)
+    with _SESSION_DOCS_LOCK:
+        if sid in _SESSION_DOCS:
+            return _SESSION_DOCS[sid]
+        doc_map = BookScanEngine.open_session_docs(session)
+        _SESSION_DOCS[sid] = doc_map
+        return doc_map
+
+def purge_session_ram_cache(session_id: str) -> None:
+    if not session_id:
+        return
+    with _THUMB_RAM_LOCK:
+        keys_to_remove = [k for k in _THUMB_RAM_CACHE if k.startswith(f"{session_id}_")]
+        for k in keys_to_remove:
+            _THUMB_RAM_CACHE.pop(k, None)
+
+def close_cached_session_docs(session_id: str) -> None:
+    if not session_id:
+        return
+    with _SESSION_DOCS_LOCK:
+        doc_map = _SESSION_DOCS.pop(session_id, None)
+        if doc_map:
+            BookScanEngine.close_session_docs(doc_map)
+    purge_session_ram_cache(session_id)
 
 # Export jobs tracking
 EXPORT_JOBS: Dict[str, Dict[str, Any]] = {}
@@ -67,6 +123,7 @@ def evict_stale_sessions():
     for sid in stale_ids:
         SESSION_TIMESTAMPS.pop(sid, None)
         sess = SESSIONS.pop(sid, None)
+        close_cached_session_docs(sid)
         asset_store.purge_session(sid)
     stale_jobs = [jid for jid, j in EXPORT_JOBS.items() if now - j.get("created_at", now) > SESSION_TTL_SECONDS]
     for jid in stale_jobs:
@@ -74,6 +131,7 @@ def evict_stale_sessions():
 
 def cleanup_session_dir(session_dir: str, session_id: Optional[str] = None):
     if session_id:
+        close_cached_session_docs(session_id)
         asset_store.purge_session(session_id)
     elif os.path.exists(session_dir):
         shutil.rmtree(session_dir, ignore_errors=True)
@@ -208,7 +266,14 @@ async def init_book_scan_session(
     evict_stale_sessions()
     SESSION_TIMESTAMPS[session_id] = time.time()
 
+    # Evict any legacy unkeyed handles if they exist
+    with _SESSION_DOCS_LOCK:
+        legacy_doc_map = _SESSION_DOCS.pop("", None)
+        if legacy_doc_map:
+            BookScanEngine.close_session_docs(legacy_doc_map)
+
     session_data = {
+        "id": session_id,
         "mode": mode,
         "is_spread": is_spread,
         "odds_order": odds_order,
@@ -252,7 +317,7 @@ async def init_book_scan_session(
     }
 
 @router.get("/page-thumbnail/{session_id}/{page_id}")
-async def get_page_thumbnail(
+def get_page_thumbnail(
     session_id: str,
     page_id: str,
     preview_clean: bool = False,
@@ -278,7 +343,10 @@ async def get_page_thumbnail(
     bleed_placement: str = "outside",
     show_crop_marks: bool = False,
     flatten_illumination: bool = False,
-    despeckle_level: int = 0,
+    spine_strength: float = 1.0,
+    spine_box: Optional[str] = None,
+    despeckle_level: float = 0.0,
+    exclude_mask_ids: Optional[str] = None,
     rev: int = 0,
     db: DBSession = Depends(get_db),
 ):
@@ -295,6 +363,12 @@ async def get_page_thumbnail(
     half = page_info.get("half", "full")
     sp = int(page_info.get("spread_split_pos", page_info.get("split_pos", 0.5)) * 1000)
     masks_list = (page_info.get("masks") or []) if preview_clean else []
+    if exclude_mask_ids and preview_clean:
+        if exclude_mask_ids.strip() == "*":
+            masks_list = []
+        else:
+            excluded = {x.strip() for x in exclude_mask_ids.split(",") if x.strip()}
+            masks_list = [m for m in masks_list if m.get("id") not in excluded]
     eff_color_mode = (page_info.get("color_mode") if preview_clean else None) or color_mode
     mask_sig = "_".join(
         f"{m.get('id','')}:{int(float(m.get('x1',0))*100)}-{int(float(m.get('y1',0))*100)}-{str(m.get('color') or m.get('fill') or 'ffffff').lstrip('#')}"
@@ -314,6 +388,15 @@ async def get_page_thumbnail(
     if sb:
         cache_tag += f"_sb_{int(sb.get('x1', 0)*1000)}_{int(sb.get('y1', 0)*1000)}_{int(sb.get('x2', 1)*1000)}_{int(sb.get('y2', 1)*1000)}"
 
+    parsed_spine_box: Optional[Dict[str, float]] = None
+    if spine_box:
+        try:
+            parts = [float(x.strip()) for x in spine_box.split(",") if x.strip()]
+            if len(parts) == 4:
+                parsed_spine_box = {"x1": parts[0], "y1": parts[1], "x2": parts[2], "y2": parts[3]}
+        except Exception:
+            parsed_spine_box = None
+
     has_active_processing = (
         clean_borders
         or enhance_colors
@@ -322,81 +405,116 @@ async def get_page_thumbnail(
         or deskew_module_enabled
         or (page_info.get("deskew_angle") is not None)
         or len(masks_list) > 0
-        or flatten_illumination
+        or (flatten_illumination and spine_strength > 0)
         or despeckle_level > 0
     )
     if preview_clean and has_active_processing:
-        cache_tag += f"_{int(clean_borders)}_{border_margin_px}_{int(enhance_colors)}_{int(saturation*100)}_{int(contrast*100)}_{eff_color_mode}_{bw_threshold}_{int(whiten_bg)}_{int(deskew)}_fi{int(flatten_illumination)}_ds{despeckle_level}"
+        cache_tag += f"_{int(clean_borders)}_{border_margin_px}_{int(enhance_colors)}_{int(saturation*100)}_{int(contrast*100)}_{eff_color_mode}_{bw_threshold}_{int(whiten_bg)}_{int(deskew)}_fi{int(flatten_illumination)}_st{int(spine_strength*100)}_ds{int(round(despeckle_level*10))}"
+        if parsed_spine_box:
+            cache_tag += f"_spb_{int(parsed_spine_box['x1']*1000)}_{int(parsed_spine_box['y1']*1000)}_{int(parsed_spine_box['x2']*1000)}_{int(parsed_spine_box['y2']*1000)}"
         if deskew_module_enabled or (page_info.get("deskew_angle") is not None):
             eff_ang = float(page_info["deskew_angle"]) if page_info.get("deskew_angle") is not None else deskew_angle
             cache_tag += f"_dm_{deskew_mode}_{int(eff_ang*100)}_{int(deskew_max_angle)}_{int(deskew_ignore_borders)}"
     if bleed_mm > 0:
         clean_hex = (bleed_color or "#ffffff").lstrip("#")
         cache_tag += f"_bl_{int(bleed_mm*100)}_{bleed_mode}_{clean_hex}_{int(show_crop_marks)}_{bleed_placement}"
+
+    # 1. Fast in-memory RAM cache check (< 1ms)
+    ram_cache_key = f"{session_id}_{cache_tag}"
+    cached_ram = get_ram_thumbnail(ram_cache_key)
+    if cached_ram is not None:
+        return Response(content=cached_ram, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
     thumb_path = asset_store.get_thumbnail_cache_path(session_id, cache_tag)
 
+    # 2. Disk cache check
     if os.path.exists(thumb_path):
-        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+        try:
+            with open(thumb_path, "rb") as f:
+                data = f.read()
+            put_ram_thumbnail(ram_cache_key, data)
+            return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+        except Exception:
+            return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
     legacy_thumb = os.path.join(session["session_dir"], f"{cache_tag}.jpg")
     if os.path.exists(legacy_thumb):
-        return FileResponse(legacy_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+        try:
+            with open(legacy_thumb, "rb") as f:
+                data = f.read()
+            put_ram_thumbnail(ram_cache_key, data)
+            return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+        except Exception:
+            return FileResponse(legacy_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
-    doc_map = BookScanEngine.open_session_docs(session)
+    # 3. Render thumbnail using cached session doc handle (thread-safe)
+    with _DOC_RENDER_LOCK:
+        doc_map = get_session_docs(session, session_id=session_id)
+        try:
+            raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=dpi)
+        except Exception:
+            # Recreate cached doc_map if a handle became stale
+            close_cached_session_docs(session_id)
+            doc_map = get_session_docs(session, session_id=session_id)
+            raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=dpi)
 
+    if preview_clean and has_active_processing:
+        eff_deskew_mode = "manual"
+        eff_deskew_angle = float(page_info["deskew_angle"]) if page_info.get("deskew_angle") is not None else float(deskew_angle)
+        proc_img = BookScanEngine.process_single_page(
+            raw_img,
+            clean_borders=clean_borders,
+            border_margin_px=border_margin_px,
+            border_threshold=border_threshold,
+            enhance_colors=enhance_colors,
+            saturation=saturation,
+            contrast=contrast,
+            color_mode=eff_color_mode if enhance_colors else "original",
+            bw_threshold=bw_threshold,
+            whiten_bg=whiten_bg,
+            deskew=deskew,
+            sharpen=enhance_colors,
+            deskew_module_enabled=deskew_module_enabled or (page_info.get("deskew_angle") is not None),
+            deskew_mode=eff_deskew_mode,
+            deskew_angle=eff_deskew_angle,
+            deskew_max_angle=deskew_max_angle,
+            deskew_ignore_borders=deskew_ignore_borders,
+            masks=masks_list,
+            flatten_illumination=flatten_illumination,
+            despeckle_level=despeckle_level,
+            spine_strength=spine_strength,
+            spine_box=parsed_spine_box,
+        )
+    else:
+        proc_img = raw_img
+
+    if bleed_mm > 0:
+        h_px, w_px = proc_img.shape[:2]
+        w_mm_val = float(page_info.get("width_mm") or 0.0)
+        px_per_mm = (w_px / w_mm_val) if w_mm_val > 0 else float(mm_to_px(1.0, dpi))
+        bleed_px = int(round(max(0.0, float(bleed_mm)) * px_per_mm))
+        proc_img = BookScanEngine.apply_bleed_to_image(
+            proc_img,
+            bleed_px=bleed_px,
+            bleed_mode=bleed_mode,
+            bleed_color=bleed_color,
+            draw_crop_marks=show_crop_marks,
+            placement=bleed_placement,
+        )
+
+    encoded_bytes = BookScanEngine.encode_thumbnail_jpg(proc_img, quality=80)
+    if not encoded_bytes:
+        raise HTTPException(status_code=500, detail="Failed to encode thumbnail.")
+
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
     try:
-        raw_img = BookScanEngine.extract_page_image(doc_map, page_info, dpi=dpi)
-        if preview_clean and has_active_processing:
-            eff_deskew_mode = deskew_mode
-            eff_deskew_angle = deskew_angle
-            if page_info.get("deskew_angle") is not None:
-                eff_deskew_mode = "manual"
-                eff_deskew_angle = float(page_info["deskew_angle"])
-            proc_img = BookScanEngine.process_single_page(
-                raw_img,
-                clean_borders=clean_borders,
-                border_margin_px=border_margin_px,
-                border_threshold=border_threshold,
-                enhance_colors=enhance_colors,
-                saturation=saturation,
-                contrast=contrast,
-                color_mode=eff_color_mode if enhance_colors else "original",
-                bw_threshold=bw_threshold,
-                whiten_bg=whiten_bg,
-                deskew=deskew,
-                sharpen=enhance_colors,
-                deskew_module_enabled=deskew_module_enabled or (page_info.get("deskew_angle") is not None),
-                deskew_mode=eff_deskew_mode,
-                deskew_angle=eff_deskew_angle,
-                deskew_max_angle=deskew_max_angle,
-                deskew_ignore_borders=deskew_ignore_borders,
-                masks=masks_list,
-                flatten_illumination=flatten_illumination,
-                despeckle_level=despeckle_level,
-            )
-        else:
-            proc_img = raw_img
+        with open(thumb_path, "wb") as f:
+            f.write(encoded_bytes)
+    except Exception:
+        pass
 
-        if bleed_mm > 0:
-            h_px, w_px = proc_img.shape[:2]
-            w_mm_val = float(page_info.get("width_mm") or 0.0)
-            px_per_mm = (w_px / w_mm_val) if w_mm_val > 0 else float(mm_to_px(1.0, dpi))
-            bleed_px = int(round(max(0.0, float(bleed_mm)) * px_per_mm))
-            proc_img = BookScanEngine.apply_bleed_to_image(
-                proc_img,
-                bleed_px=bleed_px,
-                bleed_mode=bleed_mode,
-                bleed_color=bleed_color,
-                draw_crop_marks=show_crop_marks,
-                placement=bleed_placement,
-            )
-
-        os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
-        if not BookScanEngine.write_thumbnail_jpg(proc_img, thumb_path, quality=80):
-            raise HTTPException(status_code=500, detail="Failed to encode thumbnail.")
-
-        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
-    finally:
-        BookScanEngine.close_session_docs(doc_map)
+    put_ram_thumbnail(ram_cache_key, encoded_bytes)
+    return Response(content=encoded_bytes, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 @router.post("/reorder/{session_id}")
 async def reorder_pages(session_id: str, req: ReorderRequest, db: DBSession = Depends(get_db)):
@@ -663,6 +781,7 @@ async def revert_spread(session_id: str, req: RevertSpreadRequest, db: DBSession
             page_id=req.page_id,
             revert_all=req.revert_all,
             target_page_ids=req.target_page_ids,
+            single_level=req.single_level,
         )
     except PageOpError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
@@ -675,6 +794,28 @@ async def revert_spread(session_id: str, req: RevertSpreadRequest, db: DBSession
         "total_pages": len(session["pages"]),
         "pages": session["pages"],
         "new_selected_id": new_selected_id
+    }
+
+@router.post("/revert-crop/{session_id}")
+async def revert_crop(session_id: str, req: RevertCropRequest, db: DBSession = Depends(get_db)):
+    session = get_or_load_session(session_id, db)
+    if not session.get("pages"):
+        raise HTTPException(status_code=400, detail="No pages available in session.")
+
+    BookScanEngine.revert_crop_pages(
+        session["pages"],
+        page_id=req.page_id,
+        mode=req.mode,
+        apply_to_all=req.apply_to_all,
+        target_page_ids=req.target_page_ids,
+    )
+
+    if db is not None:
+        SessionRepository.save_pages(db, session_id, session["pages"])
+
+    return {
+        "status": "ok",
+        "pages": session["pages"]
     }
 
 @router.post("/crop-page/{session_id}")

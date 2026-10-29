@@ -1,6 +1,625 @@
 # Session Log
 
-## Date: 2026-10-23
+## Date: 2026-10-29
+
+### Task 33: Production Build Gate & Session Hand-Off
+- **Objective**:
+  - Run comprehensive Next.js production build verification gate (`npm run build`).
+  - Eliminate all unused variable errors and React hook warnings flagged by ESLint during build.
+  - Verify backend engine compilation and zero-retention storage policy.
+- **Verification Results**:
+  - **Frontend Production Build**: `cd frontend && npm run build` (Next.js 14.2.35) succeeded with exit code `0`.
+    - Type checking and linting passed cleanly (`✓ Linting and checking validity of types`).
+    - All 13 static application routes generated successfully without runtime or SSG errors.
+  - **Backend Compilation**: `cd backend && python3 -m py_compile main.py engines/*.py` exited with code `0`.
+  - **Storage Hygiene**: `python3 backend/engines/storage_cleaner.py` executed cleanly with code `0` (`backend/temp_uploads/` clean).
+  - **Git Status**: Git working tree diagnostics executed; all modifications preserved cleanly for human version control check-in.
+
+### Task 32: Decouple Split Tool from Crop Box Features & Canvas Overlays
+- **Objective**:
+  - Fully decouple the **Split** tool from the **Crop** tool:
+    - The Split tool must not display, manipulate, or execute any crop box features (no outer crop borders, no corner/edge resize handles, no center move handle).
+    - Cut lines span edge-to-edge across the entire page with proportional millimeter dimension tags referencing the full sheet dimensions.
+    - Dragging cut lines operates directly on normalized page coordinates (0..1) without crop box offsets or scaling constraints.
+    - Splitting execution commits slice geometry cleanly without applying or composing new crop boxes onto child pages, and leaves existing crop settings intact without resetting to full bed.
+- **Architectural Implementation**:
+  - **Decoupled Split Canvas Overlay ([`frontend/src/components/book-studio/PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx))**:
+    - Added `isSplitMode?: boolean` to `PageCanvasProps`.
+    - Split canvas overlay logic into dedicated `renderCropOverlay` (Crop tool only) and `renderSplitOverlay` (Split tool only).
+    - `renderSplitOverlay` mounts full-page cut lines (`absolute inset-0`), with no bounding crop boxes, handles, or drag move targets.
+    - Proportional segment sizing in `renderSplitOverlay` computes millimeters against full page width and height (`pageBaseWidthMm`, `pageBaseHeightMm`).
+    - Top notch dimensions and canvas tool hint text dynamically reflect full sheet dimensions and split mode instructions.
+  - **Full-Page Cut Line Dragging ([`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx))**:
+    - Passed `isSplitMode={focusedModule === "split"}` to `PageCanvas`.
+    - In `onMove`, when `isSplitMode` is active, cut line dragging calculates positions directly from relative page coordinates `Math.max(0.01, Math.min(0.99, isH ? relY : relX))` and returns immediately without running crop box resize logic.
+  - **Pure Split Execution & State Cleanliness ([`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts))**:
+    - In `runSplitPhase`: removed `crop_box` payload property so the backend `/api/book-scan/split-spread/${sessionId}` endpoint receives `None` and preserves existing child page crop boxes without composing new crops.
+    - In `splitSpread`: removed `cropBox` dependencies; on split completion, removes only the split pages from `pageCrops` and clears `splitLines: []` on `cropModule` without resetting `cropBox: { ...FULL_BED }`.
+    - In `revertSplitLevel` and `revertSpread`: clears `splitLines: []` without clobbering active `cropBox`.
+  - **Scope Indicator Copy ([`frontend/src/components/book-studio/modules/CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx))**:
+    - Updated unlinked Dual mode hint to neutral "Click or drag on either page to switch".
+- **Verification**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` exited with code `0`.
+
+### Task 31: Split Tool Dual-Mode Cut Overlays, Auto-Detection & Batch Execution
+- **Objective**:
+  - Extend the Dual Mode interaction model to the Split tool:
+    - Render interactive cut lines on both primary and secondary pages in Dual Mode.
+    - Enable Dual ON linking (cut lines added or dragged update both pages simultaneously) and Dual OFF individual editing (grabbing or adding a cut line on either page auto-detects that page and modifies only its cut lines).
+    - Unified **Split** execution: committing via **Split** applies all accumulated cut lines across all configured pages (from `pageCropsRef.current` + active page), grouping identical configurations for single-pass batch execution and handling per-page custom cut lines cleanly.
+- **Architectural Implementation**:
+  - **Dual Canvas Cut Overlays ([`frontend/src/components/book-studio/PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx))**:
+    - Added `secondarySplitLines` prop to `PageCanvas`.
+    - Removed `side === "primary"` restriction in `renderCropOverlay`, enabling full rendering and interactive dragging of `SplitLineOverlay` on both primary and secondary pages with proportional segment sizing.
+  - **Split Line State & Auto-Detection ([`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx))**:
+    - Formulated `primarySplitLines` and `secondarySplitLines`:
+      - In Dual ON mode (`isDualLinked`), `secondarySplitLines` mirrors `cropModule.splitLines` (or its draft).
+      - In Dual OFF mode, secondary page has its own `splitLines` and never inherits the left page's lines unbidden.
+    - Synchronized `splitLines` alongside `cropBox` in `handleCropPointerDown`, `onSelectPrimaryPage`, and `onSelectSecondaryPage` so interacting with either page immediately focuses that page and loads its cut lines.
+  - **Unified Split Commit (`splitSpread`) ([`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts))**:
+    - Aggregates all staged cut lines from `pageCropsRef.current` and active `cropModule.splitLines`.
+    - Automatically groups target pages by identical cut line positions and orientations.
+    - For linked dual spreads or Scope All, executes batch splits in single API calls via `target_page_ids`.
+    - For independent spreads with custom cut lines, executes sequential phase splits across updated document slices.
+    - Clears staged drafts via `clearPageCrops()` and resets tool state to full bed.
+- **Verification**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` exited with code `0`.
+
+### Task 30: Unified Crop Apply & Simplified Dual-Mode Auto-Detection
+- **Objective**:
+  - Simplify and unify the "Apply" button: clicking Apply commits all accumulated adjustments across all pages (from `pageCrops` + active page) without discarding manual tweaks or confusing the user with dynamic strings like `Apply (P.1)`. The button now simply reads **"Apply"** (and **"Split"** in Split mode).
+  - Simplify Dual Page Mode: replace the individual `P.left` / `P.right` buttons in the Scope bar with a single **"Dual"** toggle button:
+    - **Dual ON (Default)**: Adjustments apply to both pages of the active spread simultaneously.
+    - **Dual OFF**: User adjusts each page individually without clicking page buttons. The app auto-detects which page the user works on (left or right) upon click or drag.
+  - Clean Spread Inheritance: Unedited spreads start cleanly with the document default crop box (or global baseline if "All" scope was used), preventing previous spread overrides from spilling over.
+- **Architectural Implementation**:
+  - **Unified `applyCrop` Payload Builder ([`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts))**:
+    - Aggregates all entries from `pageCropsRef.current` into `per_page_crops`.
+    - If `cropModule.target.base === "all"`, sends `apply_to_all: true` with the baseline box while sending all individual page adjustments in `per_page_crops`, so the backend preserves all custom tweaks.
+    - If non-global scope (e.g. `current`), constructs `target_page_ids` from the union of scoped pages and all modified pages in `perPageCropsPayload`.
+    - Clears `pageCrops` upon successful commit so the workspace resets cleanly to the committed state.
+    - Resets `dualSides` cleanly to `["left", "right"]` when navigating to a new unedited spread.
+  - **Dual Mode Scope Toggle & Auto-Detection UI ([`frontend/src/components/book-studio/modules/CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx))**:
+    - Replaced `P.left` / `P.right` buttons with a single `Dual` toggle button in the Scope bar when in Dual Mode.
+    - Added an active editing indicator when Dual is OFF (`Editing Page X • Click or drag either box to switch`).
+    - Simplified commit action button label to **`Apply`** and **`Split`**.
+    - Updated `activePage` resolution to automatically bind dimensions and margin inputs to the right page if the right side is active in unlinked mode.
+  - **Interactive Auto-Detection on Canvas ([`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx) & [`PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx))**:
+    - Added `onSelectPrimaryPage` to `PageCanvas`.
+    - In `handleCropPointerDown`, checks `isDualLinked`:
+      - If `isDualLinked` is `true`: dragging either box updates both pages together.
+      - If `isDualLinked` is `false`: grabbing the primary box switches focus and `dualSides` to `["left"]`; grabbing the secondary box switches focus and `dualSides` to `["right"]`.
+    - `secondaryCropBox` in `BookWorkspace` respects `isDualLinked`, preventing unedited secondary pages from taking an unlinked primary page's box.
+- **Verification**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` exited with code `0`.
+
+## Date: 2026-10-28
+
+### Task 29: Fix Continuous Mode View Switch Page Display & Crop Box Persistence
+- **Objective**:
+  - Fix bug where switching back from continuous mode to normal (page-by-page) mode causes the preview to display only the page number (`Page X`) rather than the rendered page image.
+  - Fix bug where adjusting the crop box and switching to continuous mode causes the crop box to disappear.
+- **Root Cause Analysis**:
+  1. **Thread Concurrency Collision on Thumbnail Generation**: PyMuPDF (`fitz.Document`) is not thread-safe across concurrent worker threads. When continuous mode mounted and initiated simultaneous thumbnail requests for all pages in the deck, concurrent backend threads collided on shared document handles in `extract_page_image`, throwing HTTP 500 exceptions and leaving the browser with failed image loads that rendered fallback alt text (`Page X`).
+  2. **Crop State Reset on View/Page Navigation**: `useBookModules.ts` was only writing to `pageCrops` state during auto-detect actions. Manual crop drags updated `cropModule.cropBox` but never synchronized into `pageCrops[selectedPageId]`. When toggling continuous view mode or switching pages, the module reset effect checked `pageCropsRef.current[selectedPageId]`, found undefined, and reset the crop box to `FULL_BED`.
+  3. **Continuous Scroll Crop Overlays Missing**: `BookWorkspace.tsx` in continuous mode rendered plain `<img>` elements without any overlay layer for the active crop box or existing saved crops.
+  4. **Canvas Image Cached Ready State**: In `PageCanvas.tsx`, when switching between view modes or remounting, if an image was already completed in the browser memory cache, standard `onLoad` events might not refire synchronously, causing temporary loading state artifacts.
+- **Architectural Implementation**:
+  - **PyMuPDF Thread Safety & Auto-Recovery ([`backend/book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py))**:
+    - Added global `_DOC_RENDER_LOCK = threading.Lock()` around PyMuPDF page rendering operations.
+    - Wrapped thumbnail extraction in try-except with automatic document handle invalidation and reopen recovery if a handle ever enters an invalid or closed state.
+  - **Live Crop State Synchronization ([`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts))**:
+    - Added a reactive synchronization effect that saves manual crop adjustments (`cropBox`, `splitLines`, `splitPos`) into `pageCrops[selectedPageId]` whenever `cropModule.enabled` is active, ensuring crop boxes persist across view mode toggles and page switches.
+  - **Continuous Scroll Crop Overlays ([`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx))**:
+    - Implemented `renderContinuousCropOverlay` in continuous scrolling mode (both single-page and dual-page layouts).
+    - Renders the active crop box border, corner handles, and split lines on `selectedPageId`, and dashed reference outlines on other pages with saved crops.
+    - Added `isContinuousScroll` to the pan/zoom reset effect to ensure returning to page-by-page mode centers the canvas cleanly at `{ x: 0, y: 0 }` and zoom `1.0`.
+  - **Cached Image Ready Resolution ([`frontend/src/components/book-studio/PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx))**:
+    - Added mount/`imageSrc` check for `imgRef.current?.complete && imgRef.current.naturalWidth > 0` to immediately mark images as loaded when served from cache.
+    - Added automatic transient image reload with `retryKey`.
+- **Verification & Final Gate**:
+  - Frontend TypeScript verification: `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - Backend compile verification: `python3 -m py_compile backend/main.py backend/book_scan_api.py backend/engines/*.py` exited with code `0`.
+  - Storage clean verified: `python3 backend/engines/storage_cleaner.py` exited with code `0` (temp scratch cleanly purged).
+  - Next.js Production Build Gate: `cd frontend && npm run build` exited with code `0` (all 13 routes compiled and statically generated with 0 errors).
+
+### Task 28: Fix Missing useMemo and Book Studio Module & Toolbar Props Alignment
+  - Resolve runtime crash `ReferenceError: useMemo is not defined` in `PageCanvas.tsx:334`.
+  - Fix TypeScript compilation issues across Book Studio:
+    - Restore `"bleed"` to `FocusedModuleId` in `types/book_studio.ts`.
+    - Align `BookRightPanel.tsx` shortcuts, descriptors, and option renders to include the `bleed` tool cleanly.
+    - Clean up legacy toolbar and history props in `BookWorkspace.tsx` and preserve `canRedo`.
+- **Architectural Implementation**:
+  - **Hook Import Fix ([`PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx))**:
+    - Added missing `useMemo` to `import React, { useRef, useState, useEffect, useMemo } from "react";`.
+  - **Type & Prepress Module Alignment ([`types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts), [`BookRightPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookRightPanel.tsx))**:
+    - Expanded `FocusedModuleId` to include `"bleed"`.
+    - Added `bleed` entry in `moduleShortcuts` (`shortcutLabels.module_bleed || "5"`), `moduleDescriptors` (`IconToolBleed`), and registered `BleedPanel` in the active options body.
+  - **Workspace Toolbar Props Cleanliness ([`BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx))**:
+    - Removed unused `onRestoreOriginal`, `history`, `currentHistoryIndex`, and `onSelectHistoryStep` props that were previously relocated to the top header bar (`HistoryPopover`).
+    - Restored `canRedo?: boolean` in `BookWorkspaceProps`.
+- **Verification**:
+  - TypeScript validation via deno: `deno run -A frontend/node_modules/typescript/bin/tsc --noEmit --project frontend/tsconfig.json` exited with code `0`.
+  - Backend compile verification: `python3 -m py_compile backend/main.py backend/settings_api.py backend/engines/*.py` exited with code `0`.
+
+### Task 27: Crop Tool Simplification & Dedicated History System
+- **Objective**:
+  - In Crop Tool:
+    1. Remove Trim Presets dropdown and presets logic.
+    2. Remove Auto-Detect feature (Paper/Content detection mode, Page/All detection buttons, reset to full bed).
+    3. Rename "Margins & Insets" to "Margins", defaulting aspect lock to `free` (instead of `normal`/`lock`) and units to `unit` (instead of `%`).
+    4. Remove Reset and Revert buttons and features from the tool footer; establish a dedicated "History" system with timestamped logs (`hh:mm:ss`), an icon next to the Units dropdown in the header, customizable history limits in Settings (min = 5, max = 50), and stage restoration via Undo/Redo or clicking a historical stage.
+    5. Remove the status line (`Slice (...)`, `Cropped • Level X`, `Uncropped`).
+- **Architectural Implementation**:
+  - **Crop Tool Trim Presets & Auto-Detect Removed ([`CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx))**:
+    - Removed `DEFAULT_BOOK_TRIMS`, `selectedTrimPreset`, `handleSelectTrimPreset`, and trim presets UI.
+    - Stripped out the Detect mode selector, Detect Page/All buttons, and auto-detect icons from `CropSplitPanel.tsx`.
+    - Retained the live `Dimensions` badge display (`dimsText`, `areaPct`).
+  - **Margins Defaults & Labels Updated ([`CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx), [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts), [`types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts))**:
+    - Renamed disclosure label to **Margins**.
+    - Updated default `aspectLock` to `"free"` and default `unitMode` to `"unit"`.
+    - Aspect ratio lock toggle displays `Lock` vs `Free`.
+  - **Dedicated Timestamped History System ([`book-studio/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx), [`HistoryPopover.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/HistoryPopover.tsx), [`settings_api.py`](file:///home/essam/Projects/ESSR_PA/backend/settings_api.py), [`ShortcutsSection.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/settings/ShortcutsSection.tsx))**:
+    - Placed the History popover trigger directly next to the Unit dropdown in the top header bar of Book Studio.
+    - Enhanced [`HistoryPopover.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/HistoryPopover.tsx) to display exact timestamp readouts (`hh:mm:ss`) for every action alongside page counts.
+    - Updated backend [`settings_api.py`](file:///home/essam/Projects/ESSR_PA/backend/settings_api.py) and frontend [`ShortcutsSection.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/settings/ShortcutsSection.tsx) history limit bounds to **5–50** (default: 50).
+    - Removed Revert and Reset buttons from `CropSplitPanel.tsx`, leaving a clean, full-width `Apply (Page)` / `Split (Page)` commit button.
+  - **Status Line Removed ([`CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx))**:
+    - Completely removed the `Status: Slice / Cropped • Level X / Uncropped` row.
+- **Verification**:
+  - Frontend TypeScript verification: `deno run -A frontend/node_modules/typescript/bin/tsc --noEmit --project frontend/tsconfig.json` exited with code `0`.
+  - Backend compile verification: `python -m py_compile backend/main.py backend/settings_api.py backend/engines/*.py` exited with code `0`.
+  - Storage clean verified: `python backend/engines/storage_cleaner.py` ran cleanly.
+
+### Task 26: Remove Module Toggles, Separate Crop & Split Tools, Top-Bar Split Curtain & Bottom HUD View Modes (Dual Page, Continuous Scroll, Fit Width/Page)
+- **Objective**:
+  - Remove the enable toggle switch at the top of each Book Studio module (`CropSplitPanel.tsx`, `DeskewPanel.tsx`, `CleanupPanel.tsx`, `RestorePanel.tsx`, `BleedPanel.tsx`).
+  - Separate `Crop` and `Split` into two distinct tools in the right tools panel (`BookRightPanel.tsx`).
+  - Move the Split Curtain (`Columns2`) toggle button from the bottom HUD bar to the top toolbar (`WorkspaceToolbar.tsx`).
+  - Add **Fit Width**, **Fit Page**, **Dual Page Mode** (two pages side-by-side, reverting to 1 page when clicked again), and **Continuous Scrolling vs. Page-by-Page Scrolling** toggle buttons to the bottom HUD bar (`BookWorkspace.tsx` & `PageCanvas.tsx`).
+- **Architectural Implementation**:
+  - **Module Toggles Removed (`CropSplitPanel.tsx`, `DeskewPanel.tsx`, `CleanupPanel.tsx`, `RestorePanel.tsx`, `BleedPanel.tsx`)**:
+    - Removed the top checkbox toggle bars from all 5 panels and ensured interacting with any control or clicking Apply automatically sets `enabled: true`.
+  - **Separated `Crop` & `Split` Tools (`types/book_studio.ts`, `useBookStudioState.ts`, `BookRightPanel.tsx`, `CropSplitPanel.tsx`)**:
+    - Expanded `FocusedModuleId` to `"crop" | "split" | "deskew" | "cleanup" | "restore" | "bleed"`.
+    - Added `mode?: "crop" | "split"` to `CropSplitPanel.tsx` (following the `AGENTS.md` consolidation rule without creating fragmented files). In `"crop"` mode, renders Crop Detection, Trim Presets, Dimensions, and Margins & Insets (`hideCutLines={true}` on canvas). In `"split"` mode, renders Cut Lines (`+ Vertical`, `+ Horizontal`, `SplitLinesEditor`) and auto-adds a default vertical cut line at `50%` if none exist (`hideCutLines={false}` on canvas).
+  - **Top Toolbar Split Curtain (`WorkspaceToolbar.tsx` & `BookWorkspace.tsx`)**:
+    - Moved `isSplitCurtain` toggle button from the bottom bar into `WorkspaceToolbar.tsx` next to the Hand (Pan) tool.
+  - **Bottom HUD View & Fit Controls (`BookWorkspace.tsx` & `PageCanvas.tsx`)**:
+    - Added **Dual Page Mode** (`BookOpen` button) rendering `pages[selectedIdx]` and `pages[selectedIdx + 1]` side-by-side, reverting to 1 page when clicked again.
+    - Added **Continuous Scrolling vs. Page-by-Page** (`ScrollText` button) toggling between single/dual canvas view and a vertical continuous scroll container of all pages.
+    - Added **Fit Width** (`MoveHorizontal` button) and **Fit Page** (`File` button) to the bottom bar.
+
+### Task 25: Borderless Studio Layout, Minimal Top Bar, Floating Bottom HUD & Simple Drill-Down Tools Panel
+- **Objective**:
+  - Redesign the Preview Panel, Page Deck, and Tools Panel across all 4 Studios (`Book Studio`, `Imposing Studio`, `Contour Studio`, `Flipbook Studio`) to match the clean, borderless reference UI.
+  - Keep only the Hand (Pan) tool, Undo/Redo buttons, and Page Deck toggle button in the top preview toolbar.
+  - Place the toggleable Page Deck panel in the middle column (between the Left Preview Panel and Right Tools Panel).
+  - Replace bordered module cards and colored badges in the Right Tools Panel with a simple, borderless column list of tool names that opens each tool's options when clicked (`← [Tool Name]`).
+- **Architectural Implementation**:
+  - **Unified Studio Layout (`frontend/src/components/layout/StudioLayout.tsx`)**:
+    - Re-ordered the 3-column layout to `[centerViewport (flex-1) | leftPanel (Middle Page Deck) | rightPanel (Right Tools Panel)]` with edge-to-edge bleed (`-m-2 sm:-m-2.5 md:-m-3`) and `1px` `border-[#1E232E]` dividers.
+  - **Book Studio (`WorkspaceToolbar.tsx`, `BookWorkspace.tsx`, `BookLeftPanel.tsx`, `BookRightPanel.tsx`, `modules/*.tsx`, `book-studio/page.tsx`)**:
+    - Simplified `WorkspaceToolbar.tsx` to Hand (Pan) toggle, Undo/Redo (with History popover), and `Pages` deck toggle.
+    - Updated `BookWorkspace.tsx` to edge-to-edge borderless styling and upgraded the floating bottom pill HUD with `|< < [ 1 ] / N > >|` navigation, Split Curtain toggle, Zoom `-`, continuous Zoom slider (`40`–`400%`), Zoom `+`, Zoom `%`, and Fullscreen toggle.
+    - Redesigned `BookRightPanel.tsx` into a flat, borderless tool list (`Crop & Split`, `Deskew`, `Cleanup & Erase`, `Colors & Tone`, `Bleed & Marks`, plus `Imposing Studio` and `3D Flipbook` handoffs) that opens options on click with a `← [Tool Name]` back header.
+    - Stripped card borders and module header banners from `CropSplitPanel.tsx`, `DeskewPanel.tsx` (adding `Draw Ruler` and `Grid` buttons inside Section 1), `CleanupPanel.tsx`, `RestorePanel.tsx`, and `BleedPanel.tsx`.
+  - **Imposing Studio (`PreviewViewport.tsx`, `LeftAssetPanel.tsx`, `RightControlPanel.tsx`, `imposing/page.tsx`)**:
+    - Updated `PreviewViewport.tsx` with the minimal top bar (Hand tool + `Pages` deck toggle) and floating bottom pill HUD (sheet navigation, page labels toggle, zoom slider, fit-to-screen).
+    - Converted `RightControlPanel.tsx` into the borderless drill-down tool list (`Imposition Mode`, `Sheet & Format`, `Layout & Grid`, `Prepress Marks`, `Page Actions`).
+  - **Contour Studio (`ContourViewport.tsx`, `ContourControls.tsx`, `contour/page.tsx`)**:
+    - Updated `ContourViewport.tsx` to borderless with the minimal Hand tool top bar and floating bottom zoom slider HUD.
+    - Moved `ContourControls` to `rightPanel` and converted it into the borderless drill-down tool list (`Input Artwork`, `Cut Geometry`, `Spot Stroke Swatch`, `Finishing Options`).
+  - **Flipbook Studio (`FlipbookViewport.tsx`, `FlipbookControls.tsx`, `flipbook/page.tsx`)**:
+    - Wrapped `flipbook/page.tsx` in `StudioLayout`, made `FlipbookViewport.tsx` borderless, and converted `FlipbookControls.tsx` into the borderless drill-down tool list (`Input PDF Document`, `Reading & Quality`, `Binding Style`).
+- **Verification**:
+  - Frontend TypeScript: `deno run -A frontend/node_modules/typescript/bin/tsc --noEmit --project frontend/tsconfig.json` exited with code `0`.
+  - Clean `backend/temp_uploads/`.
+
+### Task 24: Crop Module Collapsible Margins, Book Trim Presets, Deskew Decluttering, Angle HUD & Interactive Split Curtain
+- **Objective**:
+  - Make the Crop module's Margins panel a collapsible dropdown, collapsed by default.
+  - Add standard book trim presets (A4, A5, B5, US Trade 6x9, Digest, Pocket Book, etc.) with a configurable Book Trim Sizes table in `/settings`.
+  - Declutter Deskew module by removing redundant Straighten button and Grid toggle (already permanently accessible in the workspace toolbar).
+  - Add non-obtrusive live angle readout when drawing the Straighten baseline on canvas without blocking the user's cursor or text view.
+  - Replace the old compare toggle in the workspace toolbar with an interactive vertical split curtain on the canvas featuring a draggable slider divider for direct side-by-side inspection of raw scans vs processed pages.
+- **Architectural Implementation**:
+  - **Crop Module Margins Dropdown & Trim Presets (`frontend/src/components/book-studio/modules/CropSplitPanel.tsx`)**:
+    - Created collapsible accordion disclosure (`isMarginsOpen`, default `false`) with a one-line summary trigger pill showing live insets (`L:.. T:.. R:.. B:.. mm/%`) and chevron.
+    - Integrated standard book trim presets dropdown ("Freeform / Custom", A4, A5, B5 JIS, US Trade, Digest, Pocket Book, Royal, Square), loaded dynamically from `/api/settings` with fallback defaults. Selecting a preset scales and centers the crop box on the page to match the exact trim aspect ratio.
+  - **Settings API & Trim Presets Table (`backend/settings_api.py`, `backend/settings.json`, `frontend/src/components/settings/`)**:
+    - Added `BookTrimPreset` Pydantic model to `backend/settings_api.py` and `book_trims` array to `AppSettings` / `DEFAULT_SETTINGS` / `backend/settings.json`.
+    - Added REST endpoints: `POST /api/settings/book-trims`, `PUT /api/settings/book-trims/{trim_name}`, `DELETE /api/settings/book-trims/{trim_name}`.
+    - Created `frontend/src/components/settings/BookTrimsSection.tsx` with full CRUD (add, inline edit, delete) and embedded it into the `Media & Book Trims` tab in `frontend/src/app/settings/page.tsx`.
+    - Updated navigation map in `docs/architecture.md`.
+  - **Deskew Module Streamlining (`frontend/src/components/book-studio/modules/DeskewPanel.tsx`)**:
+    - Removed redundant Straighten button and Grid toggle box from Section 3, removing unused `Ruler` and `Grid` icons.
+    - Renamed Section 3 to "Scope & Apply", keeping the panel clean, compact, and focused on angle detection, fine-tuning slider/nudges, page scoping, and apply/reset actions.
+  - **Straighten Angle HUD Readout (`frontend/src/components/book-studio/PageCanvas.tsx`)**:
+    - Positioned the live angle readout badge offset from the cursor point (`translate-x-3 -translate-y-5`, flipping on edge proximity) with semi-transparent dark backdrop blur styling, guaranteeing that baseline text and the cursor crosshair remain 100% unobstructed during measurement.
+  - **Interactive Split Curtain Comparison (`BookWorkspace.tsx`, `PageCanvas.tsx`, `WorkspaceToolbar.tsx`)**:
+    - Removed the old toggle button from `WorkspaceToolbar.tsx`.
+    - Added a Split Curtain toggle button to the floating bottom HUD bar in `BookWorkspace.tsx` (`Columns2` icon).
+    - In `PageCanvas.tsx`, rendered a dual-layer preview: base processed image and top raw unedited scan clipped horizontally with CSS `clipPath: inset(0 ${(1 - curtainPos) * 100}% 0 0)`.
+    - Added an interactive draggable vertical divider line (`curtainPos` from 0.02 to 0.98) with a central grip handle (`‹›`), pointer capture, and floating corner tags ("Original Scan" and "Processed").
+- **Verification**:
+  - Python Backend: `cd backend && python3 -m py_compile main.py settings_api.py book_scan_api.py engines/*.py` exited with code `0`.
+  - Frontend TypeScript: `deno run -A frontend/node_modules/typescript/bin/tsc --noEmit --project frontend/tsconfig.json` exited with code `0`.
+  - Clean `backend/temp_uploads/`.
+
+### Task 23: Session Document Cache Isolation & Universal Upload Preview Sticking Fix
+- **Objective**:
+  - Fix critical issue where the app is stuck displaying an old file's preview regardless of what file is uploaded.
+- **Root Cause & Architectural Problem**:
+  1. **Unkeyed Document Cache Poisoning in Backend (`get_session_docs`)**:
+     - In `backend/book_scan_api.py`, `init_book_scan_session` created the in-memory session dictionary in `SESSIONS[session_id]` without setting `"id": session_id`.
+     - When `get_page_thumbnail` subsequently called `get_session_docs(session)`, `session.get("id", "")` evaluated to `""` (empty string).
+     - The fitz Document handle for the very first file ever loaded was cached under `_SESSION_DOCS[""]`.
+     - Every newly uploaded document in subsequent sessions also evaluated `session.get("id", "")` to `""`, hit `"" in _SESSION_DOCS`, and extracted pages from the first file's open PDF handle.
+  2. **Unpartitioned RAM Thumbnail Cache (`_THUMB_RAM_CACHE`)**:
+     - `get_ram_thumbnail(cache_tag)` was indexed solely by `cache_tag` without `session_id`, creating cross-session cache bleed risks for pages with similar geometry tags.
+  3. **Stale URL Query Parameter Loops in Frontend**:
+     - In `book-studio/page.tsx`, `imposing/page.tsx`, `contour/page.tsx`, and `flipbook/page.tsx`, when routing from Hub or Command Center with `?file_path=...` or `?file_id=...`, the parameter remained indefinitely in the browser URL.
+     - When users clicked "New Job" or reset the active studio, the `useEffect` saw `!sessionId` or `!fileId` with the query parameter still present in `searchParams`, immediately re-initializing the previous file.
+  4. **Browser Input Change Suppression**:
+     - Native `<input type="file">` did not reset its `value` on change. Re-uploading the same file (e.g. after editing or clicking "New Job") did not fire `onChange`, causing the preview to remain on the old artwork.
+- **Architectural Implementation**:
+  - **Backend (`backend/book_scan_api.py`)**:
+    - Added explicit `"id": session_id` to `session_data` in `init_book_scan_session`.
+    - Updated `get_session_docs(session, session_id=session_id)` to accept explicit `session_id` and bypass cache when no ID is present, preventing `""` key poisoning.
+    - Evicted any legacy empty-string document handles on session init.
+    - Partitioned `_THUMB_RAM_CACHE` with `f"{session_id}_{cache_tag}"` and added `purge_session_ram_cache` invoked on session close and eviction.
+  - **Frontend (`frontend/src/`)**:
+    - `frontend/src/app/book-studio/page.tsx`: Added `preloadedPathRef` one-shot guard and URL query parameter sanitization via `window.history.replaceState`.
+    - `frontend/src/app/imposing/page.tsx`: Added `preloadedFileIdRef` one-shot guard and URL query parameter sanitization.
+    - `frontend/src/app/contour/page.tsx` & `frontend/src/app/flipbook/page.tsx`: Added one-shot guards and URL query parameter sanitization.
+    - File input value reset (`e.target.value = ""`): Applied to `frontend/src/app/page.tsx`, `BookLeftPanel.tsx`, `useImpositionStudio.ts`, and `FlipbookControls.tsx`.
+- **Verification**:
+  - Python Backend: `cd backend && python3 -m py_compile main.py book_scan_api.py engines/*.py` exited with code `0`.
+  - Frontend TypeScript: `deno run -A frontend/node_modules/typescript/bin/tsc --noEmit --project frontend/tsconfig.json` exited with code `0`.
+  - Storage Hygiene: `backend/temp_uploads/` verified clean.
+
+## Date: 2026-10-27
+
+### Task 22: Book Studio Real-Time Preview Optimization & High-Throughput Browsing
+- **Objective**:
+  - Resolve severe preview lag, event loop freezing, and canvas preview sticking on an old page (e.g. Page 4) during document browsing after cropping, splitting, or applying erase/magic boxes.
+- **Root Cause & Architectural Problem**:
+  1. **FastAPI Event-Loop Freezing (`async def`)**:
+     - `get_page_thumbnail` in `backend/book_scan_api.py` was defined as `async def`. Under FastAPI/Starlette, `async def` runs on the main asyncio thread. Heavy OpenCV processing (`flatten_spine_illumination`, morphological dilation/closing, despeckling) and PyMuPDF rendering blocked the single event loop, freezing all concurrent requests.
+  2. **Browser Connection Queue Saturation**:
+     - The left panel deck card list was issuing requests for 20-50 pages without priority, consuming the browser's 6 concurrent HTTP connection slots. The center viewport canvas preview request (`dpi=150`) was queued behind deck cards.
+  3. **URL Churn on Page Navigation**:
+     - `buildThumbnailUrl` dynamically incorporated `selectedPageId` for uncommitted draft sliders with scope "current". Every page click modified query parameters and invalidated thumbnail cache tags for both the previously selected and newly selected cards, forcing continuous re-renders from scratch.
+  4. **Silent Loading in Canvas**:
+     - Native `<img>` in `PageCanvas.tsx` had no loading indicator or transition, continuing to paint the previous image (Page 4) until the new image resolved, making the UI appear completely frozen.
+  5. **Redundant PDF Open/Close**:
+     - Every single thumbnail request parsed and opened the full PDF via `fitz.open(...)` from disk and closed it in `finally:`.
+- **Architectural Implementation**:
+  - **Backend (`backend/book_scan_api.py`, `backend/engines/book_scan_engine.py`)**:
+    - Converted `get_page_thumbnail` from `async def` to sync `def`, offloading thumbnail execution to Starlette's threadpool executor.
+    - Implemented `get_session_docs`: persistent in-memory fitz Document handle caching per active session with thread lock.
+    - Added `_THUMB_RAM_CACHE`: 128-item in-memory LRU cache returning cached JPEG bytes in < 1ms.
+    - Replaced numpy division in `flatten_spine_illumination` with OpenCV AVX2 SIMD `cv2.divide` and normalized background estimation proxy to 320px max dimension (accelerated 80 DPI card rendering from 82ms to **37ms**).
+    - Bypassed unneeded live Hough skew detection on thumbnail requests when angle is not explicitly detected.
+  - **Frontend (`frontend/src/`)**:
+    - `useBookSession.ts` & `useBookStudioState.ts`: Created `buildDeckThumbnailUrl` / `getDeckThumbnailUrl` strictly reflecting committed page properties, completely decoupling deck cards from `selectedPageId` and draft sliders. Page selection clicks now trigger **zero** network requests for deck cards.
+    - `PageCanvas.tsx`: Added `fetchPriority="high"`, `isImageLoading` state, smooth opacity transitions, and a centered loading indicator pill (`Loading Page X...`).
+    - `DeckCard.tsx`: Added `fetchPriority="low"`, `loading="lazy"`, `decoding="async"`, and wrapped with `React.memo` using custom props comparison.
+- **Verification**:
+  - Backend Compilation: `python3 -m py_compile main.py book_scan_api.py engines/*.py` exited with code `0`.
+  - Frontend TypeScript Check: `deno run -A frontend/node_modules/typescript/bin/tsc --noEmit --project frontend/tsconfig.json` exited with code `0`.
+  - Benchmark: 80 DPI sidebar thumbnail rendered in 37.3ms (55% faster), 150 DPI preview in 147.3ms, RAM cache in < 1ms.
+  - Storage Hygiene: `backend/temp_uploads/` verified clean.
+
+### Task 21: Streamlined Single-System History Journal Architecture & Universal Multi-Level Reversion
+- **Objective**:
+  - Resolve critical bugs when deleting crop entries and reverting to older states in the history journal.
+  - Eliminate the dual-system friction where the Modifications layer stack and the History Journal competed against each other.
+  - Establish a single, authoritative history tracking system (History Journal + `Ctrl+Z` / `Ctrl+Y`) with universal multi-level reversion and scoped resets across all Book Studio modules.
+- **Root Cause & Architectural Problem**:
+  - The coexistence of two competing state systems:
+    1. A complex "Modifications" layer panel (`LayerEntryStack`) attempting to maintain non-destructive stack entries with cascading dependencies, slice-ancestry mappings, and manual card deletions.
+    2. A snapshot-based "History Journal" (`useBookHistory`) maintaining full document state steps for undo/redo.
+  - Deleting an entry from the modifications stack broke underlying page geometries if subsequent operations depended on that crop/split, leaving zombie entries, corrupted coordinate spaces, or unsynchronized visual states.
+- **Architectural Implementation**:
+  - **Single Source of Truth**:
+    - Completely removed `LayerEntryStack` from all modules ([`CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx), [`DeskewPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/DeskewPanel.tsx), [`CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx), [`BleedPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/BleedPanel.tsx), [`RestorePanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/RestorePanel.tsx)).
+    - Replaced ~300 lines of brittle `removeAppliedCrop` patchwork math with pure, clean state operations.
+  - **Backend Hierarchical Multi-Level Crop Stack (`backend/engines/book_scan_engine.py`, `backend/engines/schemas.py`, `backend/book_scan_api.py`)**:
+    - Enhanced `BookStudioPage` and backend page models with `crop_stack: list[CropBox]`.
+    - Added `apply_crop_to_pages`: pushes composed crop boxes onto `p["crop_stack"]`.
+    - Implemented `revert_crop_pages`:
+      - `mode="level"`: Pops the topmost crop box from `crop_stack`, restores previous dimensions (`width_mm`, `height_mm`), and recalibrates master scan bed coordinates.
+      - `mode="reset"`: Clears the entire crop stack and restores the uncropped master bed.
+    - Added `single_level: bool = False` to `revert_pages` / `/revert-spread/` endpoint for stepping back 1 split level without wiping out all prior split work.
+    - Added route `POST /api/book-scan/revert-crop/{session_id}`.
+  - **Frontend History Reactivity & Level-by-Level Controls**:
+    - `useBookHistory.ts`: Added `onStepRestored` callback to clean up drafts; automatically bumped `p.rev` on restored snapshots so thumbnail images and DOM canvases update immediately without stale browser cache.
+    - `useBookModules.ts`:
+      - Implemented `revertCropLevel(scopeMode: "current" | "all")` and `resetCrop(scopeMode)`.
+      - Implemented `revertSplitLevel(pageId)`.
+      - Implemented `resetDeskew(scopeMode)`.
+      - Appended clear, descriptive entries to history journal (e.g. `Revert Crop Level (P.1)`, `Crop Page (Paper • P.1)`).
+    - `CropSplitPanel.tsx`: Added live status badge displaying current crop level and slice status, plus tactile `Apply`, `Revert 1 Level ↶`, and `Reset ↺` buttons.
+    - `DeskewPanel.tsx`: Added `Reset (0°)` button.
+    - `BleedPanel.tsx`: Added `Reset (0mm)` button.
+    - `RestorePanel.tsx`: Added `Reset` button.
+- **Verification**:
+  - Python Backend: `cd backend && python3 -m py_compile main.py book_scan_api.py engines/*.py` exited with code `0`.
+  - Frontend TypeScript: `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - Next.js Production Build: `npm run build` passed with code `0` (13/13 static routes generated, zero errors).
+  - Storage Hygiene: `backend/temp_uploads/` verified clean.
+
+### Task 20: Crop Entry Registration & Multi-Generation Split Layer Persistence
+- **Objective**:
+  - Fix issue where applying a crop in the Crop module did not register as an entry in the Modifications layer stack.
+  - Fix issue where applying a split and then applying another split overwrote (or hid/replaced) the previous split entry in the Modifications layer stack.
+- **Root Cause & Architectural Problem**:
+  1. Ancestry Disconnect in `LayerEntryStack`:
+     - `LayerEntryStack` in [`PageScopeSelector.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx) filtered entries strictly by `entry.targetPageIds.includes(activePageId)`.
+     - When pages were split into slices, the slices received new IDs (e.g. `p1` -> `p1_left`, `p1_right`, and subsequent horizontal splits created `p1_left_col_0`, `p1_left_col_1`).
+     - Previous split and crop entries in `appliedEntries` only retained the parent/ancestor IDs. Because `LayerEntryStack` did not resolve slice ancestry, any entry targeting ancestor pages or previous split generations failed the exact string match and disappeared from the active view.
+     - Furthermore, entries with `origScope: "all"` had non-empty `targetPageIds` from their creation time, causing the id check to fail and prematurely return `false` before the `origScope === "all"` rule could take effect.
+  2. Sequential Split Overwriting:
+     - In [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts) (`splitSpread`), subsequent splits added a new split entry to `appliedEntries` but left earlier split and crop entries with stale `targetPageIds` that only referenced parent IDs.
+  3. Crop Entry Target Resolution & Reindexing:
+     - In `applyCrop`, `targetPageIds` only stored raw target IDs without resolving parent/slice ancestry, and page number indexing was computed before referencing the new post-crop page metadata.
+- **Architectural Implementation**:
+  - [`frontend/src/components/book-studio/modules/PageScopeSelector.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx):
+    - Added `pages?: BookStudioPage[]` to `LayerEntryStackProps`.
+    - Added `getAncestorIds` recursive helper traversing `immediate_parent_id` and `parent_page_id` up the page slice tree to collect all ancestor IDs.
+    - Updated `pageEntries` filtering to:
+      1. Check `excludedPages`.
+      2. Check `entry.origScope === "all"` (persisting global modifications across all slices).
+      3. Check whether `entry.targetPageIds` matches `activePageId` OR any of its `ancestorIds`.
+      4. Fallback to `targetPages` matching.
+  - [`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts):
+    - Updated `splitSpread`: When new slice IDs (`allSliceIds`) are generated from `parentIds`, all existing entries in `appliedEntries` that targeted `parentIds` or had `origScope === "all"` are mapped to include `allSliceIds` in their `targetPageIds` and have their `targetPages` updated against `current`.
+    - Updated `applyCrop`: Populated `targetPageIds` with full ancestry and derived slice IDs, re-indexed `cropTargetPages` using the fresh `updatedPages`, computed accurate scope labels (`P.n`, `P.n,m`, `All`), and reliably appended the crop entry to `cropModule.appliedEntries`.
+    - Updated `removeAppliedCrop`: Synchronized ancestor checks to test both `immediate_parent_id` and `parent_page_id`.
+  - Modules Integration:
+    - Passed `pages={pages}` to `LayerEntryStack` in [`CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx), [`DeskewPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/DeskewPanel.tsx), [`RestorePanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/RestorePanel.tsx), and [`BleedPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/BleedPanel.tsx).
+- **Verification**:
+  - Frontend TypeScript: `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - Backend Python: `cd backend && python3 -m py_compile main.py engines/*.py` exited with code `0`.
+  - Next.js Production Build: `npm run build` passed with code `0` (13/13 static routes generated, zero errors).
+  - Storage Hygiene: `backend/temp_uploads/` verified clean.
+
+### Task 19: Relative Position-Preserving Crop Box Adjustments & Canvas Dragging
+- **Objective**:
+  - Prevent crop box position reset when modifying margin values via steppers or number inputs in `CropSplitPanel.tsx` or dragging resize handles on `PageCanvas.tsx` / `BookWorkspace.tsx`.
+  - Ensure changes are strictly relative to the current position and placement of the crop box on the page.
+- **Root Cause & Architectural Problem**:
+  - When `Lock` mode was active, `handleInsetChange` computed a single ratio from the target value and forced `x1 = ratio, y1 = ratio, x2 = 1 - ratio, y2 = 1 - ratio`, discarding the crop box's actual position and resetting it to a centered square/rectangle.
+  - Similarly, in `BookWorkspace.tsx`, dragging handles in `Lock` mode forced `box.x1 = ratio, box.x2 = 1 - ratio, box.y1 = ratio, box.y2 = 1 - ratio`.
+- **Architectural Implementation**:
+  - [`frontend/src/components/book-studio/modules/CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx):
+    - Reworked `handleInsetChange` to calculate `delta = targetVal - curSideVal` in both physical unit mode (`mm`/`in`/`cm`/`px`) and percentage mode (`%`).
+    - In `Lock` mode, `delta` is clamped to prevent negative margins and maintain minimum 2mm / 2% crop width and height, then applied uniformly to all 4 margins relative to their current position (`curLeft + delta`, `curRight + delta`, `curTop + delta`, `curBottom + delta`).
+    - In `Normal` mode, only the target side is adjusted relative to page boundaries.
+    - Updated split lines recalculation so that cut line absolute positions on the sheet remain intact during box adjustments.
+  - [`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx):
+    - Reworked handle drag handlers (`w`, `e`, `n`, `s`, `nw`, `ne`, `sw`, `se`) to compute deltas relative to `cropDragStartRef.current.box`.
+    - In `Lock` mode, deltas expand or contract the box symmetrically around its current center without shifting its position.
+    - In `Normal` mode, anchor-based dragging prevents initial snapping jitter.
+- **Verification**:
+  - Python Backend: `cd backend && python3 -m py_compile main.py engines/*.py` exited with code `0`.
+  - Frontend TypeScript: `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - Next.js Production Build: `npm run build` passed with code `0` (13/13 static routes generated, zero errors).
+  - Storage Hygiene: `backend/temp_uploads/` verified clean.
+
+## Date: 2026-10-26
+
+### Task 18: Crop Module Redesign, Flickering Elimination & Streamlined Controls
+- **Objective**:
+  1. Eliminate preview panel flickering when increasing or decreasing crop values.
+  2. Keep the whole page image 100% visible while moving/adjusting the draft crop box, and only cut/crop when the user applies the crop. Remove the inspection opacity slider completely.
+  3. De-clutter and re-distribute the tools panel with generous spacing so fields do not overlap or clip.
+  4. Rework the locking ratio to two modes: `Lock` (all sides move together symmetrically) and `Normal` (every side moves freely and independently).
+  5. Remove artificial crop ceilings (like 48%), allowing the user to crop freely without breaking entries (preventing negative values and clamping bounds so margins do not exceed page dimensions or cross opposing edges).
+  6. Shorten tool and option names to as few words as possible (single-word titles: `Crop`, `Detect`, `Paper`, `Content`, `Page`, `All`, `Dimensions`, `Margins`, `Lock`, `Normal`, `Left`, `Right`, `Top`, `Bottom`, `Splits`, `Vertical`, `Horizontal`, `Scope`, `Apply`, `Update`, `Cancel`).
+  7. Eliminate browser default number spinner arrows, keeping only the dedicated `[-]` and `[+]` buttons.
+- **Architectural & Component Implementation**:
+  - [`frontend/src/components/book-studio/PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx):
+    - Removed the 4 dark overlay scrim divs (`backdrop-blur-[1px]` with dynamic background opacity). This eliminates GPU backdrop re-rasterization that caused repainting stutter and flickering during margin adjustments.
+    - Removed `transition-all duration-150` on the page `<img>` so image rendering is instantaneous with zero transition jitter. Full scanned page remains completely visible at all times during crop framing.
+  - [`frontend/src/app/book-studio/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx):
+    - Configured `rightWidthClass="w-full lg:w-[325px] xl:w-[345px]"` to provide ample breathing room for the right sidebar tools without horizontal cramping.
+  - [`frontend/src/types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts) & [`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts):
+    - Updated `aspectLock` to `'lock' | 'normal' | 'all' | 'none'`, defaulting cleanly to `'lock'`.
+  - [`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx):
+    - Refactored `activeCropDrag` handlers:
+      - In `Lock` mode (`aspectLock === "lock" || aspectLock === "all"`): dragging any handle (`w`, `e`, `n`, `s`, or corners) adjusts all 4 margins symmetrically together.
+      - In `Normal` mode (`aspectLock === "normal"`): each side and corner handle moves freely and independently without moving opposing sides.
+  - [`frontend/src/components/book-studio/modules/CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx):
+    - Removed inspection opacity slider completely.
+    - Replaced the 4-way aspect ratio toggle with a clean 2-button segmented toggle: `Lock` and `Normal`.
+    - Shortened all titles, tools, and options to minimal single words (`Crop`, `Detect`, `Paper`, `Content`, `Page`, `All`, `Dimensions`, `Margins`, `Lock`, `Normal`, `Left`, `Right`, `Top`, `Bottom`, `Splits`, `Vertical`, `Horizontal`, `Scope`, `Apply`, `Update`, `Cancel`).
+    - Suppressed browser native numeric spinner arrows using Tailwind CSS `[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`, preserving clean, tactile `[-]` and `[+]` buttons.
+    - Restructured the 4 margin steppers into a clean, spacious 2x2 layout with top row label/unit headers and generous 28px buttons, eliminating all clipping and overlap.
+    - Reworked boundary calculations: removed artificial 48% limits, clamping cleanly to `[0, pageWidth - opposingMargin - 2mm]` in `Normal` mode and `[0, minDimension / 2 - 2mm]` in `Lock` mode.
+- **Verification**:
+  - Python compilation: `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py settings_api.py engines/*.py` exited with code `0`.
+  - TypeScript compilation: `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - Next.js production build: `npm run build` passed with code `0` (13/13 static pages generated, zero errors).
+  - Storage hygiene: `backend/temp_uploads/` verified clean.
+
+### Task 17: Manual Spine Selection Rectangle, Continuous Despeckle & Precision Crop Controls
+- **Objective**:
+  1. Cleanup Module: Implement a manual spine selection rectangle (to isolate book-spine gutter shadows) and control flattening intensity via a continuous strength slider (10% to 100%, debounced).
+  2. Cleanup Module: Replace the 4 discrete despeckle buttons (`Off`, `L1`, `L2`, `L3`) with a continuous numeric slider + direct number input (0.0 to 10.0, step 0.5) with live debounced preview.
+  3. Crop Module: Implement 4 directional step inputs (`Left`, `Top`, `Right`, `Bottom`) with stepper buttons (-/+) and direct input, plus a unit toggle button between `%` and active default unit (`mm`/`in`/`cm`/`px` via canonical `src/lib/units.ts`).
+  4. Crop Module: Implement aspect ratio lock toggles (`All 4`, `L-R`, `T-B`, `Free`) with **All 4 locked by default** so stepping or dragging insets scales linked sides symmetrically.
+  5. Crop Module: Implement a prominent live cropped dimension badge displaying current cropped dimensions in the selected unit (e.g. `148.5 mm × 210.0 mm`) and sheet area percentage.
+  6. Crop Module: Implement post-detection inspection opacity (continuous slider 0% to 100%, default 55%) controlling the shading opacity outside the crop box on `PageCanvas.tsx` to inspect trimmed margins.
+- **Architectural & Engine Implementation**:
+  - [`backend/engines/book_scan_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/book_scan_engine.py):
+    - Upgraded `flatten_spine_illumination` to accept `strength: float = 1.0` and `spine_box: Optional[Dict[str, float]] = None`. When `spine_box` is provided, a Gaussian-feathered spatial mask (feathering 20% of the box dimension) is blended with the original image, removing gutter shadows with zero visible transition seams.
+    - Upgraded `despeckle_image` to continuous float `level: float` (0.0=off, 0.1..10.0 dust filter) mapping to non-linear resolution-scaled connected component areas (`base_area = max(2.0, 4.5 * (lvl ** 1.35))`).
+    - Updated `process_single_page` and `render_export_pages` to pass and export `spine_strength`, `spine_box`, and `despeckle_level`.
+  - [`backend/engines/schemas.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/schemas.py) & [`backend/book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py):
+    - Added `spine_strength: float = 1.0` and `spine_box: Optional[str] = None` to thumbnail query parameters and `ExportRequest`.
+    - Updated cache tag hashing with `_st{int(spine_strength*100)}`, `_spb_{spine_box}`, and `_ds{int(round(despeckle_level*10))}`.
+  - [`frontend/src/types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts), [`frontend/src/hooks/useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts), & [`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts):
+    - Added `aspectLock?: "all" | "lr" | "tb" | "none"` (default `"all"`), `unitMode?: "percent" | "unit"`, and `overlayOpacity?: number` (default `0.55`) to `CropModuleConfig`.
+    - Added `spineStrength?: number` (default `1.0`), `spineBox?: CropBox | null`, `spineSelectionActive?: boolean`, and continuous `despeckleLevel: number` to `CleanupModuleConfig`.
+    - Added 350ms debounced hooks: `debouncedSpineStrength` and `debouncedDespeckle` per AGENTS.md rules.
+    - Wired `per_page_cleanup` serialization for high-res PDF print exports.
+  - [`frontend/src/components/book-studio/modules/CropSplitPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CropSplitPanel.tsx):
+    - Built the 4 directional step inputs (`Left`, `Top`, `Right`, `Bottom`) with `-` / `+` steppers, direct numeric input, and toggle between `%` and active default unit (`mm`/`in`/`cm`/`px`).
+    - Added Aspect Ratio Lock segmented control (`All 4`, `L-R`, `T-B`, `Free`) defaulting to `All 4`.
+    - Added live cropped dimension badge: `W × H (area% of page)`.
+    - Added post-detection inspection opacity slider (0% to 100%, default 55%).
+  - [`frontend/src/components/book-studio/modules/CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx):
+    - Added spine shadow flattening strength slider (10% to 100%, debounced).
+    - Added "Select Spine Area" button / "Reset Area" button with active badge and intelligent gutter presets.
+    - Added continuous numeric despeckle slider (0.0 to 10.0, step 0.5) + direct numeric input.
+  - [`frontend/src/components/book-studio/PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx) & [`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx):
+    - Styled dynamic crop scrim opacity with `rgba(0, 0, 0, ${cropModule.overlayOpacity ?? 0.55})`.
+    - Rendered interactive cyan spine selection box with 8 resize handles and interior move bar.
+    - Implemented `handleSpinePointerDown` with stable bounding box dragging.
+    - Updated crop drag handles to strictly adhere to `aspectLock` symmetry.
+- **Verification**:
+  - Python compilation: `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py settings_api.py engines/*.py` exited with code `0`.
+  - TypeScript compilation: `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - Next.js production build: `npm run build` passed with code `0` (13/13 static routes generated, zero errors).
+  - Storage hygiene: `backend/temp_uploads/` verified clean.
+
+### Task 16: Mask Box Resize Handle Dragging & Preview Visibility (Show/Hide) Architecture
+- **Objective**:
+  1. Fix the mask box resizing handles on the canvas preview so they smoothly resize and move the erase box in all directions (`n`, `s`, `w`, `e`, `nw`, `ne`, `sw`, `se`, `move`).
+  2. Fix show/hide visibility toggling so that hiding an individual mask entry or toggling "Hide" on the entire Modifications panel cleanly hides the whiteout/erase boxes from both the preview canvas and the backend thumbnail image.
+  3. Ensure that when editing an existing mask, the old mask is excluded from the underlying image pixels so the user can see what was underneath while repositioning or resizing the draft box.
+- **Root Cause & Architectural Problem**:
+  - `overlayRef` in `PageCanvas.tsx` was conditionally attached only inside `{cropModule?.enabled && <div ref={overlayRef}>}`. When the user was inside the Cleanup module, `cropModule.enabled` was `false`, causing `overlayRef.current` to be `null`. Therefore, `handleMaskPointerDown` and `onMove` in `BookWorkspace.tsx` failed their null check and aborted immediately without dragging or resizing anything.
+  - The backend (`backend/book_scan_api.py`) burned all masks from `page_info["masks"]` directly into the thumbnail JPEG pixels via OpenCV whenever `preview_clean` was `true`. Because the thumbnail endpoint had no parameter for excluded/hidden masks, hiding an entry or the entire modifications panel in the frontend only hid the HTML overlay, while the white box remained permanently baked into the underlying image pixels.
+- **Changes Delivered**:
+  - [`frontend/src/components/book-studio/PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx):
+    - Added a permanent `<div ref={overlayRef} className="absolute inset-0 pointer-events-none select-none" />` covering the image bounds so `overlayRef.current` is always non-null regardless of which tool is active.
+    - Elevated `draftMaskBox` to `z-[55]` and ensured `pointer-events-auto` on all 8 corner/edge resize handles and the interior drag area.
+  - [`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx):
+    - Re-architected pointer drag handlers using stable initial bounding box anchor points from `maskDragStartRef.current`, eliminating edge creep and rounding drift for precision CAD-grade resizing.
+    - Updated `visiblePageMasks` to respect `cleanupModule.enabled` and individual entry visibility across all mask ID formats.
+  - [`backend/book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py):
+    - Added `exclude_mask_ids: Optional[str] = None` query parameter to `/api/book-scan/page-thumbnail/{session_id}/{page_id}`.
+    - Filtered `masks_list` when `exclude_mask_ids` is provided (supporting comma-separated mask IDs or `*` to exclude all masks). Automatically invalidates and updates disk cache tags (`mask_sig`).
+  - [`frontend/src/types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts), [`frontend/src/hooks/useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts), & [`frontend/src/hooks/useBookStudioState.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookStudioState.ts):
+    - Wired `excludeMaskIds` into `ThumbnailRenderOpts` and `buildThumbnailUrl`.
+    - Computed active `hiddenMaskIds` in `getThumbnailUrl` for hidden entries, disabled cleanup, and masks currently in draft edit.
+  - [`frontend/src/components/book-studio/modules/CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx):
+    - Added synchronization hook to populate `appliedEntries` from `pages` if unmapped masks exist from session persistence (gated with `initializedRef` to run strictly once on load, preventing double entry creation during live `handleApply`).
+    - Deduplicated entry commits in `handleApply` by filtering any matching mask IDs before appending.
+    - Ensured coordinate normalization (`Math.min`/`Math.max`) on edit and apply.
+    - Removed redundant "Clear Page" and "Clear All" buttons from the Erase Box section in `CleanupPanel.tsx` in favor of the Modifications layer stack.
+- **Verification**:
+  - Backend compile: `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py settings_api.py engines/*.py` exited with code `0`.
+  - Frontend typecheck: `cd frontend && npx tsc --noEmit` exited with code `0` (zero errors).
+  - Storage hygiene: `backend/temp_uploads/` verified clean.
+- **Objective**:
+  1. Eliminate the premature creation of entries when dragging a mask box on the canvas; follow the single-commit rule where no modification entry is created until the user clicks "Apply".
+  2. Remove redundant in-tool box entries so there is exactly one unified entry per committed modification in the Modifications panel.
+  3. Wire the "Edit" button in the Modifications panel so it displays interactive resize and move controls for the mask box directly on the preview canvas and allows the user to edit its fill color and page scope.
+- **Root Cause & Architectural Problem**:
+  - Drawing on the canvas via `PageCanvas.handleMaskPointerUp` previously called `onApplyMaskBox` immediately, which hit `/api/book-scan/mask-page/` and pushed an entry to `cleanupModule.appliedEntries` immediately on mouse up. Clicking "Apply" then created a second entry for the same action.
+  - No draft state existed for masks, unlike `cropBox` in the Crop tool, preventing interactive handles (resize/move) and color adjustments before commit.
+- **Changes Delivered**:
+  - [`frontend/src/types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts):
+    - Added `draftMaskBox?: MaskBox | null;` to `CleanupModuleConfig`.
+  - [`frontend/src/components/book-studio/PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx):
+    - Added interactive resize/move bounding box for `cleanupModule?.draftMaskBox` with 8 corner/edge resize handles (`nw`, `ne`, `sw`, `se`, `n`, `s`, `w`, `e`) and an interior `move` drag area styled with the mask's fill color.
+    - Updated `handleMaskPointerUp` to pass coordinates up without prematurely creating database entries.
+  - [`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx):
+    - Implemented `handleMaskPointerDown`, `activeMaskDrag`, and pointer move/up listeners to support live dragging, resizing, and repositioning of `draftMaskBox`.
+  - [`frontend/src/app/book-studio/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx):
+    - Updated `onApplyMaskBox` on `PageCanvas` to set `draftMaskBox` in `cleanupModule` and deactivate the drawing tool, perfectly mirroring the Crop tool draft workflow.
+    - Passed `setCleanupModule` to `BookWorkspace` and `applyMaskBox`/`removeMaskBox` down to `BookRightPanel`.
+  - [`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts) & [`frontend/src/hooks/useBookStudioState.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookStudioState.ts):
+    - Initialized `draftMaskBox: null` in `cleanupModule`.
+    - Enhanced `applyMaskBox` to accept `customColor` and `existingMaskId` parameters for seamless update workflows.
+  - [`frontend/src/components/book-studio/modules/CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx):
+    - Unified `handleApply`: if a `draftMaskBox` is present, it commits the box to targeted pages via `applyMaskBox` and pushes/updates a single clean modification entry in `cleanupModule.appliedEntries` before clearing the draft.
+    - Updated `handleEditEntry`: clicking "Edit" restores `draftMaskBox` onto the canvas, displays the interactive resize controls, sets the fill color picker, and updates the action button to "Update Entry".
+    - Added "Draft Box Active" / "Editing Mask Box" pill with a "Cancel Box" button.
+    - Enhanced `handleDeleteApplied` to clear `draftMaskBox` and invoke `removeMaskBox`.
+- **Verification**:
+  - Backend compile: `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py settings_api.py engines/*.py db/*.py storage/*.py` exited with code `0`.
+  - Frontend typecheck: `cd frontend && npx tsc --noEmit` exited with code `0` (zero errors).
+  - Production build: `cd frontend && npm run build` exited with code `0` (13 static pages generated cleanly).
+  - Storage hygiene: `backend/temp_uploads/` verified clean.
+
+### Task 14: Erase Box Modifications Synchronization, Auto-Pruning & Canvas Parity
+- **Objective**:
+  1. Synchronize the Cleanup module modifications panel entries with user erase box operations in real-time, matching the behavior of the Crop tool modification panel.
+  2. Ensure that when the user manually deletes the last erase box on a page or across all pages, the modification entries are cleanly removed from the Modifications panel.
+  3. When all boxes across all pages are deleted (and no background filters are active), ensure the Cleanup module is disabled and the Modifications panel completely hides.
+  4. Wire canvas mask visibility toggling from the Modifications panel (`Show`/`Hide` eye icons) so canvas overlays immediately respect entry visibility.
+- **Root Cause & Architectural Problem**:
+  - Previously, deleting the last erase box on a page did not unlink the page from multi-page entries (`All` / `Custom`), leaving empty pages with obsolete modification cards.
+  - Deleting the last remaining box across the entire book could leave stale entries or fail to disable the cleanup state.
+  - History jumps (Undo/Redo) could desynchronize the layer entry stack from the actual mask geometry on pages.
+- **Changes Delivered**:
+  - [`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts):
+    - Re-architected `removeMaskBox`: when `totalRemainingBoxes === 0`, prunes all mask entries from `appliedEntries` and sets `enabled: false` if no filters remain. When `totalRemainingBoxes > 0`, recalculates remaining boxes per entry, unlinks pages that reached 0 boxes (`targetPageIds`, `targetPages`, `scopeLabel`), and updates live counts (`details: "X Box(es)"`).
+    - Updated `applyMaskBox`: accurately computes box counts and attaches `solidColor` and scope labels.
+    - Updated `clearPageMasks` & `clearAllMasks`: synchronized with `appliedEntries` pruning and scope re-evaluation.
+    - Updated `useEffect` on `pages`: guarantees bidirectional consistency between canvas page masks and `cleanupModule.appliedEntries` during Undo, Redo, page operations, or session restoration.
+  - [`frontend/src/components/book-studio/modules/CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx):
+    - Enabled `onClearPageMasks` to accept target page IDs for multi-page entry deletion.
+    - Updated `handleDeleteApplied` and `handleDeleteFromCurrentPage` to trigger proper page-specific mask clearing and unlinking.
+    - Enhanced `handleEditEntry` to distinguish between filter entries and erase box entries.
+  - [`frontend/src/components/book-studio/BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx) & [`frontend/src/app/book-studio/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx):
+    - Passed `cleanupModule` into `BookWorkspace` and computed `isMasksVisible` for the active page, hiding canvas mask overlays when an entry is toggled to `Hide` in the Modifications panel.
+  - [`frontend/src/types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts):
+    - Added `solidColor?: string;` to `AppliedModuleEntry` for inline color swatch rendering in `LayerEntryStack`.
+- **Verification**:
+  - Backend compile: `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py settings_api.py engines/*.py db/*.py storage/*.py` exited with code `0`.
+  - Frontend typecheck: `cd frontend && npx tsc --noEmit` exited with code `0` (zero errors).
+  - Production build: `cd frontend && npm run build` succeeded with code `0` (13 static routes generated cleanly).
+  - Storage hygiene: `backend/temp_uploads/` verified clean.
+
+### Task 13: Cleanup Module Decoupling, Layer Stack Application & Single-Source Unlinking
+- **Objective**:
+  1. Extract `CleanupPanel` from `RestorePanel.tsx` into a dedicated, single-responsibility module file [`frontend/src/components/book-studio/modules/CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx).
+  2. Implement true per-page parameter resolution from applied layer stacks (`AppliedModuleEntry` / `BleedEntry`) across both real-time thumbnail previews and backend PDF/ZIP exports.
+  3. Consolidate duplicated `handleDeleteFromCurrentPage` routines across 4 modules (`CleanupPanel`, `RestorePanel`, `DeskewPanel`, `BleedPanel`) into canonical helper `unlinkPageFromEntries` in [`frontend/src/lib/pageScope.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/lib/pageScope.ts).
+  4. Fix preview and export bugs where pages in applied layer scopes erroneously rendered with active form slider values instead of their committed entry parameters.
+- **Root Cause & Architectural Problem**:
+  - `RestorePanel.tsx` previously housed two separate modules (`CleanupPanel` and `RestorePanel`) spanning 942 lines, violating single responsibility.
+  - While Book Studio allowed operators to add entries to `appliedEntries` for different page scopes, `buildThumbnailUrl` and `exportPdf` only evaluated whether a page was included in the scope, then applied the global/active form state to all matching pages. Adjusting a slider on Page 2 inadvertently altered the rendered output of previously committed modifications on Page 1.
+  - Each of the 4 panels independently implemented ~30 lines of identical page unlinking math.
+- **Changes Delivered**:
+  - [`frontend/src/lib/pageScope.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/lib/pageScope.ts):
+    - Added `getAppliedEntryForPage` to find the highest-priority visible entry matching a given page.
+    - Updated `isPageInAppliedEntries` to wrap `getAppliedEntryForPage`.
+    - Added canonical `unlinkPageFromEntries` to remove a page from an entry, manage exclusions, and format custom scope labels.
+  - [`frontend/src/components/book-studio/modules/CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx):
+    - Created clean standalone component handling erase boxes, fill color, spine shadows, and despeckle filters.
+  - [`frontend/src/components/book-studio/modules/RestorePanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/RestorePanel.tsx):
+    - Pruned `CleanupPanelProps` and `CleanupPanel`, leaving a concise, dedicated component for color mode, background whitening, and tonal vibrance/contrast.
+  - [`frontend/src/components/book-studio/modules/DeskewPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/DeskewPanel.tsx) & [`frontend/src/components/book-studio/modules/BleedPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/BleedPanel.tsx):
+    - Replaced duplicated unlinking boilerplate with `unlinkPageFromEntries`.
+  - [`frontend/src/components/book-studio/BookRightPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookRightPanel.tsx):
+    - Updated import to load `CleanupPanel` from `./modules/CleanupPanel`.
+  - [`frontend/src/hooks/useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts):
+    - Updated `buildThumbnailUrl` to resolve effective deskew, cleanup, color, and bleed values per page from matching layer entries before querying backend thumbnails.
+  - [`frontend/src/hooks/useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts):
+    - Extended `exportPdf` to compile per-page maps (`per_page_cleanup`, `per_page_restoration`, `per_page_bleed`) and include them in `exportPayload`.
+  - [`backend/engines/schemas.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/schemas.py) & [`backend/engines/book_scan_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/book_scan_engine.py):
+    - Added `per_page_cleanup`, `per_page_restoration`, `per_page_bleed` fields to `ExportRequest`.
+    - Wired `BookScanEngine.render_export_pages` to extract and apply per-page cleanup, color/tone, and bleed parameters during compilation.
+  - [`docs/architecture.md`](file:///home/essam/Projects/ESSR_PA/docs/architecture.md):
+    - Synchronized Repository Navigation Map to reflect dedicated `CleanupPanel.tsx` path.
+- **Verification**:
+  - Backend compile: `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py settings_api.py engines/*.py db/*.py storage/*.py` exited with `0`.
+  - Frontend typecheck: `cd frontend && npx tsc --noEmit` exited with `0` (zero errors).
+  - Storage hygiene: `backend/temp_uploads` verified clean.
 
 ### Task 12: Production Build Gate & Session Hand-Off
 - **Objective**:
@@ -771,3 +1390,38 @@
 ### 3. Verification
 - `bash -n start.sh` passed.
 - After restart: `/`, `/book-studio`, `/imposing` → 200; backend `/docs` → 200; both units `active (running)`.
+
+## 2026-10-26 — Cleanup mask edit/visibility fixes
+- PageCanvas: draft (editing) mask box raised to z-[55] so resize/move handles are no longer covered by saved mask overlays or the draw surface.
+- BookWorkspace: per-mask visibility (each mask follows its own applied entry `visible` flag); mask being edited is hidden from saved overlays. Replaced page-wide `isMasksVisible`.
+- useBookSession: cleanup filter params resolve only from non-mask entries, so hiding filter entries/all entries works even when mask entries exist.
+
+## 2026-10-29 — Crop tool in dual / continuous preview modes
+- BookWorkspace: wheel-zoom listener now re-binds when switching page-by-page <-> continuous (was bound to a stale element, causing browser-zoom/UI glitches after toggling back). Continuous dual rows use CSS `zoom` instead of `transform: scale` (no more overlapping rows).
+- BookWorkspace: continuous mode selected page now has an interactive crop box (move/edge/corner handles) wired to the shared crop drag logic via `overlayRef`.
+- PageCanvas: dual-page layout gives each page a half-width column (removed `max-w-[46vw]`), so the image/overlay stay aligned and the crop box is draggable.
+- Follow-up: removed Continuous Scroll mode from BookWorkspace (button, state, render path, extra refs) — it caused flicker/UI glitches. Preview is now single/dual page only; crop box works in both via PageCanvas. `tsc --noEmit` clean.
+
+## 2026-10-29 — Scope-Aware Crop Tool & Dual-Mode Per-Page Toggles
+- Crop Module Scope Default: Changed default scope from `all` to current page (`P.n`).
+- Live Scope Propagation: Editing the crop box now updates drafts across all in-scope pages in real-time (`All`, `Odds`, `Evens`, `Range`, or active dual-page selection).
+- Dual Mode Per-Page Crop Boxes: Both previewed pages now render independent interactive crop boxes (`primaryCropBox` & `secondaryCropBox`).
+- Dual-Mode Scope Toggles: Added dynamic `P.left` and `P.right` toggle buttons in `CropSplitPanel` scope bar when in Dual Mode:
+  - Clicking `P.left` selects/focuses the left page only.
+  - Clicking `P.right` selects/focuses the right page only.
+  - Toggling both allows simultaneous editing and applying to both visible pages.
+  - Dragging either crop box on the canvas automatically focuses the respective page when in single/current scope.
+- Typecheck & Build Health: `npx tsc --noEmit` and `python3 -m py_compile` passed with 0 errors.
+
+## 2026-10-29 — Fixed Book Spread Navigation & Clean Spread Inheritance
+- Fixed Book Spreads in Dual Mode:
+  - Pages are now paired as discrete book spreads (`[1, 2]`, `[3, 4]`, `[5, 6]`, ...) rather than sliding by a single page (`[1, 2]` -> `[2, 3]`).
+  - Next/Prev navigation advances or steps back by full spreads (+2 / -2) in dual mode.
+  - HUD readout displays `P. 1–2 / N`, `P. 3–4 / N`, etc.
+  - Resolved crop box leaks where moving from `[1, 2]` previously overlapped Page 2 into `[2, 3]`.
+- Default Dual-Mode Scope:
+  - Both visible pages (`P.left` and `P.right`) are now selected by default in `dualSides` (`["left", "right"]`), allowing immediate editing of both pages together.
+- Clean Spread Crop Initialization:
+  - Removed passive persist `useEffect` in `useBookModules.ts` that erroneously stamped prior spread crop boxes onto newly visited pages during navigation.
+  - Moving to `[3, 4]` starts with the document default crop box (or committed crop box) if no prior edits were made, cleanly supporting the workflow: select All on page 1 -> switch to dual mode -> adjust 2 pages at a time -> apply.
+- Verified: `npx tsc --noEmit` and `python3 -m py_compile` passed with 0 errors.

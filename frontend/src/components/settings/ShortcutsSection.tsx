@@ -62,7 +62,7 @@ export default function ShortcutsSection({ settings, onSettingsChange }: Shortcu
 
   const handleLimitChange = (valStr: string) => {
     const num = Number(valStr);
-    const clamped = Math.max(10, Math.min(100, Math.round(isNaN(num) ? 50 : num)));
+    const clamped = Math.max(5, Math.min(50, Math.round(isNaN(num) ? 50 : num)));
     onSettingsChange((prev) => ({
       ...prev,
       book_studio: {
@@ -146,7 +146,7 @@ export default function ShortcutsSection({ settings, onSettingsChange }: Shortcu
           <div className="space-y-0.5">
             <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">History Entries Limit</span>
             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-              Maximum actions retained in the snapshot journal (default: 50, range: 10–100).
+              Maximum actions retained in the snapshot journal (default: 50, range: 5–50).
             </p>
           </div>
           <div className="w-36">
@@ -154,8 +154,8 @@ export default function ShortcutsSection({ settings, onSettingsChange }: Shortcu
               label="Max Steps"
               value={String(bookSettings.history_limit)}
               onChange={handleLimitChange}
-              min="10"
-              max="100"
+              min="5"
+              max="50"
               step="5"
               unit="steps"
             />

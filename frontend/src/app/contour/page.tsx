@@ -69,10 +69,18 @@ function ContourStudioContent() {
     }
   }, []);
 
+  const preloadedRef = useRef<string | null>(null);
+
   // Preload artwork if routed from Hub
   useEffect(() => {
     const fileIdParam = searchParams.get("file_id");
-    if (fileIdParam && !fileId) {
+    if (fileIdParam && fileIdParam !== preloadedRef.current && !fileId) {
+      preloadedRef.current = fileIdParam;
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {
+        // ignore
+      }
       setFileId(fileIdParam);
       generateContour(fileIdParam, offsetVal, threshold, smoothing, keepHoles, addWhiteMatte, strokeColor);
     }
@@ -210,8 +218,14 @@ function ContourStudioContent() {
         ) : undefined
       }
       error={error}
-      leftLabel="Controls"
-      leftPanel={
+      centerViewport={
+        <ContourViewport
+          fileId={fileId} svgContent={svgContent} isGenerating={isGenerating}
+          artworkOpacity={artworkOpacity} setArtworkOpacity={setArtworkOpacity}
+        />
+      }
+      rightLabel="Controls"
+      rightPanel={
         <ContourControls
           offsetVal={offsetVal} setOffsetVal={setOffsetVal}
           threshold={threshold} setThreshold={setThreshold}
@@ -223,11 +237,6 @@ function ContourStudioContent() {
           fileId={fileId} svgContent={svgContent} isGenerating={isGenerating}
           handleFileUpload={handleFileUpload} handleGenerate={handleGenerate}
           handleDownload={handleDownload} handleResetToAuto={handleResetToAuto}
-        />
-      }
-      centerViewport={
-        <ContourViewport
-          fileId={fileId} svgContent={svgContent} isGenerating={isGenerating}
           artworkOpacity={artworkOpacity} setArtworkOpacity={setArtworkOpacity}
         />
       }

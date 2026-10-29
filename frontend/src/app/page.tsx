@@ -147,7 +147,9 @@ export default function HomePage() {
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      handleProcessFile(e.target.files[0]);
+      const file = e.target.files[0];
+      e.target.value = "";
+      handleProcessFile(file);
     }
   };
 

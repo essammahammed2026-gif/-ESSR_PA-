@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useEffect } from "react";
-import { Upload, RefreshCw, ChevronLeft, ChevronDown } from "lucide-react";
+import { Upload, RefreshCw, X, ChevronDown, ArrowLeftRight } from "lucide-react";
 import {
   IconBookStudio,
   IconImposingStudio,
@@ -15,7 +15,6 @@ import { PageContextMenu } from "./PageContextMenu";
 import { PagePropertiesModal } from "./PagePropertiesModal";
 import { DeckGrid } from "@/components/shared/DeckGrid";
 import { FileUploadQueue } from "./FileUploadQueue";
-import { ArrowLeftRight } from "lucide-react";
 
 interface BookLeftPanelProps {
   intakeMode: BookIntakeMode;
@@ -215,21 +214,20 @@ export function BookLeftPanel({
     { id: "dual_pass", title: "Multi-File & Collation", tooltip: "Interleave odd/even duplex scans or combine split parts", icon: <IconImposingStudio size={15} /> },
   ];
   return (
-    <div className="flex flex-col h-full bg-[#181D27] rounded-xl border border-[#242A38] overflow-hidden select-none">
+    <div className="flex flex-col h-full bg-[#11141B] overflow-hidden select-none">
       <div
-        className="px-3 py-2 border-b border-[#242A38] bg-[#131720] flex items-center justify-between"
+        className="px-3 py-2 border-b border-[#1E232E] bg-[#11141B] flex items-center justify-between"
         title={sessionId ? "Drag thumbnails to reorder • Right-click for page actions" : "Configure document intake"}
       >
         <div className="flex items-center space-x-1.5 text-slate-200 font-semibold text-xs min-w-0">
-          <IconBookStudio size={15} className="shrink-0" style={{ color: "var(--app-accent, #f59e0b)" }} />
-          <span className="truncate">{sessionId ? "Deck" : "Intake"}</span>
+          <span className="truncate">{sessionId ? "Page Deck" : "Document Intake"}</span>
 
           {sessionId && (
             <div className="relative shrink-0" ref={selectMenuRef}>
               <button
                 type="button"
                 onClick={() => setIsSelectMenuOpen((prev) => !prev)}
-                className="flex items-center space-x-1 px-1.5 py-0.5 text-[10px] bg-[#181D27] hover:bg-slate-800 text-slate-300 hover:text-white rounded border border-[#2E3648] transition-colors cursor-pointer"
+                className="flex items-center space-x-1 px-1.5 py-0.5 text-[10px] bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 hover:text-white rounded border border-[#1E232E] transition-colors cursor-pointer"
                 title="Select specific pages (All, Odds, Evens, Range)"
               >
                 <span>Select</span>
@@ -242,11 +240,11 @@ export function BookLeftPanel({
               </button>
 
               {isSelectMenuOpen && (
-                <div className="absolute top-full left-0 mt-1 w-44 bg-[#131720] border border-[#2E3648] rounded-lg shadow-xl py-1 z-50 text-[11px] text-slate-200">
+                <div className="absolute top-full left-0 mt-1 w-44 bg-[#14171F] border border-[#242A38] rounded-lg shadow-xl py-1 z-50 text-[11px] text-slate-200">
                   <button
                     type="button"
                     onClick={handleSelectAll}
-                    className="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 flex items-center justify-between cursor-pointer"
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-white/[0.06] flex items-center justify-between cursor-pointer"
                   >
                     <span>All Pages</span>
                     <span className="text-[10px] text-slate-500 font-mono">{pages.length}</span>
@@ -254,7 +252,7 @@ export function BookLeftPanel({
                   <button
                     type="button"
                     onClick={handleSelectOdds}
-                    className="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 flex items-center justify-between cursor-pointer"
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-white/[0.06] flex items-center justify-between cursor-pointer"
                   >
                     <span>Odd Pages</span>
                     <span className="text-[10px] text-slate-500 font-mono">
@@ -264,7 +262,7 @@ export function BookLeftPanel({
                   <button
                     type="button"
                     onClick={handleSelectEvens}
-                    className="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 flex items-center justify-between cursor-pointer"
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-white/[0.06] flex items-center justify-between cursor-pointer"
                   >
                     <span>Even Pages</span>
                     <span className="text-[10px] text-slate-500 font-mono">
@@ -272,13 +270,13 @@ export function BookLeftPanel({
                     </span>
                   </button>
 
-                  <div className="border-t border-[#242A38] my-1" />
+                  <div className="border-t border-[#1E232E] my-1" />
 
                   {!showCustomRangeInput ? (
                     <button
                       type="button"
                       onClick={() => setShowCustomRangeInput(true)}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-slate-800 flex items-center justify-between cursor-pointer text-slate-300"
+                      className="w-full text-left px-2.5 py-1.5 hover:bg-white/[0.06] flex items-center justify-between cursor-pointer text-slate-300"
                     >
                       <span>Custom Range...</span>
                     </button>
@@ -294,7 +292,7 @@ export function BookLeftPanel({
                             if (e.key === "Enter") handleApplyCustomRange();
                           }}
                           placeholder="1-5, 8"
-                          className="w-full bg-[#181D27] border border-[#2E3648] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono"
+                          className="w-full bg-[#11141B] border border-[#242A38] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono"
                           autoFocus
                         />
                         <button
@@ -310,11 +308,11 @@ export function BookLeftPanel({
 
                   {selectedPageIds.length > 1 && (
                     <>
-                      <div className="border-t border-[#242A38] my-1" />
+                      <div className="border-t border-[#1E232E] my-1" />
                       <button
                         type="button"
                         onClick={handleClearSelection}
-                        className="w-full text-left px-2.5 py-1 text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                        className="w-full text-left px-2.5 py-1 text-slate-400 hover:text-white hover:bg-white/[0.06] cursor-pointer"
                       >
                         Reset Selection
                       </button>
@@ -327,13 +325,13 @@ export function BookLeftPanel({
         </div>
         <div className="flex items-center space-x-1.5 shrink-0">
           {sessionId && (
-            <button onClick={resetJob} className="text-[10px] px-2 py-0.5 bg-[#181D27] hover:bg-slate-800 text-slate-300 rounded border border-[#2E3648] transition-colors cursor-pointer" title="Close current session and start a new job">
+            <button onClick={resetJob} className="text-[10px] px-2 py-0.5 bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 rounded border border-[#1E232E] transition-colors cursor-pointer" title="Close current session and start a new job">
               New Job
             </button>
           )}
           {onCollapse && (
-            <button onClick={onCollapse} className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer" title="Collapse Deck Panel">
-              <ChevronLeft size={14} />
+            <button onClick={onCollapse} className="p-1 text-slate-400 hover:text-white hover:bg-white/[0.06] rounded transition-colors cursor-pointer" title="Close Page Deck">
+              <X size={13} />
             </button>
           )}
         </div>
@@ -410,7 +408,17 @@ export function BookLeftPanel({
                         fileOdds ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"
                       }`}
                     >
-                      <input ref={oddsInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileOdds(e.target.files?.[0] || null)} />
+                      <input
+                        ref={oddsInputRef}
+                        type="file"
+                        accept=".pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          e.target.value = "";
+                          setFileOdds(f);
+                        }}
+                      />
                       <div className="text-xs font-medium text-slate-200 truncate">{fileOdds ? fileOdds.name : "Odds PDF (1, 3, 5...)"}</div>
                     </div>
                     <div className="flex items-center justify-between text-[11px] px-0.5">
@@ -459,7 +467,17 @@ export function BookLeftPanel({
                         fileEvens ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"
                       }`}
                     >
-                      <input ref={evensInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileEvens(e.target.files?.[0] || null)} />
+                      <input
+                        ref={evensInputRef}
+                        type="file"
+                        accept=".pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          e.target.value = "";
+                          setFileEvens(f);
+                        }}
+                      />
                       <div className="text-xs font-medium text-slate-200 truncate">{fileEvens ? fileEvens.name : "Evens PDF (6, 4, 2...)"}</div>
                     </div>
                     <div className="flex items-center justify-between text-[11px] px-0.5">
@@ -518,7 +536,17 @@ export function BookLeftPanel({
                     fileSingle ? "border-amber-500/60 bg-[#131720]" : "border-[#2E3648] hover:border-slate-500 bg-[#131720]/40"
                   }`}
                 >
-                  <input ref={singleInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => setFileSingle(e.target.files?.[0] || null)} />
+                  <input
+                    ref={singleInputRef}
+                    type="file"
+                    accept=".pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      e.target.value = "";
+                      setFileSingle(f);
+                    }}
+                  />
                   <Upload size={18} className="mx-auto mb-1.5" style={{ color: "var(--app-accent, #f59e0b)" }} />
                   <div className="text-xs font-medium text-slate-200 truncate">{fileSingle ? fileSingle.name : "Browse Book PDF"}</div>
                 </div>

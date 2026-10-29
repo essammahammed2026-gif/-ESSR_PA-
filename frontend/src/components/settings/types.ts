@@ -13,9 +13,17 @@ export interface Roll {
   unit: string;
 }
 
+export interface BookTrim {
+  name: string;
+  width: number;
+  height: number;
+  unit: string;
+}
+
 export interface AppSettingsData {
   sheets: Sheet[];
   rolls: Roll[];
+  book_trims?: BookTrim[];
   imposing: {
     default_sheet_unit: string;
     default_margin: number;
@@ -74,6 +82,16 @@ export interface StorageStatus {
 export const DEFAULT_SETTINGS: AppSettingsData = {
   sheets: [],
   rolls: [],
+  book_trims: [
+    { name: "A4", width: 210.0, height: 297.0, unit: "mm" },
+    { name: "A5", width: 148.0, height: 210.0, unit: "mm" },
+    { name: "B5 (JIS)", width: 182.0, height: 257.0, unit: "mm" },
+    { name: "US Trade (6\" × 9\")", width: 152.4, height: 228.6, unit: "mm" },
+    { name: "US Digest (5.5\" × 8.5\")", width: 139.7, height: 215.9, unit: "mm" },
+    { name: "Pocket Book (4.25\" × 6.87\")", width: 108.0, height: 174.5, unit: "mm" },
+    { name: "Royal (6.14\" × 9.21\")", width: 156.0, height: 234.0, unit: "mm" },
+    { name: "Square Large (8.25\" × 8.25\")", width: 210.0, height: 210.0, unit: "mm" },
+  ],
   imposing: {
     default_sheet_unit: "mm",
     default_margin: 10,

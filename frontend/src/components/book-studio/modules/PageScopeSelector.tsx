@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback } from "react";
 import { Trash2, Eye, EyeOff, Pencil, FileMinus } from "lucide-react";
 import {
+  BookStudioPage,
   ModulePageScope,
   ModulePageScopeMode,
   ModuleTaskProgress,
@@ -136,6 +137,7 @@ export interface LayerEntryStackProps<T extends LayerEntryItem> {
   editingId?: string | null;
   activePageNum?: number;
   activePageId?: string | null;
+  pages?: BookStudioPage[];
   onEdit?: (entry: T) => void;
   onDelete: (id: string, entry: T) => void;
   onDeleteFromCurrentPage?: (id: string, entry: T) => void;
@@ -155,6 +157,7 @@ export function LayerEntryStack<T extends LayerEntryItem>({
   editingId,
   activePageNum,
   activePageId,
+  pages,
   onEdit,
   onDelete,
   onDeleteFromCurrentPage,
@@ -163,28 +166,59 @@ export function LayerEntryStack<T extends LayerEntryItem>({
   onDeleteAll,
   emptyLabel,
 }: LayerEntryStackProps<T>) {
+  // Helper: compute all ancestor IDs for a given pageId so slice views inherit parent entries
+  const getAncestorIds = useCallback((pageId: string | null | undefined): Set<string> => {
+    const ids = new Set<string>();
+    if (!pageId) return ids;
+    ids.add(pageId);
+    if (!pages || pages.length === 0) return ids;
+
+    let current = pages.find((p) => p.id === pageId);
+    while (current) {
+      if (current.immediate_parent_id && !ids.has(current.immediate_parent_id)) {
+        ids.add(current.immediate_parent_id);
+      }
+      if (current.parent_page_id && !ids.has(current.parent_page_id)) {
+        ids.add(current.parent_page_id);
+      }
+      const nextParentId = current.immediate_parent_id || current.parent_page_id;
+      if (nextParentId && nextParentId !== current.id) {
+        current = pages.find((p) => p.id === nextParentId);
+      } else {
+        break;
+      }
+    }
+    return ids;
+  }, [pages]);
+
   // Filter entries to only those that apply to the currently viewed page
   const pageEntries = useMemo<T[]>(() => {
     if (!activePageId && activePageNum === undefined) {
       return entries;
     }
+    const ancestorIds = getAncestorIds(activePageId);
+
     return entries.filter((entry) => {
       // 1. If this entry explicitly excluded the current page, it does NOT apply here
       if (activePageNum !== undefined && entry.excludedPages && entry.excludedPages.includes(activePageNum)) {
         return false;
       }
-      // 2. If targetPageIds is present and has items, check if current activePageId is in it
-      if (activePageId && entry.targetPageIds && entry.targetPageIds.length > 0) {
-        return entry.targetPageIds.includes(activePageId);
+      // 2. If this entry was applied to "all", it applies to all pages unless excluded
+      if (entry.origScope === "all") {
+        return true;
       }
-      // 3. If targetPages is present and has items, check if current activePageNum is in it
+      // 3. If targetPageIds is present and has items, check if activePageId OR any ancestor matches
+      if (activePageId && entry.targetPageIds && entry.targetPageIds.length > 0) {
+        return entry.targetPageIds.some((id) => ancestorIds.has(id));
+      }
+      // 4. If targetPages is present and has items, check if current activePageNum is in it
       if (activePageNum !== undefined && entry.targetPages && entry.targetPages.length > 0) {
         return entry.targetPages.includes(activePageNum);
       }
-      // 4. Default: entry targets all pages
+      // 5. Default: entry targets all pages
       return true;
     });
-  }, [entries, activePageId, activePageNum]);
+  }, [entries, activePageId, activePageNum, getAncestorIds]);
 
   // Universal: newest applied layer always on top - hooks called unconditionally
   const displayEntries = useMemo<T[]>(() => [...pageEntries].reverse(), [pageEntries]);

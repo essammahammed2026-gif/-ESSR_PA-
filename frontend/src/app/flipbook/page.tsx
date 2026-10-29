@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Download } from "lucide-react";
 import { apiFetch, getApiUrl, downloadBlob } from "@/lib/api";
+import { StudioLayout } from "@/components/layout/StudioLayout";
 import { FlipbookControls } from "@/components/flipbook/FlipbookControls";
 import dynamic from "next/dynamic";
 
@@ -73,9 +73,17 @@ function FlipbookStudioContent() {
     addFlyleaves: false,
   });
 
+  const preloadedFidRef = useRef<string | null>(null);
+
   useEffect(() => {
     const fid = searchParams.get("file_id");
-    if (!fid || taskId || isGenerating || resultUrl) return;
+    if (!fid || fid === preloadedFidRef.current || taskId || isGenerating || resultUrl) return;
+    preloadedFidRef.current = fid;
+    try {
+      window.history.replaceState(null, "", window.location.pathname);
+    } catch {
+      // ignore
+    }
     setIsGenerating(true);
     setProgress(15);
     setStatusMsg("Loading preloaded artwork into 3D Flipbook engine...");
@@ -288,51 +296,41 @@ function FlipbookStudioContent() {
   const showHardCoverOptions = bindingStyle === "Hard Cover";
 
   return (
-    <div className="w-full space-y-3 pb-4">
-      {/* Top Header & Breadcrumbs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#242A38]">
-        <div className="flex items-center space-x-3 text-sm text-slate-300">
-          <nav className="flex items-center space-x-2" aria-label="Breadcrumb">
-            <Link
-              href="/"
-              className="font-medium hover:underline transition-all"
-              style={{ color: "var(--app-accent, #06b6d4)" }}
-            >
-              Home
-            </Link>
-            <span className="text-slate-500">/</span>
-            {files.length > 0 ? (
-              <span className="text-slate-300 font-medium">Flipbook Studio</span>
-            ) : (
-              <span className="font-semibold text-white">Flipbook Studio</span>
-            )}
-            {files.length > 0 && (
-              <>
-                <span className="text-slate-500">/</span>
-                <span className="font-semibold text-white font-mono text-xs truncate max-w-[200px]" title={files[0].name}>
-                  {files[0].name}
-                </span>
-              </>
-            )}
-          </nav>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700/50">
-            HTML5 3D Proof
-          </span>
-        </div>
-
-        {resultUrl && !isGenerating && (
+    <StudioLayout
+      title="Flipbook Studio"
+      breadcrumbs={
+        files.length > 0 ? [{ label: files[0].name }] : undefined
+      }
+      statusBadge={
+        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700/50">
+          HTML5 3D Proof
+        </span>
+      }
+      headerActions={
+        resultUrl && !isGenerating ? (
           <button
             type="button"
             onClick={() => setShowExportModal(true)}
-            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm self-start sm:self-auto shrink-0"
+            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm self-start sm:self-auto shrink-0 cursor-pointer"
           >
             <Download size={14} />
             <span>Export & Download</span>
           </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+        ) : undefined
+      }
+      error={error}
+      centerViewport={
+        <FlipbookViewport
+          error={error}
+          isGenerating={isGenerating}
+          statusMsg={statusMsg}
+          progress={progress}
+          resultUrl={resultUrl}
+          isUpdating={isUpdating}
+        />
+      }
+      rightLabel="Controls"
+      rightPanel={
         <FlipbookControls
           files={files}
           numPages={numPages}
@@ -366,16 +364,8 @@ function FlipbookStudioContent() {
           onExportFormatChange={setExportFormat}
           onStartExport={handleStartExport}
         />
-        <FlipbookViewport
-          error={error}
-          isGenerating={isGenerating}
-          statusMsg={statusMsg}
-          progress={progress}
-          resultUrl={resultUrl}
-          isUpdating={isUpdating}
-        />
-      </div>
-    </div>
+      }
+    />
   );
 }
 

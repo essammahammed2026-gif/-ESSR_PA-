@@ -18,6 +18,12 @@ class RollPreset(BaseModel):
     width: float = Field(..., gt=0, description="Roll width in mm")
     unit: str = "mm"
 
+class BookTrimPreset(BaseModel):
+    name: str
+    width: float = Field(..., gt=0, description="Width in mm")
+    height: float = Field(..., gt=0, description="Height in mm")
+    unit: str = "mm"
+
 class ImposingSettings(BaseModel):
     default_sheet_unit: str = "mm"
     default_margin: float = 10.0
@@ -46,7 +52,7 @@ class FlipbookSettings(BaseModel):
     eco_mode: bool = False
 
 class BookStudioSettings(BaseModel):
-    history_limit: int = Field(50, ge=10, le=100)
+    history_limit: int = Field(50, ge=5, le=50)
     shortcuts: dict = Field(default_factory=lambda: {
         "undo": "ctrl+z",
         "redo": "ctrl+y",
@@ -60,6 +66,7 @@ class BookStudioSettings(BaseModel):
 class AppSettings(BaseModel):
     sheets: List[SheetPreset] = []
     rolls: List[RollPreset] = []
+    book_trims: List[BookTrimPreset] = []
     imposing: ImposingSettings = Field(default_factory=ImposingSettings)
     contour: ContourSettings = Field(default_factory=ContourSettings)
     flipbook: FlipbookSettings = Field(default_factory=FlipbookSettings)
@@ -76,6 +83,16 @@ DEFAULT_SETTINGS: dict = {
         {"name": "60cm Roll", "width": 600.0, "unit": "mm"},
         {"name": "100cm Roll", "width": 1000.0, "unit": "mm"},
         {"name": "160cm Wide Roll", "width": 1600.0, "unit": "mm"},
+    ],
+    "book_trims": [
+        {"name": "A4", "width": 210.0, "height": 297.0, "unit": "mm"},
+        {"name": "A5", "width": 148.0, "height": 210.0, "unit": "mm"},
+        {"name": "B5 (JIS)", "width": 182.0, "height": 257.0, "unit": "mm"},
+        {"name": "US Trade (6\" × 9\")", "width": 152.4, "height": 228.6, "unit": "mm"},
+        {"name": "US Digest (5.5\" × 8.5\")", "width": 139.7, "height": 215.9, "unit": "mm"},
+        {"name": "Pocket Book (4.25\" × 6.87\")", "width": 108.0, "height": 174.5, "unit": "mm"},
+        {"name": "Royal (6.14\" × 9.21\")", "width": 156.0, "height": 234.0, "unit": "mm"},
+        {"name": "Square Large (8.25\" × 8.25\")", "width": 210.0, "height": 210.0, "unit": "mm"},
     ],
     "imposing": {
         "default_sheet_unit": "mm",
@@ -132,6 +149,8 @@ def load_settings() -> dict:
                     merged[k] = {**DEFAULT_SETTINGS[k], **data[k]}
             if "rolls" not in merged:
                 merged["rolls"] = DEFAULT_SETTINGS["rolls"]
+            if "book_trims" not in merged:
+                merged["book_trims"] = DEFAULT_SETTINGS["book_trims"]
             return merged
     except Exception:
         return DEFAULT_SETTINGS
@@ -225,6 +244,42 @@ def delete_roll(roll_name: str):
     if len(filtered) == len(current_rolls):
         raise HTTPException(status_code=404, detail="Roll not found")
     settings["rolls"] = filtered
+    save_settings(settings)
+    return settings
+
+@router.post("/api/settings/book-trims")
+def add_book_trim(trim: BookTrimPreset):
+    settings = load_settings()
+    existing = [t for t in settings.get("book_trims", []) if t.get("name") != trim.name]
+    existing.append(trim.dict())
+    settings["book_trims"] = existing
+    save_settings(settings)
+    return settings
+
+@router.put("/api/settings/book-trims/{trim_name}")
+def edit_book_trim(trim_name: str, trim: BookTrimPreset):
+    settings = load_settings()
+    current_trims = settings.get("book_trims", [])
+    found = False
+    for i, t in enumerate(current_trims):
+        if t.get("name") == trim_name:
+            current_trims[i] = trim.dict()
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Book trim preset not found")
+    settings["book_trims"] = current_trims
+    save_settings(settings)
+    return settings
+
+@router.delete("/api/settings/book-trims/{trim_name}")
+def delete_book_trim(trim_name: str):
+    settings = load_settings()
+    current_trims = settings.get("book_trims", [])
+    filtered = [t for t in current_trims if t.get("name") != trim_name]
+    if len(filtered) == len(current_trims):
+        raise HTTPException(status_code=404, detail="Book trim preset not found")
+    settings["book_trims"] = filtered
     save_settings(settings)
     return settings
 

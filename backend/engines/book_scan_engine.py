@@ -124,14 +124,25 @@ class BookScanEngine:
                         pass
 
     @staticmethod
-    def write_thumbnail_jpg(img: np.ndarray, thumb_path: str, quality: int = 80) -> bool:
-        """Single-copy ndarray → JPEG writer — keeps cv2.imencode out of routers."""
+    def encode_thumbnail_jpg(img: np.ndarray, quality: int = 80) -> Optional[bytes]:
+        """Encodes ndarray to JPEG bytes in memory."""
         try:
             success, enc = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
             if not success:
-                return False
+                return None
+            return enc.tobytes()
+        except Exception:
+            return None
+
+    @staticmethod
+    def write_thumbnail_jpg(img: np.ndarray, thumb_path: str, quality: int = 80) -> bool:
+        """Single-copy ndarray → JPEG writer — keeps cv2.imencode out of routers."""
+        data = BookScanEngine.encode_thumbnail_jpg(img, quality=quality)
+        if data is None:
+            return False
+        try:
             with open(thumb_path, "wb") as f:
-                f.write(enc.tobytes())
+                f.write(data)
             return True
         except Exception:
             return False
@@ -836,23 +847,38 @@ class BookScanEngine:
         return img
 
     @staticmethod
-    def flatten_spine_illumination(image: np.ndarray) -> np.ndarray:
+    def flatten_spine_illumination(
+        image: np.ndarray,
+        strength: float = 1.0,
+        spine_box: Optional[Dict[str, float]] = None,
+    ) -> np.ndarray:
         """
         Morphological background cleanup (removes curved book-spine gutter shadows,
         scanner show-through, and uneven gray/yellow lighting across the sheet while
         strictly preserving colored ink stamps, photos, and crisp dark text).
+
+        strength: 0.1 to 1.0 (blends between original image and flattened illumination).
+        spine_box: Optional normalized {x1, y1, x2, y2} region (0.0 to 1.0).
+                   When provided, illumination flattening is confined to the spine box
+                   with feathered Gaussian border falloff to avoid harsh transition edges.
         """
         try:
             h, w = image.shape[:2]
             if h < 16 or w < 16:
                 return image
 
-            # Downscale 3x to estimate the background paper illumination envelope
-            sh, sw = max(12, h // 3), max(12, w // 3)
-            small = cv2.resize(image, (sw, sh), interpolation=cv2.INTER_AREA)
+            eff_strength = max(0.0, min(1.0, float(strength)))
+            if eff_strength <= 0.0:
+                return image
+
+            # Fast normalized proxy downscale to estimate low-frequency background envelope
+            max_dim = max(h, w)
+            scale = min(1.0, 320.0 / max(1, max_dim))
+            sw, sh = max(16, int(round(w * scale))), max(16, int(round(h * scale)))
+            small = cv2.resize(image, (sw, sh), interpolation=cv2.INTER_AREA) if scale < 1.0 else image
             gray_small = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if len(small.shape) == 3 else small
 
-            ksize = max(15, int(round(min(sh, sw) * 0.12)))
+            ksize = max(11, int(round(min(sh, sw) * 0.12)))
             if ksize % 2 == 0:
                 ksize += 1
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
@@ -871,28 +897,104 @@ class BookScanEngine:
                 # Protect saturated colored stamps/illustrations
                 chroma_weight = np.clip((sat - 30.0) / 35.0, 0.0, 1.0)[:, :, None]
 
-                # Divide image by local background envelope to normalize uneven shadows to 255
-                norm = (image.astype(np.float32) / bg_full[:, :, None]) * 255.0
+                # Divide image by local background envelope to normalize uneven shadows to 255 (OpenCV SIMD)
+                norm = cv2.divide(image.astype(np.float32), bg_full[:, :, None], scale=255.0)
                 # Softly pull normalized background (norm >= 218) to pure 255 white while deepening text contrast
                 leveled = np.clip((norm - 18.0) * (255.0 / (222.0 - 18.0)), 0.0, 255.0)
 
-                out = image.astype(np.float32) * chroma_weight + leveled * (1.0 - chroma_weight)
-                return np.clip(out, 0, 255).astype(np.uint8)
+                flat_img = np.clip(image.astype(np.float32) * chroma_weight + leveled * (1.0 - chroma_weight), 0, 255).astype(np.uint8)
             else:
-                norm = (image.astype(np.float32) / bg_full) * 255.0
+                norm = cv2.divide(image.astype(np.float32), bg_full, scale=255.0)
                 leveled = np.clip((norm - 18.0) * (255.0 / (222.0 - 18.0)), 0.0, 255.0)
-                return leveled.astype(np.uint8)
+                flat_img = np.clip(leveled, 0, 255).astype(np.uint8)
+
+            if not spine_box:
+                if eff_strength >= 0.999:
+                    return flat_img
+                return cv2.addWeighted(flat_img, eff_strength, image, 1.0 - eff_strength, 0.0)
+
+            # Spatial feathering over spine_box
+            bx1 = int(round(max(0.0, min(1.0, float(min(spine_box.get("x1", 0.0), spine_box.get("x2", 1.0))))) * w))
+            bx2 = int(round(max(0.0, min(1.0, float(max(spine_box.get("x1", 0.0), spine_box.get("x2", 1.0))))) * w))
+            by1 = int(round(max(0.0, min(1.0, float(min(spine_box.get("y1", 0.0), spine_box.get("y2", 1.0))))) * h))
+            by2 = int(round(max(0.0, min(1.0, float(max(spine_box.get("y1", 0.0), spine_box.get("y2", 1.0))))) * h))
+
+            if bx2 <= bx1 or by2 <= by1:
+                return flat_img if eff_strength >= 0.999 else cv2.addWeighted(flat_img, eff_strength, image, 1.0 - eff_strength, 0.0)
+
+            weight_mask = np.zeros((h, w), dtype=np.float32)
+            weight_mask[by1:by2, bx1:bx2] = 1.0
+
+            box_min_dim = min(bx2 - bx1, by2 - by1)
+            feather_px = max(11, int(round(box_min_dim * 0.20)))
+            if feather_px % 2 == 0:
+                feather_px += 1
+            weight_mask = cv2.GaussianBlur(weight_mask, (feather_px, feather_px), 0)
+            weight_mask = np.clip(weight_mask * eff_strength, 0.0, 1.0)
+
+            if len(image.shape) == 3:
+                wm = weight_mask[:, :, None]
+                blended = image.astype(np.float32) * (1.0 - wm) + flat_img.astype(np.float32) * wm
+            else:
+                blended = image.astype(np.float32) * (1.0 - weight_mask) + flat_img.astype(np.float32) * weight_mask
+            return np.clip(blended, 0, 255).astype(np.uint8)
         except Exception:
             return image
 
     @staticmethod
-    def despeckle_image(image: np.ndarray, level: int = 1) -> np.ndarray:
+    def despeckle_image(image: np.ndarray, level: float = 1.0) -> np.ndarray:
         """
         Connected-components pepper-noise & scanner dust removal in background regions.
         Removes isolated tiny scanner dust specks without erasing text punctuation or diacritics.
-        level: 1 (Light), 2 (Medium), 3 (Strong).
+        level: continuous float 0.0 to 10.0 (0.0 = disabled).
         """
-        if level <= 0:
+        lvl = float(level)
+        if lvl <= 0.0:
+            return image
+        try:
+            h, w = image.shape[:2]
+            area_scale = max(0.35, (min(w, h) / 1000.0) ** 2)
+            base_area = max(2.0, 4.5 * (lvl ** 1.35))
+            max_speck_area = max(3, int(round(base_area * area_scale)))
+
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+            # Use local background comparison so specks inside shaded areas are also caught
+            local_bg = cv2.medianBlur(gray, 21)
+            diff = cv2.subtract(local_bg, gray)
+            dark_mask = ((diff > 15) | (gray < 215)).astype(np.uint8) * 255
+
+            # Group legitimate text characters & nearby dots/diacritics together (3x3 kernel)
+            proximity_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            grouped = cv2.dilate(dark_mask, proximity_kernel, iterations=1)
+
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(dark_mask, connectivity=8)
+            if num_labels <= 1:
+                return image
+
+            _, group_labels, group_stats, _ = cv2.connectedComponentsWithStats(grouped, connectivity=8)
+
+            remove_labels = np.zeros(num_labels, dtype=bool)
+            for lbl in range(1, num_labels):
+                area = int(stats[lbl, cv2.CC_STAT_AREA])
+                if area <= max_speck_area:
+                    sample_y = int(stats[lbl, cv2.CC_STAT_TOP])
+                    sample_x = int(stats[lbl, cv2.CC_STAT_LEFT])
+                    grp_id = int(group_labels[sample_y, sample_x])
+                    grp_area = int(group_stats[grp_id, cv2.CC_STAT_AREA]) if grp_id > 0 else area
+                    if grp_area <= max_speck_area * 3:
+                        remove_labels[lbl] = True
+
+            if not np.any(remove_labels):
+                return image
+
+            # Dilate speck mask by 1px to also clean JPEG ringing halos around dust specks
+            speck_mask = (remove_labels[labels]).astype(np.uint8) * 255
+            speck_mask = cv2.dilate(speck_mask, np.ones((3, 3), np.uint8), iterations=1) > 0
+            out = image.copy()
+            out[speck_mask] = 255
+            return out
+        except Exception:
+            return image
             return image
         try:
             h, w = image.shape[:2]
@@ -1011,7 +1113,9 @@ class BookScanEngine:
         deskew_ignore_borders: bool = True,
         masks: Optional[List[Dict[str, Any]]] = None,
         flatten_illumination: bool = False,
-        despeckle_level: int = 0,
+        despeckle_level: float = 0.0,
+        spine_strength: float = 1.0,
+        spine_box: Optional[Dict[str, float]] = None,
     ) -> np.ndarray:
         """
         Runs the refined processing pipeline:
@@ -1048,10 +1152,14 @@ class BookScanEngine:
 
         # 4. Morphological Spine Illumination Leveling & Despeckle
         if flatten_illumination:
-            img = BookScanEngine.flatten_spine_illumination(img)
+            img = BookScanEngine.flatten_spine_illumination(
+                img,
+                strength=spine_strength,
+                spine_box=spine_box,
+            )
 
-        if despeckle_level and int(despeckle_level) > 0:
-            img = BookScanEngine.despeckle_image(img, level=int(despeckle_level))
+        if despeckle_level and float(despeckle_level) > 0.0:
+            img = BookScanEngine.despeckle_image(img, level=float(despeckle_level))
 
         # 5. Paper background whitening (clears yellow/gray paper cast & light bleed-through)
         if whiten_bg:
@@ -1604,7 +1712,7 @@ class BookScanEngine:
         return new_pages
 
     @staticmethod
-    def revert_pages(pages, page_id=None, revert_all=False, target_page_ids=None):
+    def revert_pages(pages, page_id=None, revert_all=False, target_page_ids=None, single_level=False):
         """Recombine split slices into parent spreads. Returns (new_pages, new_selected_id).
 
         Raises PageOpError(400/404) on missing targets.
@@ -1723,6 +1831,9 @@ class BookScanEngine:
                 if is_slice:
                     composed = BookScanEngine.compose_crop_boxes(p.get("page_crop_box"), page_cb_in)
                     p["page_crop_box"] = composed
+                    stack = list(p.get("crop_stack") or [])
+                    stack.append(composed)
+                    p["crop_stack"] = stack
                     base_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
                     base_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
                     p["orig_width_mm"] = base_w
@@ -1732,6 +1843,9 @@ class BookScanEngine:
                 else:
                     composed = BookScanEngine.compose_crop_boxes(p.get("crop_box"), page_cb_in)
                     p["crop_box"] = composed
+                    stack = list(p.get("crop_stack") or [])
+                    stack.append(composed)
+                    p["crop_stack"] = stack
                     orig_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
                     orig_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
                     p["orig_width_mm"] = orig_w
@@ -1742,6 +1856,66 @@ class BookScanEngine:
                     p["rev"] = int(p.get("rev", 0)) + 1
                 except (TypeError, ValueError):
                     p["rev"] = 1
+        return pages
+
+    @staticmethod
+    def revert_crop_pages(pages, page_id=None, mode="level", apply_to_all=False, target_page_ids=None):
+        """Reverts 1 crop level or completely resets crop to full bed."""
+        target_ids = set(target_page_ids) if target_page_ids is not None else None
+
+        for p in pages:
+            pid = p["id"]
+            if target_ids is not None:
+                is_target = pid in target_ids
+            elif apply_to_all:
+                is_target = True
+            else:
+                is_target = (pid == page_id)
+
+            if not is_target:
+                continue
+
+            is_slice = (
+                p.get("half") in ["left", "right"]
+                or p.get("slice_box") is not None
+                or bool(p.get("parent_page_id"))
+            )
+            stack = list(p.get("crop_stack") or [])
+            base_w = p.get("orig_width_mm") or p.get("width_mm", 210.0)
+            base_h = p.get("orig_height_mm") or p.get("height_mm", 297.0)
+            p["orig_width_mm"] = base_w
+            p["orig_height_mm"] = base_h
+
+            if (mode or "level").lower() == "reset" or not stack:
+                # Full reset to full bed
+                p["crop_stack"] = []
+                p.pop("crop_box", None)
+                p.pop("page_crop_box", None)
+                p["width_mm"] = base_w
+                p["height_mm"] = base_h
+            else:
+                # Pop 1 level
+                stack.pop()
+                p["crop_stack"] = stack
+                if stack:
+                    prev_box = stack[-1]
+                    if is_slice:
+                        p["page_crop_box"] = prev_box
+                    else:
+                        p["crop_box"] = prev_box
+                    p["width_mm"] = round(base_w * BookScanEngine.box_frac_w(prev_box), 1)
+                    p["height_mm"] = round(base_h * BookScanEngine.box_frac_h(prev_box), 1)
+                else:
+                    p.pop("crop_box", None)
+                    p.pop("page_crop_box", None)
+                    p["width_mm"] = base_w
+                    p["height_mm"] = base_h
+
+            try:
+                p["rev"] = int(p.get("rev", 0)) + 1
+            except (TypeError, ValueError):
+                p["rev"] = 1
+
         return pages
 
     @staticmethod
@@ -1877,6 +2051,9 @@ class BookScanEngine:
         extra_crops = getattr(req, "per_page_crops", None) or {}
         extra_angles = getattr(req, "per_page_deskew_angles", None) or {}
         extra_colors = getattr(req, "per_page_color_modes", None) or {}
+        extra_cleanup = getattr(req, "per_page_cleanup", None) or {}
+        extra_restoration = getattr(req, "per_page_restoration", None) or {}
+        extra_bleed = getattr(req, "per_page_bleed", None) or {}
 
         for idx, p_info in enumerate(pages):
             page_num = idx + 1
@@ -1928,13 +2105,22 @@ class BookScanEngine:
                 eff_deskew_mode = req.deskew_mode
                 eff_deskew_angle = req.deskew_angle
 
-            apply_cleanup = getattr(req, "cleanup_module_enabled", True) and BookScanEngine.is_page_in_scope(
-                page_num,
-                getattr(req, "cleanup_scope_mode", "all"),
-                getattr(req, "cleanup_custom_range", ""),
-            )
-            do_flatten_illum = apply_cleanup and bool(getattr(req, "flatten_illumination", False))
-            do_despeckle = int(getattr(req, "despeckle_level", 0) or 0) if apply_cleanup else 0
+            if pid in extra_cleanup:
+                c_info = extra_cleanup[pid]
+                do_flatten_illum = bool(c_info.get("flatten_illumination", False))
+                do_despeckle = float(c_info.get("despeckle_level", 0.0) or 0.0)
+                eff_spine_strength = float(c_info.get("spine_strength", 1.0) or 1.0)
+                eff_spine_box = c_info.get("spine_box")
+            else:
+                apply_cleanup = getattr(req, "cleanup_module_enabled", True) and BookScanEngine.is_page_in_scope(
+                    page_num,
+                    getattr(req, "cleanup_scope_mode", "all"),
+                    getattr(req, "cleanup_custom_range", ""),
+                )
+                do_flatten_illum = apply_cleanup and bool(getattr(req, "flatten_illumination", False))
+                do_despeckle = float(getattr(req, "despeckle_level", 0.0) or 0.0) if apply_cleanup else 0.0
+                eff_spine_strength = float(getattr(req, "spine_strength", 1.0) or 1.0) if apply_cleanup else 1.0
+                eff_spine_box = getattr(req, "spine_box", None) if apply_cleanup else None
 
             apply_restoration = req.restoration_module_enabled and BookScanEngine.is_page_in_scope(
                 page_num, req.restoration_scope_mode, req.restoration_custom_range
@@ -1946,27 +2132,48 @@ class BookScanEngine:
             page_color_override = extra_colors.get(pid) or eff_page_info.get("color_mode")
 
             # Restoration settings
-            if req.restoration_module_enabled:
+            if pid in extra_restoration:
+                r_info = extra_restoration[pid]
+                do_clean_borders = bool(r_info.get("clean_borders", False))
+                do_enhance_colors = bool(r_info.get("enhance_colors", True)) or bool(page_color_override)
+                do_color_mode = page_color_override or r_info.get("color_mode", "original")
+                do_whiten_bg = bool(r_info.get("whiten_bg", False))
+                eff_saturation = float(r_info.get("saturation", req.saturation))
+                eff_contrast = float(r_info.get("contrast", req.contrast))
+                eff_bw_threshold = int(r_info.get("bw_threshold", req.bw_threshold))
+                eff_border_margin = int(r_info.get("border_margin_px", req.border_margin_px))
+                eff_border_threshold = int(r_info.get("border_threshold", req.border_threshold))
+            elif req.restoration_module_enabled:
                 do_clean_borders = apply_restoration and req.clean_borders
                 do_enhance_colors = (apply_restoration or bool(page_color_override)) and req.enhance_colors
                 do_color_mode = page_color_override or (req.color_mode if apply_restoration else "original")
                 do_whiten_bg = apply_restoration and req.whiten_bg
+                eff_saturation = req.saturation
+                eff_contrast = req.contrast
+                eff_bw_threshold = req.bw_threshold
+                eff_border_margin = req.border_margin_px
+                eff_border_threshold = req.border_threshold
             else:
                 do_clean_borders = False
                 do_enhance_colors = bool(page_color_override)
                 do_color_mode = page_color_override or "original"
                 do_whiten_bg = False
+                eff_saturation = 1.0
+                eff_contrast = 1.0
+                eff_bw_threshold = req.bw_threshold
+                eff_border_margin = req.border_margin_px
+                eff_border_threshold = req.border_threshold
 
             cleaned = BookScanEngine.process_single_page(
                 raw_img,
                 clean_borders=do_clean_borders,
-                border_margin_px=req.border_margin_px,
-                border_threshold=req.border_threshold,
+                border_margin_px=eff_border_margin,
+                border_threshold=eff_border_threshold,
                 enhance_colors=do_enhance_colors,
-                saturation=req.saturation,
-                contrast=req.contrast,
+                saturation=eff_saturation,
+                contrast=eff_contrast,
                 color_mode=do_color_mode,
-                bw_threshold=req.bw_threshold,
+                bw_threshold=eff_bw_threshold,
                 whiten_bg=do_whiten_bg,
                 deskew=req.deskew if not req.deskew_module_enabled else False,
                 sharpen=req.sharpen,
@@ -1978,23 +2185,38 @@ class BookScanEngine:
                 masks=eff_page_info.get("masks"),
                 flatten_illumination=do_flatten_illum,
                 despeckle_level=do_despeckle,
+                spine_strength=eff_spine_strength,
+                spine_box=eff_spine_box,
             )
             processed_images.append(cleaned)
 
             # Bleed settings per page
-            if req.bleed_module_enabled:
+            if pid in extra_bleed:
+                b_info = extra_bleed[pid]
+                p_bleed = float(b_info.get("bleed_mm", req.bleed_mm))
+                p_bmode = str(b_info.get("bleed_mode", req.bleed_mode))
+                p_bcolor = str(b_info.get("bleed_color", req.bleed_color))
+                p_marks = bool(b_info.get("show_crop_marks", req.show_crop_marks))
+                p_placement = str(b_info.get("bleed_placement", getattr(req, "bleed_placement", "outside")))
+            elif req.bleed_module_enabled:
                 p_bleed = req.bleed_mm if apply_bleed else 0.0
+                p_bmode = req.bleed_mode
+                p_bcolor = req.bleed_color
                 p_marks = req.show_crop_marks if apply_bleed else False
+                p_placement = getattr(req, "bleed_placement", "outside")
             else:
                 p_bleed = 0.0
+                p_bmode = req.bleed_mode
+                p_bcolor = req.bleed_color
                 p_marks = False
+                p_placement = getattr(req, "bleed_placement", "outside")
 
             per_page_bleed_list.append({
                 "bleed_mm": p_bleed,
-                "bleed_mode": req.bleed_mode,
-                "bleed_color": req.bleed_color,
+                "bleed_mode": p_bmode,
+                "bleed_color": p_bcolor,
                 "show_crop_marks": p_marks,
-                "placement": getattr(req, "bleed_placement", "outside"),
+                "placement": p_placement,
                 "color_mode": do_color_mode,
             })
         return processed_images, per_page_bleed_list

@@ -1,7 +1,18 @@
 "use client";
 
-import React from "react";
-import { Loader2, Download, Eye, X, FileArchive, FileCode2, UploadCloud } from "lucide-react";
+import React, { useState } from "react";
+import {
+  Loader2,
+  Download,
+  Eye,
+  X,
+  FileArchive,
+  FileCode2,
+  UploadCloud,
+  ChevronLeft,
+  SlidersHorizontal,
+  BookOpen,
+} from "lucide-react";
 
 export interface FlipbookControlsProps {
   files: File[];
@@ -37,132 +48,206 @@ export interface FlipbookControlsProps {
   onStartExport: () => void;
 }
 
+type FlipbookToolId = "document" | "reading" | "binding";
+
 export function FlipbookControls(p: FlipbookControlsProps) {
+  const [activeTool, setActiveTool] = useState<FlipbookToolId | null>(null);
+
+  const tools: {
+    id: FlipbookToolId;
+    title: string;
+    category: "PROOFING SETUP";
+    icon: React.ReactNode;
+  }[] = [
+    { id: "document", title: "Input PDF Document", category: "PROOFING SETUP", icon: <UploadCloud size={15} /> },
+    { id: "reading", title: "Reading & Quality", category: "PROOFING SETUP", icon: <SlidersHorizontal size={15} /> },
+    { id: "binding", title: "Binding Style", category: "PROOFING SETUP", icon: <BookOpen size={15} /> },
+  ];
+
+  const activeToolMeta = tools.find((t) => t.id === activeTool);
+
   return (
     <>
-      <div className="lg:col-span-1 space-y-3.5">
-        <div className="bg-[#181D27] p-3.5 rounded-xl border border-[#242A38] space-y-3.5">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block pb-2 border-b border-[#242A38]">
-            Virtual Binding Options
-          </span>
+      <div className="flex flex-col h-full bg-[#11141B] select-none overflow-hidden">
+        {/* Header */}
+        <div className="px-4 py-3 flex items-center justify-between border-b border-[#1E232E] shrink-0">
+          {activeTool && activeToolMeta ? (
+            <button
+              type="button"
+              onClick={() => setActiveTool(null)}
+              className="flex items-center space-x-2 text-slate-200 hover:text-white transition-colors cursor-pointer group"
+            >
+              <ChevronLeft size={16} className="text-slate-400 group-hover:text-white transition-transform group-hover:-translate-x-0.5" />
+              <span className="text-xs font-semibold tracking-tight">{activeToolMeta.title}</span>
+            </button>
+          ) : (
+            <span className="text-xs font-semibold text-slate-100 tracking-tight">Flipbook Tools</span>
+          )}
+        </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Page Range</label>
-            <input
-              type="text"
-              placeholder="e.g. 1-10 or leave blank for All"
-              value={p.pageRange}
-              onChange={(e) => p.onPageRangeChange(e.target.value)}
-              disabled={!!p.taskId}
-              className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-2 rounded-lg outline-none disabled:opacity-40"
-            />
-          </div>
-
-          <div>
-            <div className="flex justify-between items-center mb-1 text-xs">
-              <label className="font-semibold text-slate-300">Input PDF Document</label>
-              {p.numPages > 0 && <span className="text-indigo-400 font-mono text-[11px]">{p.numPages} pages</span>}
+        {/* Main Content */}
+        <div className="flex-1 overflow-y-auto px-3 py-3">
+          {!activeTool ? (
+            <div className="space-y-5">
+              <div className="space-y-1">
+                <div className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  PROOFING SETUP
+                </div>
+                {tools.map((tool) => (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    onClick={() => setActiveTool(tool.id)}
+                    className="w-full flex items-center space-x-3 px-2.5 py-2.5 rounded-lg text-left text-slate-300 hover:text-white hover:bg-white/[0.04] transition-colors cursor-pointer group"
+                  >
+                    <span className="text-slate-400 group-hover:text-slate-200 transition-colors shrink-0">
+                      {tool.icon}
+                    </span>
+                    <span className="text-[13px] font-normal tracking-tight truncate">
+                      {tool.title}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <label className="w-full border-2 border-dashed border-[#2E3648] hover:border-indigo-500/50 rounded-lg p-3 text-center cursor-pointer block bg-[#131720]/60 transition-colors">
-              <input
-                type="file"
-                multiple
-                accept="application/pdf"
-                onChange={p.onFileChange}
-                className="hidden"
-              />
-              <UploadCloud size={22} className="text-indigo-400 mx-auto mb-1 opacity-80" />
-              <span className="text-xs font-medium text-slate-300 block">
-                {p.files.length > 0 ? `${p.files.length} PDF selected` : "Select PDF"}
-              </span>
-            </label>
-          </div>
+          ) : (
+            <div className="space-y-4 px-1">
+              {activeTool === "document" && (
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5 text-xs">
+                      <label className="font-semibold text-slate-300">Input PDF Document</label>
+                      {p.numPages > 0 && <span className="text-slate-400 font-mono text-[11px]">{p.numPages} pages</span>}
+                    </div>
+                    <label className="w-full border border-dashed border-[#242A38] hover:border-slate-500 rounded-lg p-4 text-center cursor-pointer block bg-[#181D27]/50 transition-colors">
+                      <input
+                        type="file"
+                        multiple
+                        accept="application/pdf"
+                        onChange={(e) => {
+                          p.onFileChange(e);
+                          e.target.value = "";
+                        }}
+                        className="hidden"
+                      />
+                      <UploadCloud size={22} className="text-slate-400 mx-auto mb-1.5" />
+                      <span className="text-xs font-medium text-slate-200 block">
+                        {p.files.length > 0 ? `${p.files.length} PDF selected` : "Select PDF"}
+                      </span>
+                    </label>
+                  </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Preview Quality (DPI)</label>
-            <select
-              value={p.dpi}
-              onChange={(e) => p.onDpiChange(e.target.value)}
-              disabled={!!p.taskId}
-              className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-2 rounded-lg outline-none disabled:opacity-40"
-            >
-              <option value="72">72 DPI (Ultra-Fast Preview)</option>
-              <option value="150">150 DPI (Crisp Text)</option>
-            </select>
-          </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Page Range</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 1-10 or leave blank for All"
+                      value={p.pageRange}
+                      onChange={(e) => p.onPageRangeChange(e.target.value)}
+                      disabled={!!p.taskId}
+                      className="w-full text-xs bg-[#181D27] border border-[#242A38] text-slate-200 p-2 rounded-lg outline-none disabled:opacity-40"
+                    />
+                  </div>
+                </div>
+              )}
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Reading Flow</label>
-            <select
-              value={p.direction}
-              onChange={(e) => p.onDirectionChange(e.target.value)}
-              className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-2 rounded-lg outline-none"
-            >
-              <option>Left to Right (LTR)</option>
-              <option>Right to Left (RTL)</option>
-            </select>
-          </div>
+              {activeTool === "reading" && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Preview Quality (DPI)</label>
+                    <select
+                      value={p.dpi}
+                      onChange={(e) => p.onDpiChange(e.target.value)}
+                      disabled={!!p.taskId}
+                      className="w-full text-xs bg-[#181D27] border border-[#242A38] text-slate-200 p-2 rounded-lg outline-none disabled:opacity-40"
+                    >
+                      <option value="72">72 DPI (Ultra-Fast Preview)</option>
+                      <option value="150">150 DPI (Crisp Text)</option>
+                    </select>
+                  </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Binding Style</label>
-            <select
-              value={p.bindingStyle}
-              onChange={(e) => p.onBindingChange(e.target.value)}
-              className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-2 rounded-lg outline-none"
-            >
-              <option>Soft Cover (Paperback)</option>
-              <option>Hard Cover</option>
-              <option>Magazine</option>
-              <option>Spiral</option>
-              <option>Plastic Comb</option>
-              <option>Double Wire</option>
-            </select>
-          </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Reading Flow</label>
+                    <select
+                      value={p.direction}
+                      onChange={(e) => p.onDirectionChange(e.target.value)}
+                      className="w-full text-xs bg-[#181D27] border border-[#242A38] text-slate-200 p-2 rounded-lg outline-none"
+                    >
+                      <option>Left to Right (LTR)</option>
+                      <option>Right to Left (RTL)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
 
-          {p.showMagPadding && (
-            <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/30 text-xs">
-              <label className="block font-semibold mb-1 text-indigo-300">
-                Magazine Signature Padding (Needs {4 - (p.numPages % 4)} pp)
-              </label>
-              <select
-                value={p.magPadChoice}
-                onChange={(e) => p.onMagPadChange(e.target.value)}
-                className="w-full text-xs bg-[#131720] border border-[#2E3648] text-slate-200 p-1.5 rounded-lg outline-none"
-              >
-                <option>After front cover</option>
-                <option>Before back cover</option>
-                <option>At the very end</option>
-              </select>
+              {activeTool === "binding" && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Binding Style</label>
+                    <select
+                      value={p.bindingStyle}
+                      onChange={(e) => p.onBindingChange(e.target.value)}
+                      className="w-full text-xs bg-[#181D27] border border-[#242A38] text-slate-200 p-2 rounded-lg outline-none"
+                    >
+                      <option>Soft Cover (Paperback)</option>
+                      <option>Hard Cover</option>
+                      <option>Magazine</option>
+                      <option>Spiral</option>
+                      <option>Plastic Comb</option>
+                      <option>Double Wire</option>
+                    </select>
+                  </div>
+
+                  {p.showMagPadding && (
+                    <div className="space-y-1.5 pt-1 text-xs">
+                      <label className="block font-semibold text-slate-300">
+                        Magazine Signature Padding (Needs {4 - (p.numPages % 4)} pp)
+                      </label>
+                      <select
+                        value={p.magPadChoice}
+                        onChange={(e) => p.onMagPadChange(e.target.value)}
+                        className="w-full text-xs bg-[#181D27] border border-[#242A38] text-slate-200 p-2 rounded-lg outline-none"
+                      >
+                        <option>After front cover</option>
+                        <option>Before back cover</option>
+                        <option>At the very end</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {p.showHardCoverOptions && (
+                    <label className="flex items-center space-x-2.5 pt-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={p.addFlyleaves}
+                        onChange={(e) => p.onFlyleavesChange(e.target.checked)}
+                        className="rounded bg-[#181D27] border-[#242A38] text-blue-500"
+                      />
+                      <span className="text-xs font-medium text-slate-300">
+                        Insert 3 blank flyleaf endpapers
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
           )}
+        </div>
 
-          {p.showHardCoverOptions && (
-            <div className="p-3 bg-[#131720] rounded-lg border border-[#2E3648] flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="flyleaves"
-                checked={p.addFlyleaves}
-                onChange={(e) => p.onFlyleavesChange(e.target.checked)}
-                className="rounded bg-[#1A202C] border-[#2E3648] text-indigo-500"
-              />
-              <label htmlFor="flyleaves" className="text-xs font-medium text-slate-300 cursor-pointer">
-                Insert 3 blank flyleaf endpapers
-              </label>
-            </div>
-          )}
-
-          {!p.taskId && (
+        {/* Bottom Action */}
+        {!p.taskId && (
+          <div className="p-3 border-t border-[#1E232E] shrink-0">
             <button
               type="button"
               onClick={p.onGenerate}
               disabled={p.isGenerating || p.files.length === 0}
-              className="w-full py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold disabled:opacity-40 flex items-center justify-center space-x-2 transition-colors shadow-sm"
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold disabled:opacity-40 flex items-center justify-center space-x-2 transition-colors shadow-sm cursor-pointer disabled:cursor-not-allowed"
             >
               {p.isGenerating ? <Loader2 className="animate-spin" size={15} /> : <Eye size={15} />}
               <span>{p.isGenerating ? "Synthesizing Proof..." : "Generate Live Proof"}</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {p.showExportModal && (

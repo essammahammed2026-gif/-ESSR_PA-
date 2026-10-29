@@ -4,16 +4,14 @@ import React, { useState } from "react";
 import { 
   Upload, 
   Trash2, 
-  File, 
-  FolderOpen, 
-  MoreVertical, 
   Loader2, 
   RotateCw, 
   RotateCcw, 
   Copy, 
   Eye, 
   EyeOff, 
-  GripVertical 
+  GripVertical,
+  X
 } from "lucide-react";
 import { getApiUrl } from "@/lib/api";
 import { ImposingItem, ImposingPage } from "@/types/prepress";
@@ -28,10 +26,10 @@ interface LeftAssetPanelProps {
   toggleDeletePage: (id: string) => void;
   duplicatePage: (id: string) => void;
   clearAllPages: () => void;
+  onCollapse?: () => void;
 }
 
 export function LeftAssetPanel({ 
-  items, 
   pages, 
   handleFileUpload, 
   isUploading, 
@@ -39,7 +37,8 @@ export function LeftAssetPanel({
   rotatePage, 
   toggleDeletePage, 
   duplicatePage, 
-  clearAllPages 
+  clearAllPages,
+  onCollapse,
 }: LeftAssetPanelProps) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -82,43 +81,31 @@ export function LeftAssetPanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#181D27] rounded-xl border border-[#242A38] overflow-hidden shadow-sm select-none">
-      {/* File Manager Header Area */}
-      <div className="p-3 border-b border-[#242A38] bg-[#131720]">
-        <div className="flex items-center justify-between cursor-pointer group">
-          <div className="flex items-center space-x-2 text-slate-200 font-semibold text-sm truncate pr-2">
-            <FolderOpen size={16} className="text-blue-400 shrink-0" />
-            <span className="truncate">{items && items.length > 0 ? items[0].name : "File Manager"}</span>
-          </div>
-          <MoreVertical size={14} className="text-slate-500 group-hover:text-white shrink-0" />
-        </div>
-      </div>
-      
-      <div className="p-2 border-b border-[#242A38] bg-[#1A202C] flex items-center justify-between">
-        <div className="bg-blue-600/20 text-blue-400 px-2.5 py-1 rounded border border-blue-500/30 text-xs font-semibold flex items-center space-x-1.5">
-          <File size={13} />
+    <div className="flex flex-col h-full bg-[#11141B] overflow-hidden select-none">
+      {/* Header Area */}
+      <div className="px-3 py-2 border-b border-[#1E232E] bg-[#11141B] flex items-center justify-between">
+        <div className="flex items-center space-x-2 text-slate-200 font-semibold text-xs truncate">
           <span>Page Deck</span>
+          {pages.length > 0 && (
+            <span className="text-[10px] font-mono text-slate-500">
+              ({activeCount}{deletedCount > 0 ? `, ${deletedCount} excl.` : ""})
+            </span>
+          )}
         </div>
-        {pages.length > 0 && (
-          <span className="text-[11px] font-mono text-slate-400">
-            {activeCount} {activeCount === 1 ? "page" : "pages"}
-            {deletedCount > 0 && <span className="text-rose-400 ml-1">({deletedCount} excluded)</span>}
-          </span>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="p-1 text-slate-400 hover:text-white hover:bg-white/[0.06] rounded transition-colors cursor-pointer"
+            title="Close Page Deck"
+          >
+            <X size={13} />
+          </button>
         )}
       </div>
 
       {/* Pages Grid Container */}
-      <div className="flex-1 overflow-y-auto p-3">
-        <div className="flex items-center justify-between mb-2.5">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Pages Deck
-          </span>
-          {pages.length > 0 && (
-            <span className="text-[10px] text-slate-500">
-              Drag to reorder
-            </span>
-          )}
-        </div>
+      <div className="flex-1 overflow-y-auto p-2.5">
 
         {pages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 border border-dashed border-[#2E3648] rounded-lg p-4 text-center">
@@ -275,7 +262,7 @@ export function LeftAssetPanel({
       </div>
 
       {/* Bottom Actions Bar */}
-      <div className="p-2 border-t border-[#242A38] bg-[#131720] flex items-center justify-between">
+      <div className="p-2 border-t border-[#1E232E] bg-[#11141B] flex items-center justify-between">
         <label 
           className="cursor-pointer p-1.5 hover:bg-[#232936] rounded text-slate-400 hover:text-white transition-colors flex items-center space-x-1" 
           title="Import Additional Files"

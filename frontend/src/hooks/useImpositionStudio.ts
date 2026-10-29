@@ -260,6 +260,7 @@ export function useImpositionStudio() {
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const files = Array.from(e.target.files);
+    e.target.value = "";
 
     setIsUploading(true);
     setError(null);

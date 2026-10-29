@@ -7,8 +7,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  RotateCcw,
-  Layers,
+  Hand,
 } from "lucide-react";
 
 export interface ContourViewportProps {
@@ -24,11 +23,11 @@ export function ContourViewport({
   svgContent,
   isGenerating,
   artworkOpacity,
-  setArtworkOpacity,
 }: ContourViewportProps) {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [isPanMode, setIsPanMode] = useState(true);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef({ x: 0, y: 0 });
   const rafId = useRef<number | null>(null);
@@ -109,42 +108,38 @@ export function ContourViewport({
   };
 
   return (
-    <div className="bg-[#181D27] rounded-xl border border-[#242A38] flex-1 flex flex-col overflow-hidden min-h-[720px] h-full shadow-sm relative">
-      {/* Canvas Toolbar */}
-      <div className="p-2.5 border-b border-[#242A38] flex justify-between items-center bg-[#141822]">
-        <div className="flex items-center space-x-3">
-          <span className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
-            <Layers size={14} className="text-pink-400" />
-            <span>Interactive Proof Canvas</span>
-          </span>
-          {isGenerating && (
-            <span className="text-xs text-pink-400 flex items-center font-medium">
-              <Loader2 className="animate-spin mr-1.5" size={13} />
-              Tracing Die Lines...
-            </span>
-          )}
+    <div className="bg-[#14171F] flex-1 flex flex-col overflow-hidden h-full relative">
+      {/* Minimal Borderless Top Toolbar: Hand Tool */}
+      <div className="px-3 py-1.5 border-b border-[#1E232E] bg-[#14171F] flex items-center justify-center relative select-none z-20 shrink-0">
+        <div className="flex items-center space-x-1">
+          <button
+            type="button"
+            onClick={() => setIsPanMode((prev) => !prev)}
+            className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+              isPanMode
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
+            }`}
+            title="Hand Tool (Drag to Pan Canvas)"
+          >
+            <Hand size={15} />
+          </button>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2 bg-[#1A202C] px-2.5 py-1 rounded border border-[#2E3648]">
-            <label className="text-[10px] font-semibold text-slate-400 uppercase">Artwork Opacity</label>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={artworkOpacity}
-              onChange={(e) => setArtworkOpacity(e.target.value)}
-              className="w-20 h-1 bg-[#2E3648] rounded appearance-none cursor-pointer accent-slate-300"
-            />
-            <span className="text-[10px] font-mono text-slate-300 w-7 text-right">{artworkOpacity}%</span>
-          </div>
-        </div>
+        {isGenerating && (
+          <span className="absolute right-3 text-[11px] text-pink-400 flex items-center font-medium">
+            <Loader2 className="animate-spin mr-1.5" size={12} />
+            Tracing Die Lines...
+          </span>
+        )}
       </div>
 
       {/* Viewport Canvas */}
       <div
         ref={canvasRef}
-        className="flex-1 bg-[#0F1218] flex items-center justify-center p-8 overflow-hidden relative cursor-grab active:cursor-grabbing select-none"
+        className={`flex-1 bg-[#14171F] flex items-center justify-center p-8 overflow-hidden relative select-none ${
+          isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+        }`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -181,44 +176,50 @@ export function ContourViewport({
           </div>
         )}
 
-        {/* Floating Viewport HUD Controls */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-1 bg-[#181D27]/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-[#2E3648] shadow-lg z-10">
-          <button
-            type="button"
-            onClick={() => handleZoom("in")}
-            className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
-            title="Zoom In (+)"
-          >
-            <ZoomIn size={15} />
-          </button>
+        {/* Floating Bottom Pill HUD Controls */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-2 bg-[#14171F]/95 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-[#242A38] shadow-2xl z-10 text-xs select-none">
           <button
             type="button"
             onClick={() => handleZoom("out")}
-            className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
+            className="p-1 text-slate-400 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer"
             title="Zoom Out (-)"
           >
-            <ZoomOut size={15} />
+            <ZoomOut size={14} />
           </button>
-          <div className="w-px h-3.5 bg-[#2E3648] mx-1" />
+          <input
+            type="range"
+            min={10}
+            max={400}
+            step={5}
+            value={Math.min(400, Math.max(10, Math.round(scale * 100)))}
+            onChange={(e) => setScale(Number(e.target.value) / 100)}
+            className="w-24 h-1 bg-[#2B3242] rounded-lg appearance-none cursor-pointer accent-blue-500"
+            title="Zoom Level"
+          />
+          <button
+            type="button"
+            onClick={() => handleZoom("in")}
+            className="p-1 text-slate-400 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer"
+            title="Zoom In (+)"
+          >
+            <ZoomIn size={14} />
+          </button>
           <button
             type="button"
             onClick={handleFitToViewport}
-            className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
+            className="px-1.5 py-0.5 text-[11px] font-mono text-slate-300 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer min-w-[42px] text-center"
+            title="Reset Zoom"
+          >
+            {Math.round(scale * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={handleFitToViewport}
+            className="p-1 text-slate-400 hover:text-white rounded hover:bg-white/[0.06] transition-colors cursor-pointer"
             title="Fit to Screen"
           >
-            <Maximize2 size={15} />
+            <Maximize2 size={13} />
           </button>
-          <button
-            type="button"
-            onClick={handleFitToViewport}
-            className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232936] transition-colors"
-            title="Reset Pan & Zoom"
-          >
-            <RotateCcw size={15} />
-          </button>
-          <span className="text-[10px] font-mono text-slate-400 pl-1.5 pr-0.5">
-            {Math.round(scale * 100)}%
-          </span>
         </div>
       </div>
     </div>

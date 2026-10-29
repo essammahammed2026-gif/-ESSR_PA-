@@ -57,7 +57,7 @@ export function HistoryPopover({
       <div className="flex items-center justify-between px-3.5 py-2.5 bg-[#181D27] border-b border-[#242A38]">
         <div className="flex items-center space-x-2">
           <History size={14} className="text-amber-400" />
-          <span className="text-xs font-bold text-slate-200">History Journal</span>
+          <span className="text-xs font-bold text-slate-200">History</span>
         </div>
         <span className="text-[10px] font-mono font-medium text-slate-400 px-1.5 py-0.5 rounded bg-slate-800">
           {currentIndex + 1} / {history.length}
@@ -72,6 +72,9 @@ export function HistoryPopover({
           history.map((entry, idx) => {
             const isActive = idx === currentIndex;
             const isFuture = idx > currentIndex;
+            const timeStr = entry.timestamp
+              ? new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+              : "";
 
             return (
               <button
@@ -93,9 +96,15 @@ export function HistoryPopover({
                   <div className="shrink-0">{getStepIcon(entry.label)}</div>
                   <div className="truncate">
                     <span className="block truncate">{entry.label}</span>
-                    <span className="text-[10px] font-mono text-slate-500">
-                      {entry.pages.length} {entry.pages.length === 1 ? "page" : "pages"}
-                    </span>
+                    <div className="flex items-center space-x-2 text-[10px] font-mono text-slate-500">
+                      <span>{entry.pages.length} {entry.pages.length === 1 ? "page" : "pages"}</span>
+                      {timeStr && (
+                        <>
+                          <span>•</span>
+                          <span>{timeStr}</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
 

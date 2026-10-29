@@ -5,14 +5,15 @@ import { Layers, Scissors, BookOpen, RotateCcw, Save, CheckCircle2, AlertCircle,
 import { apiFetch } from "@/lib/api";
 import SheetsSection from "@/components/settings/SheetsSection";
 import RollsSection from "@/components/settings/RollsSection";
+import BookTrimsSection from "@/components/settings/BookTrimsSection";
 import DefaultsSection from "@/components/settings/DefaultsSection";
 import StorageSection from "@/components/settings/StorageSection";
 import AppearanceSection from "@/components/settings/AppearanceSection";
 import ShortcutsSection from "@/components/settings/ShortcutsSection";
 import { DEFAULT_SETTINGS } from "@/components/settings/types";
-import type { AppSettingsData, SettingsTab, Sheet, Roll } from "@/components/settings/types";
+import type { AppSettingsData, SettingsTab, Sheet, Roll, BookTrim } from "@/components/settings/types";
 const TABS: { id: SettingsTab; label: string; Icon: typeof Layers }[] = [
-  { id: "sheets", label: "Sheet & Roll Media", Icon: Layers },
+  { id: "sheets", label: "Media & Book Trims", Icon: Layers },
   { id: "imposing", label: "Imposing Studio", Icon: Sliders },
   { id: "contour", label: "Contour Cut Studio", Icon: Scissors },
   { id: "flipbook", label: "Flipbook Studio", Icon: BookOpen },
@@ -57,6 +58,7 @@ export default function SettingsPage() {
   };
   const onSheets = (sheets: Sheet[]) => setSettings((s) => ({ ...s, sheets }));
   const onRolls = (rolls: Roll[]) => setSettings((s) => ({ ...s, rolls }));
+  const onBookTrims = (book_trims: BookTrim[]) => setSettings((s) => ({ ...s, book_trims }));
   return (
     <div className="h-full flex flex-col overflow-y-auto bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 p-2 md:p-3">
       <div className="w-full mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-gray-200 dark:border-gray-800">
@@ -107,7 +109,13 @@ export default function SettingsPage() {
           })}
         </div>
         <div className="md:col-span-3 space-y-6">
-          {activeTab === "sheets" && (<div className="space-y-6"><SheetsSection sheets={settings.sheets} onSheetsChange={onSheets} /><RollsSection rolls={settings.rolls} onRollsChange={onRolls} /></div>)}
+          {activeTab === "sheets" && (
+            <div className="space-y-6">
+              <SheetsSection sheets={settings.sheets} onSheetsChange={onSheets} />
+              <RollsSection rolls={settings.rolls} onRollsChange={onRolls} />
+              <BookTrimsSection trims={settings.book_trims} onTrimsChange={onBookTrims} />
+            </div>
+          )}
           {(activeTab === "imposing" || activeTab === "contour" || activeTab === "flipbook") && (<DefaultsSection settings={settings} onSettingsChange={setSettings} activeTab={activeTab} />)}
           {activeTab === "shortcuts" && <ShortcutsSection settings={settings} onSettingsChange={setSettings} />}
           {activeTab === "appearance" && <AppearanceSection />}

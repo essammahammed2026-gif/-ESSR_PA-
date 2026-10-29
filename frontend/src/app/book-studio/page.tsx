@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { FolderOpen, SlidersHorizontal, Download, List, LayoutGrid, RefreshCw, ChevronDown, FileText, FileArchive, Image as ImageIcon } from "lucide-react";
+import { FolderOpen, SlidersHorizontal, Download, List, LayoutGrid, RefreshCw, ChevronDown, FileText, FileArchive, Image as ImageIcon, History } from "lucide-react";
 import { useBookStudioState } from "@/hooks/useBookStudioState";
 import { type LengthUnit, UNIT_OPTIONS } from "@/lib/units";
 import { ExportFormat, TiffCompression } from "@/types/book_studio";
@@ -10,6 +10,7 @@ import dynamic from "next/dynamic";
 import { StudioLayout } from "@/components/layout/StudioLayout";
 import { BookLeftPanel } from "@/components/book-studio/BookLeftPanel";
 import { BookRightPanel } from "@/components/book-studio/BookRightPanel";
+import { HistoryPopover } from "@/components/book-studio/HistoryPopover";
 import { ExportProgressModal } from "@/components/book-studio/ExportProgressModal";
 
 const BookWorkspace = dynamic(
@@ -66,14 +67,18 @@ function BookStudioContent() {
     bleedModule, setBleedModule,
     restorationModule, setRestorationModule,
     cropModule, setCropModule,
-    pageCrops,
+    pageCrops, focusCropPage,
     clearPageCrops,
     isDetectingCrop,
     detectCrop,
     detectAllCrops,
     splitSpread,
     revertSpread,
+    revertSplitLevel,
     applyCrop,
+    revertCropLevel,
+    resetCrop,
+    resetDeskew,
     removeAppliedCrop,
     removeAllAppliedCrops,
     clearAllDeskewAngles,
@@ -103,6 +108,7 @@ function BookStudioContent() {
     exportPdf,
     exportProgress,
     dismissExportProgress,
+    getDeckThumbnailUrl,
     getThumbnailUrl,
     history,
     currentHistoryIndex,
@@ -111,7 +117,6 @@ function BookStudioContent() {
     undo,
     redo,
     jumpToStep,
-    revertToOriginal,
     shortcuts,
     shortcutLabels,
   } = useBookStudioState();
@@ -119,6 +124,17 @@ function BookStudioContent() {
   const [isLeftCollapsed, setIsLeftCollapsed] = useState<boolean>(false);
   const [isRightCollapsed, setIsRightCollapsed] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [isDualPage, setIsDualPage] = useState<boolean>(false);
+  // Dual mode adds per-side scope toggles (left / right page); leaving dual mode drops them.
+  const toggleDualPage = () => {
+    const next = !isDualPage;
+    setIsDualPage(next);
+    setCropModule((prev) => ({
+      ...prev,
+      target: { ...prev.target, dualSides: next && prev.target.base === "current" ? ["left", "right"] : undefined },
+    }));
+  };
+  const [historyMenuOpen, setHistoryMenuOpen] = useState<boolean>(false);
 
   // Multi-format Export Dropdown state
   const [exportMenuOpen, setExportMenuOpen] = useState<boolean>(false);
@@ -158,13 +174,20 @@ function BookStudioContent() {
   };
 
   const searchParams = useSearchParams();
+  const preloadedPathRef = useRef<string | null>(null);
 
   // Preload file if routed from Hub or Command Center
   useEffect(() => {
     const filePathParam = searchParams.get("file_path");
-    if (filePathParam && !sessionId && !isInitializing) {
+    if (filePathParam && filePathParam !== preloadedPathRef.current && !sessionId && !isInitializing) {
+      preloadedPathRef.current = filePathParam;
       setIntakeMode("single_page");
-      initSession(filePathParam);
+      void initSession(filePathParam);
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {
+        // ignore
+      }
     }
   }, [searchParams, sessionId, isInitializing, setIntakeMode, initSession]);
 
@@ -226,6 +249,38 @@ function BookStudioContent() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* History Popover Trigger */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setHistoryMenuOpen((p) => !p)}
+              disabled={!sessionId || history.length === 0}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                historyMenuOpen
+                  ? "bg-[#252B3B] text-white border-amber-500/50"
+                  : "bg-[#131720] border-[#242A38] text-slate-300 hover:text-white hover:bg-[#181D27]"
+              }`}
+              title="Open Document History"
+            >
+              <History size={13} className="text-amber-400" />
+              <span>History</span>
+              {history.length > 0 && (
+                <span className="text-[10px] font-mono text-slate-400">({history.length})</span>
+              )}
+            </button>
+
+            <HistoryPopover
+              history={history}
+              currentIndex={currentHistoryIndex}
+              onSelectStep={(idx) => {
+                void jumpToStep(idx);
+                setHistoryMenuOpen(false);
+              }}
+              open={historyMenuOpen}
+              onClose={() => setHistoryMenuOpen(false)}
+            />
           </div>
 
           {/* Expandable Multi-Format Export Button & Dropdown */}
@@ -432,7 +487,7 @@ function BookStudioContent() {
           pastePage={pastePage}
           canPaste={canPaste}
           extractPage={extractPage}
-          getThumbnailUrl={getThumbnailUrl}
+          getThumbnailUrl={getDeckThumbnailUrl}
           viewMode={viewMode}
           unit={unit}
           onCollapse={() => setIsLeftCollapsed(true)}
@@ -449,6 +504,7 @@ function BookStudioContent() {
           rotatePage={rotatePage}
           sessionId={sessionId}
           unit={unit}
+          focusedModule={focusedModule}
           showGrid={deskewModule.enabled && deskewModule.showGrid}
           gridColor={deskewModule.gridColor}
           eyedropperActive={eyedropperActive}
@@ -495,7 +551,15 @@ function BookStudioContent() {
             setCropModule((prev) => ({ ...prev, enabled: !prev.enabled }));
           }}
           onApplyMaskBox={(box) => {
-            void applyMaskBox(box);
+            setCleanupModule((prev) => ({
+              ...prev,
+              draftMaskBox: {
+                id: `m_${Date.now().toString(36)}`,
+                ...box,
+                color: prev.maskColor || "#ffffff",
+              },
+            }));
+            setMaskToolActive(false);
           }}
           onRemoveMaskBox={(maskId) => {
             void removeMaskBox(maskId);
@@ -504,31 +568,38 @@ function BookStudioContent() {
             setDeskewModule((prev) => ({ ...prev, enabled: true, showGrid: !prev.showGrid }));
           }}
           cropModule={cropModule}
+          isDualPage={isDualPage}
+          onToggleDualPage={toggleDualPage}
+          pageCrops={pageCrops}
+          focusCropPage={focusCropPage}
           bleedModule={bleedModule}
+          cleanupModule={cleanupModule}
           setCropModule={setCropModule}
+          setCleanupModule={setCleanupModule}
 
           onUndo={undo}
           canUndo={canUndo}
           onRedo={redo}
           canRedo={canRedo}
-          onRestoreOriginal={revertToOriginal}
-          history={history}
-          currentHistoryIndex={currentHistoryIndex}
-          onSelectHistoryStep={jumpToStep}
           shortcuts={shortcuts}
           shortcutLabels={shortcutLabels}
+          isDeckOpen={!isLeftCollapsed}
+          onToggleDeck={() => setIsLeftCollapsed((prev) => !prev)}
         />
       }
 
       // Right Panel: Prepress & Restoration Controls
       rightLabel="Controls"
       rightIcon={<SlidersHorizontal size={13} />}
+      rightWidthClass="w-full lg:w-[325px] xl:w-[345px]"
       isRightCollapsed={isRightCollapsed}
       onToggleRight={() => setIsRightCollapsed((prev) => !prev)}
       rightPanel={
         <BookRightPanel
           shortcutLabels={shortcutLabels}
           cropModule={cropModule}
+          isDualPage={isDualPage}
+          focusCropPage={focusCropPage}
           setCropModule={setCropModule}
           isDetectingCrop={isDetectingCrop}
           detectCrop={detectCrop}
@@ -538,7 +609,11 @@ function BookStudioContent() {
           clearPageCrops={clearPageCrops}
           splitSpread={splitSpread}
           revertSpread={revertSpread}
+          revertSplitLevel={revertSplitLevel}
           applyCrop={applyCrop}
+          revertCropLevel={revertCropLevel}
+          resetCrop={resetCrop}
+          resetDeskew={resetDeskew}
           removeAppliedCrop={removeAppliedCrop}
           removeAllAppliedCrops={removeAllAppliedCrops}
           pages={pages}
@@ -563,15 +638,18 @@ function BookStudioContent() {
             setMaskToolActive(false);
             setEyedropperActive(true);
           }}
-          onClearPageMasks={() => void clearPageMasks()}
+          onClearPageMasks={(ids) => void clearPageMasks(ids)}
           onClearAllMasks={() => void clearAllMasks()}
+          applyMaskBox={applyMaskBox}
+          removeMaskBox={removeMaskBox}
           pageColorMode={
             selectedPageId
               ? pages.find((p) => p.id === selectedPageId)?.color_mode ?? null
               : null
           }
-          onSetPageColorMode={(mode, clearAll) => {
-            void setPageColorMode(mode, selectedPageIds.length > 1 ? selectedPageIds : undefined, clearAll);
+          onSetPageColorMode={(mode, targetIds, clearAll) => {
+            const ids = targetIds ?? (selectedPageIds.length > 1 ? selectedPageIds : undefined);
+            void setPageColorMode(mode, ids, clearAll);
           }}
           focusedModule={focusedModule}
           onFocusModule={openModule}

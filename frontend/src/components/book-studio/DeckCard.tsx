@@ -19,7 +19,7 @@ export interface DeckCardProps {
   onContextMenu?: (e: React.MouseEvent, page: BookStudioPage) => void;
 }
 
-export function DeckCard({
+export function DeckCardComponent({
   page,
   index,
   isSelected,
@@ -69,6 +69,7 @@ export function DeckCard({
           alt={page.label}
           loading="lazy"
           decoding="async"
+          fetchPriority="low"
           className="object-contain max-h-full max-w-full pointer-events-none transition-transform duration-150"
         />
         {page.rotation !== 0 && (
@@ -102,3 +103,18 @@ export function DeckCard({
     </div>
   );
 }
+
+function areDeckCardPropsEqual(prev: DeckCardProps, next: DeckCardProps): boolean {
+  return (
+    prev.page.id === next.page.id &&
+    prev.page.rev === next.page.rev &&
+    prev.page.rotation === next.page.rotation &&
+    prev.isSelected === next.isSelected &&
+    prev.isDragTarget === next.isDragTarget &&
+    prev.isSelfDragging === next.isSelfDragging &&
+    prev.thumbnailUrl === next.thumbnailUrl &&
+    prev.index === next.index
+  );
+}
+
+export const DeckCard = React.memo(DeckCardComponent, areDeckCardPropsEqual);

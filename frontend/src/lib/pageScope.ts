@@ -81,6 +81,17 @@ export function resolveCropTarget(
   target: CropTarget
 ): ResolvedCropTarget {
   if (target.base === "current") {
+    const selIdx = pages.findIndex((p) => p.id === selectedPageId);
+    const sides = target.dualSides;
+    if (sides && sides.length > 0 && selIdx >= 0) {
+      const pairStartIdx = Math.floor(selIdx / 2) * 2;
+      const ids: string[] = [];
+      if (sides.includes("left") && pages[pairStartIdx]) ids.push(pages[pairStartIdx].id);
+      if (sides.includes("right") && pages[pairStartIdx + 1]) ids.push(pages[pairStartIdx + 1].id);
+      if (ids.length > 0) {
+        return { applyToAll: false, ids, label: ids.length > 1 ? "Both Pages" : "Current Page" };
+      }
+    }
     return {
       applyToAll: false,
       ids: selectedPageId ? [selectedPageId] : [],
@@ -266,6 +277,33 @@ export function resolveConcretePageNumbers(
 }
 
 /**
+ * Retrieves the active applied entry governing a specific page from a list of applied entries.
+ * Evaluates in reverse order (last applied has priority) and honors the entry's `visible` flag.
+ */
+export function getAppliedEntryForPage<T extends {
+  targetPages?: number[];
+  targetPageIds?: string[];
+  visible?: boolean;
+}>(
+  pageNum: number,
+  pageId: string | undefined,
+  entries: T[] | undefined
+): T | undefined {
+  if (!entries || entries.length === 0) return undefined;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry.visible === false) continue;
+    if (entry.targetPageIds && pageId && entry.targetPageIds.includes(pageId)) {
+      return entry;
+    }
+    if (entry.targetPages && entry.targetPages.includes(pageNum)) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Checks whether a page is included in a list of applied entries.
  * Honors entry visibility (skips entries toggled off).
  */
@@ -274,17 +312,59 @@ export function isPageInAppliedEntries(
   pageId: string | undefined,
   entries: { targetPages?: number[]; targetPageIds?: string[]; visible?: boolean }[] | undefined
 ): boolean {
-  if (!entries || entries.length === 0) return false;
-  return entries.some((entry) => {
-    if (entry.visible === false) return false;
-    if (entry.targetPageIds && pageId && entry.targetPageIds.includes(pageId)) {
-      return true;
-    }
-    if (entry.targetPages && entry.targetPages.includes(pageNum)) {
-      return true;
-    }
-    return false;
-  });
+  return Boolean(getAppliedEntryForPage(pageNum, pageId, entries));
+}
+
+/**
+ * Unlinks a specific page (by pageId and/or 1-based pageNum) from an applied entry in a stack.
+ * Prunes the entry completely if no target pages remain, or updates `excludedPages` and
+ * `scopeLabel` cleanly (e.g. "Custom" or explicit remaining pages).
+ */
+export function unlinkPageFromEntries<T extends {
+  id: string;
+  targetPages?: number[];
+  targetPageIds?: string[];
+  origScope?: "all" | "odds" | "evens" | "range" | "current";
+  excludedPages?: number[];
+  scopeLabel?: string;
+}>(
+  entries: T[] | undefined,
+  entryId: string,
+  pageId: string | undefined,
+  pageNum: number | undefined,
+  totalPages: number
+): T[] {
+  if (!entries || entries.length === 0) return [];
+  return entries
+    .map((e) => {
+      if (e.id !== entryId) return e;
+      const nextIds = pageId
+        ? (e.targetPageIds || []).filter((id) => id !== pageId)
+        : (e.targetPageIds || []);
+      const nextPages = pageNum !== undefined
+        ? (e.targetPages || []).filter((n) => n !== pageNum)
+        : (e.targetPages || []);
+      const isFromAll = e.origScope === "all" || (e.targetPages?.length ?? 0) + (e.excludedPages?.length ?? 0) >= totalPages;
+      const nextExcluded = pageNum !== undefined
+        ? Array.from(new Set([...(e.excludedPages || []), pageNum])).sort((a, b) => a - b)
+        : (e.excludedPages || []);
+
+      return {
+        ...e,
+        origScope: e.origScope || (isFromAll ? "all" : undefined),
+        excludedPages: nextExcluded,
+        targetPageIds: nextIds,
+        targetPages: nextPages,
+        scopeLabel: isFromAll && nextExcluded.length > 0
+          ? "Custom"
+          : nextPages.length === 1
+            ? `P.${nextPages[0]}`
+            : nextPages.length > 0
+              ? `P.${nextPages.join(",")}`
+              : "None",
+      };
+    })
+    .filter((e) => (e.targetPageIds && e.targetPageIds.length > 0) || (e.targetPages && e.targetPages.length > 0));
 }
 
 /**

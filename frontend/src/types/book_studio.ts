@@ -17,7 +17,7 @@ export interface MaskBox extends CropBox {
   color?: string; // "#ffffff" | hex
 }
 
-export type FocusedModuleId = "crop" | "deskew" | "cleanup" | "restore" | "bleed";
+export type FocusedModuleId = "crop" | "split" | "deskew" | "cleanup" | "restore" | "bleed";
 export type ExportFormat = "pdf" | "pdf_split" | "jpeg" | "png" | "tiff";
 export type TiffCompression = "lzw" | "deflate" | "none";
 
@@ -57,6 +57,7 @@ export interface BookStudioPage extends BasePage {
   split_lines?: number[];
   label: string;
   crop_box?: CropBox;
+  crop_stack?: CropBox[];
   spread_crop_box?: CropBox;
   page_crop_box?: CropBox;
   is_spread?: boolean;
@@ -89,6 +90,7 @@ export interface AppliedModuleEntry {
   excludedPages?: number[];
   prevPagesSnapshot?: BookStudioPage[];
   visible?: boolean;
+  solidColor?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   params?: Record<string, any>;
 }
@@ -101,6 +103,9 @@ export interface CropModuleConfig {
   target: CropTarget;
   detectMode?: CropDetectMode;
   appliedEntries?: AppliedModuleEntry[];
+  aspectLock?: "lock" | "free" | "normal" | "all" | "none"; // "lock" = all sides move together, "free" = free
+  unitMode?: "percent" | "unit"; // Toggle between % and default unit
+  overlayOpacity?: number; // Inspection shading opacity 0.0 to 1.0 (default 0.55)
 }
 
 export type CropTargetBase = "all" | "current" | "range";
@@ -111,6 +116,8 @@ export interface CropTarget {
   base: CropTargetBase;
   customRange: string;
   parity: CropParity;
+  /** Dual-page mode only (base "current"): which visible page(s) edits and Apply target. Default: left only. */
+  dualSides?: Array<"left" | "right">;
 }
 
 export type ModulePageScopeMode = "all" | "current" | "odds" | "evens" | "range";
@@ -173,8 +180,12 @@ export interface CleanupModuleConfig {
   maskCustomRange: string;
   maskColor: string;
   flattenIllumination: boolean;
-  despeckleLevel: 0 | 1 | 2 | 3;
+  spineStrength?: number;
+  spineBox?: CropBox | null;
+  spineSelectionActive?: boolean;
+  despeckleLevel: number;
   scope: ModulePageScope;
+  draftMaskBox?: MaskBox | null;
   appliedEntries?: AppliedModuleEntry[];
 }
 
@@ -236,6 +247,8 @@ export interface ThumbnailRenderOpts {
   cleanupEnabled: boolean;
   cleanupScope: ModulePageScope;
   flattenIllumination: boolean;
+  spineStrength?: number;
+  spineBox?: CropBox | null;
   despeckleLevel: number;
   restorationEnabled: boolean;
   restorationScope: ModulePageScope;
@@ -259,6 +272,7 @@ export interface ThumbnailRenderOpts {
   cleanupAppliedEntries?: AppliedModuleEntry[];
   restorationAppliedEntries?: AppliedModuleEntry[];
   bleedAppliedEntries?: BleedEntry[];
+  excludeMaskIds?: string[];
 }
 
 export interface ModuleTaskProgress {
