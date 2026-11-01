@@ -65,18 +65,41 @@ export interface StorageItem {
   description: string;
   path: string;
   display_path: string;
-  category: "runtime" | "build";
+  category: "cache" | "scratch" | "build" | "deliverables" | "user_data" | "backups" | "runtime";
+  safety_level: "safe" | "build" | "deliverables" | "protected";
   size_bytes: number;
   size_human: string;
   count: number;
 }
 
+export interface StorageCategoryStats {
+  count: number;
+  size_bytes: number;
+  size_human: string;
+}
+
+export interface StorageBreakdown {
+  uploaded: StorageCategoryStats;
+  archived: StorageCategoryStats;
+  pending: StorageCategoryStats;
+  in_progress: StorageCategoryStats;
+  trash: StorageCategoryStats;
+  cache: StorageCategoryStats;
+  build: StorageCategoryStats;
+}
+
 export interface StorageStatus {
   items: StorageItem[];
-  total_runtime_bytes: number;
-  total_runtime_human: string;
   total_bytes: number;
   total_human: string;
+  safe_cleanable_bytes: number;
+  safe_cleanable_human: string;
+  build_cleanable_bytes: number;
+  build_cleanable_human: string;
+  total_runtime_bytes: number;
+  total_runtime_human: string;
+  trash_count: number;
+  breakdown?: StorageBreakdown;
 }
 
 export const DEFAULT_SETTINGS: AppSettingsData = {

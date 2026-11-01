@@ -1,3 +1,5 @@
+import os
+import re
 import time
 from typing import Any, Dict
 from sqlalchemy import (
@@ -21,9 +23,14 @@ class SessionModel(Base):
     id = Column(String(64), primary_key=True, index=True)
     studio_type = Column(String(32), default="book_scan", index=True)  # 'book_scan', 'imposing', 'contour', 'flipbook'
     title = Column(String(255), nullable=True)
+    original_filename = Column(String(255), nullable=True)
     intake_mode = Column(String(32), default="single")  # 'single', 'dual', 'multi_merge'
     is_spread = Column(Boolean, default=False)
-    status = Column(String(32), default="active", index=True)  # 'active', 'completed', 'archived'
+    status = Column(String(32), default="active", index=True)  # 'active', 'completed', 'archived', 'trash'
+    trash_reason = Column(String(64), nullable=True)  # 'deleted', 'file_not_found'
+    tag = Column(String(32), default="in-progress", index=True)  # 'pending', 'in-progress', 'done'
+    notes = Column(Text, nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
     session_dir = Column(String(512), nullable=False)
     settings = Column(JSON, default=dict)
     rev = Column(Integer, default=1)
@@ -61,10 +68,16 @@ class SessionModel(Base):
             "id": self.id,
             "studio_type": self.studio_type,
             "title": self.title,
+            "original_filename": self.original_filename or self.title,
             "mode": self.intake_mode,
             "intake_mode": self.intake_mode,
             "is_spread": self.is_spread,
             "status": self.status,
+            "trash_reason": self.trash_reason,
+            "tag": self.tag or "in-progress",
+            "notes": self.notes or "",
+            "file_size": self.file_size_bytes or 0,
+            "file_size_bytes": self.file_size_bytes or 0,
             "session_dir": self.session_dir,
             "settings": self.settings or {},
             "rev": self.rev,
@@ -291,6 +304,8 @@ class ExportJobModel(Base):
     session = relationship("SessionModel", back_populates="export_jobs")
 
     def to_dict(self) -> Dict[str, Any]:
+        raw_name = os.path.basename(self.output_file_path) if self.output_file_path else None
+        clean_name = re.sub(r'^(?:sync_|export_)?[a-f0-9\-]{8,36}_', '', raw_name) if raw_name else None
         return {
             "jobId": self.id,
             "session_id": self.session_id,
@@ -301,8 +316,40 @@ class ExportJobModel(Base):
             "currentPage": self.current_page,
             "totalPages": self.total_pages,
             "outputFilePath": self.output_file_path,
+            "filename": clean_name,
             "fileSizeBytes": self.file_size_bytes,
             "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+
+class IntakeAssetModel(Base):
+    """
+    Persisted intake asset uploaded through the Command Center / Home Studio.
+    Guarantees uploaded files in the intake workbench are retained in SQLite
+    across browser reloads, studio route switching, and workstation restarts.
+    """
+    __tablename__ = "intake_assets"
+
+    id = Column(String(128), primary_key=True, index=True)  # prefixed_name / file_id
+    filename = Column(String(255), nullable=False)
+    file_path = Column(String(512), nullable=False)
+    file_size = Column(Integer, default=0)
+    page_count = Column(Integer, default=1)
+    width_mm = Column(Float, default=0.0)
+    height_mm = Column(Float, default=0.0)
+    created_at = Column(Float, default=time.time, index=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "file_id": self.id,
+            "filename": self.filename,
+            "file_path": self.file_path,
+            "file_size": self.file_size,
+            "page_count": self.page_count,
+            "width_mm": self.width_mm,
+            "height_mm": self.height_mm,
+            "uploaded_at": self.created_at,
+        }
+

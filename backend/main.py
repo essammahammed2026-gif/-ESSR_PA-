@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from settings_api import router as settings_router
 from imposing_api import router as imposing_router, _pregen_all_thumbnails
 from book_scan_api import router as book_scan_router
+from sessions_api import router as sessions_router
 from fastapi import UploadFile, File, Form, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,7 @@ def on_startup():
 app.include_router(settings_router)
 app.include_router(imposing_router)
 app.include_router(book_scan_router)
+app.include_router(sessions_router)
 
 app.add_middleware(
     CORSMiddleware,

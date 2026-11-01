@@ -8,7 +8,10 @@ import {
   CropModuleConfig,
   BleedModuleConfig,
   CleanupModuleConfig,
+  DeskewModuleConfig,
+  RestorationModuleConfig,
   CropBox,
+  MaskBox,
   SplitLine,
   FocusedModuleId,
 } from "@/types/book_studio";
@@ -35,14 +38,20 @@ interface BookWorkspaceProps {
   maskToolActive?: boolean;
   onToggleMaskTool?: () => void;
   onToggleCropTool?: () => void;
-  onApplyMaskBox?: (box: CropBox) => void;
+  onApplyMaskBox?: (box: CropBox, side?: "primary" | "secondary") => void;
   onRemoveMaskBox?: (maskId: string) => void;
   onToggleGrid?: () => void;
   cropModule?: CropModuleConfig;
   bleedModule?: BleedModuleConfig;
   cleanupModule?: CleanupModuleConfig;
+  deskewModule?: DeskewModuleConfig;
+  restorationModule?: RestorationModuleConfig;
   setCropModule?: React.Dispatch<React.SetStateAction<CropModuleConfig>>;
   setCleanupModule?: React.Dispatch<React.SetStateAction<CleanupModuleConfig>>;
+  setDeskewModule?: React.Dispatch<React.SetStateAction<DeskewModuleConfig>>;
+  setRestorationModule?: React.Dispatch<React.SetStateAction<RestorationModuleConfig>>;
+  setBleedModule?: React.Dispatch<React.SetStateAction<BleedModuleConfig>>;
+  onCommitBoxDrag?: (label: string) => void;
   onUndo?: () => void;
   canUndo?: boolean;
   onRedo?: () => void;
@@ -63,7 +72,9 @@ export function BookWorkspace({
   eyedropperActive = false, onPickColor,
   straightenActive = false, onApplyStraightenAngle,
   maskToolActive = false, onApplyMaskBox, onRemoveMaskBox,
-  cropModule, bleedModule, cleanupModule, setCropModule, setCleanupModule,
+  cropModule, bleedModule, cleanupModule, deskewModule, restorationModule,
+  setCropModule, setCleanupModule, setDeskewModule, setRestorationModule, setBleedModule,
+  onCommitBoxDrag,
   onUndo, canUndo, onRedo, canRedo,
   shortcuts = {}, shortcutLabels = {},
   isDeckOpen = false, onToggleDeck,
@@ -85,8 +96,10 @@ export function BookWorkspace({
   const startPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [activeCropDrag, setActiveCropDrag] = useState<string | null>(null);
   const cropDragStartRef = useRef<{ relX: number; relY: number; box: CropBox } | null>(null);
+  const cropDragMovedRef = useRef<boolean>(false);
   const [activeMaskDrag, setActiveMaskDrag] = useState<string | null>(null);
   const maskDragStartRef = useRef<{ relX: number; relY: number; box: CropBox } | null>(null);
+  const maskDragMovedRef = useRef<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isLockedOriginal, setIsLockedOriginal] = useState<boolean>(false);
   const [isHoldingSpace, setIsHoldingSpace] = useState<boolean>(false);
@@ -103,6 +116,7 @@ export function BookWorkspace({
   const secondaryPage = isDualPage && pairStartIdx + 1 < pages.length ? pages[pairStartIdx + 1] : null;
 
   const isDualLinked = (cropModule?.target.dualSides?.length ?? 2) >= 2;
+  const isCleanupDualLinked = (cleanupModule?.scope.dualSides?.length ?? 2) >= 2;
 
   const primaryCropBox = selectedPage
     ? (pageCrops?.[selectedPage.id]?.cropBox ?? cropModule?.cropBox ?? { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 })
@@ -115,12 +129,39 @@ export function BookWorkspace({
           : (secondaryPage.crop_box ? { x1: 0, y1: 0, x2: 1, y2: 1 } : { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.95 })))
     : undefined;
 
+  const primaryDraftMaskBox: MaskBox | null = selectedPage
+    ? (isDualPage && secondaryPage && cleanupModule?.scope.mode === "current" && !isCleanupDualLinked
+        ? (cleanupModule?.pageDraftMasks?.[selectedPage.id] ?? (cleanupModule?.scope.dualSides?.[0] === "left" ? (cleanupModule?.draftMaskBox ?? null) : null))
+        : (cleanupModule?.draftMaskBox ?? cleanupModule?.pageDraftMasks?.[selectedPage.id] ?? null))
+    : (cleanupModule?.draftMaskBox ?? null);
+
+  const secondaryDraftMaskBox: MaskBox | null = secondaryPage
+    ? (isDualPage && cleanupModule?.scope.mode === "current" && !isCleanupDualLinked
+        ? (cleanupModule?.pageDraftMasks?.[secondaryPage.id] ?? (cleanupModule?.scope.dualSides?.[0] === "right" ? (cleanupModule?.draftMaskBox ?? null) : null))
+        : (isDualPage && (cleanupModule?.scope.mode !== "current" || isCleanupDualLinked)
+            ? (cleanupModule?.draftMaskBox ?? cleanupModule?.pageDraftMasks?.[secondaryPage.id] ?? null)
+            : null))
+    : null;
+
+  const primarySpineBox: CropBox | null = selectedPage
+    ? (isDualPage && secondaryPage && cleanupModule?.scope.mode === "current" && !isCleanupDualLinked
+        ? (cleanupModule?.pageSpineBoxes?.[selectedPage.id] ?? (cleanupModule?.scope.dualSides?.[0] === "left" ? (cleanupModule?.spineBox ?? null) : null))
+        : (cleanupModule?.spineBox ?? cleanupModule?.pageSpineBoxes?.[selectedPage.id] ?? null))
+    : (cleanupModule?.spineBox ?? null);
+
+  const secondarySpineBox: CropBox | null = secondaryPage
+    ? (isDualPage && cleanupModule?.scope.mode === "current" && !isCleanupDualLinked
+        ? (cleanupModule?.pageSpineBoxes?.[secondaryPage.id] ?? (cleanupModule?.scope.dualSides?.[0] === "right" ? (cleanupModule?.spineBox ?? null) : null))
+        : (isDualPage && (cleanupModule?.scope.mode !== "current" || isCleanupDualLinked)
+            ? (cleanupModule?.spineBox ?? cleanupModule?.pageSpineBoxes?.[secondaryPage.id] ?? null)
+            : null))
+    : null;
+
   // Per-mask visibility: each saved mask is hidden only when its own applied entry is toggled off.
   // The mask currently being edited (draft) is also hidden so the editable draft box sits on top.
   const visiblePageMasks = useMemo(() => {
     const masks = selectedPage?.masks || [];
     if (masks.length === 0) return masks;
-    if (cleanupModule?.enabled === false) return [];
     const hiddenIds = new Set<string>();
     for (const e of cleanupModule?.appliedEntries || []) {
       if (e.visible === false) {
@@ -128,10 +169,25 @@ export function BookWorkspace({
         if (id) hiddenIds.add(id);
       }
     }
-    const editingMaskId = cleanupModule?.draftMaskBox?.id;
+    const editingMaskId = primaryDraftMaskBox?.id || cleanupModule?.draftMaskBox?.id;
     if (editingMaskId) hiddenIds.add(editingMaskId);
     return masks.filter((m) => !hiddenIds.has(m.id));
-  }, [selectedPage?.masks, cleanupModule?.appliedEntries, cleanupModule?.draftMaskBox?.id, cleanupModule?.enabled]);
+  }, [selectedPage?.masks, cleanupModule?.appliedEntries, primaryDraftMaskBox?.id, cleanupModule?.draftMaskBox?.id]);
+
+  const visibleSecondaryPageMasks = useMemo(() => {
+    const masks = secondaryPage?.masks || [];
+    if (masks.length === 0) return masks;
+    const hiddenIds = new Set<string>();
+    for (const e of cleanupModule?.appliedEntries || []) {
+      if (e.visible === false) {
+        const id = e.params?.maskBox?.id || (e.id.startsWith("mask_") ? e.id.slice(5) : null);
+        if (id) hiddenIds.add(id);
+      }
+    }
+    const editingMaskId = secondaryDraftMaskBox?.id || cleanupModule?.draftMaskBox?.id;
+    if (editingMaskId) hiddenIds.add(editingMaskId);
+    return masks.filter((m) => !hiddenIds.has(m.id));
+  }, [secondaryPage?.masks, cleanupModule?.appliedEntries, secondaryDraftMaskBox?.id, cleanupModule?.draftMaskBox?.id]);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const primarySplitLines = selectedPage
     ? (pageCrops?.[selectedPage.id]?.splitLines ?? cropModule?.splitLines ?? [])
@@ -322,6 +378,7 @@ export function BookWorkspace({
     if (overlayEl && boxToUse) {
       const rect = overlayEl.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
+        cropDragMovedRef.current = false;
         cropDragStartRef.current = {
           relX: (e.clientX - rect.left) / rect.width,
           relY: (e.clientY - rect.top) / rect.height,
@@ -342,6 +399,9 @@ export function BookWorkspace({
       const relY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
 
       const { relX: sx, relY: sy, box: b } = cropDragStartRef.current;
+      if (Math.abs(relX - sx) > 0.001 || Math.abs(relY - sy) > 0.001) {
+        cropDragMovedRef.current = true;
+      }
 
       if (focusedModule === "split") {
         const spineIdx = activeCropDrag === "spine" ? 0
@@ -485,19 +545,167 @@ export function BookWorkspace({
         };
       });
     };
-    const onUp = () => { setActiveCropDrag(null); cropDragStartRef.current = null; };
+    const onUp = () => {
+      const moved = cropDragMovedRef.current;
+      setActiveCropDrag(null);
+      cropDragStartRef.current = null;
+      cropDragMovedRef.current = false;
+      if (moved) {
+        onCommitBoxDrag?.(focusedModule === "split" ? "Adjust Cut Line" : "Adjust Crop Box");
+      }
+    };
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
     return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-  }, [activeCropDrag, setCropModule, focusedModule]);
+  }, [activeCropDrag, setCropModule, focusedModule, onCommitBoxDrag]);
+
+  const maskOverlayElRef = useRef<HTMLElement | null>(null);
+  const maskDragSideRef = useRef<"primary" | "secondary">("primary");
+
+  // Shared helper for computing moved/resized CropBox from pointer coordinates
+  const computeDraggedBox = (
+    handle: string,
+    relX: number,
+    relY: number,
+    sx: number,
+    sy: number,
+    b: CropBox,
+    minSize: number
+  ): CropBox => {
+    const minX = Math.min(b.x1, b.x2);
+    const maxX = Math.max(b.x1, b.x2);
+    const minY = Math.min(b.y1, b.y2);
+    const maxY = Math.max(b.y1, b.y2);
+
+    if (handle === "move") {
+      const w = maxX - minX;
+      const h = maxY - minY;
+      const nx1 = Math.max(0, Math.min(1 - w, minX + relX - sx));
+      const ny1 = Math.max(0, Math.min(1 - h, minY + relY - sy));
+      return {
+        x1: Math.round(nx1 * 1000) / 1000,
+        y1: Math.round(ny1 * 1000) / 1000,
+        x2: Math.round((nx1 + w) * 1000) / 1000,
+        y2: Math.round((ny1 + h) * 1000) / 1000,
+      };
+    }
+
+    let x1 = minX, x2 = maxX, y1 = minY, y2 = maxY;
+    if (handle.includes("w")) x1 = Math.max(0, Math.min(relX, maxX - minSize));
+    if (handle.includes("e")) x2 = Math.min(1, Math.max(relX, minX + minSize));
+    if (handle.includes("n")) y1 = Math.max(0, Math.min(relY, maxY - minSize));
+    if (handle.includes("s")) y2 = Math.min(1, Math.max(relY, minY + minSize));
+    return {
+      x1: Math.round(Math.min(x1, x2) * 1000) / 1000,
+      y1: Math.round(Math.min(y1, y2) * 1000) / 1000,
+      x2: Math.round(Math.max(x1, x2) * 1000) / 1000,
+      y2: Math.round(Math.max(y1, y2) * 1000) / 1000,
+    };
+  };
+
+  // Shared helper for switching active unlinked dual-page side ("left" | "right") across all tools
+  const selectDualSpreadSide = useCallback((side: "left" | "right") => {
+    if (!isDualPage || !secondaryPage || !selectedPage) return;
+    const targetPage = side === "right" ? secondaryPage : selectedPage;
+    if ((focusedModule === "crop" || focusedModule === "split") && cropModule?.target.base === "current") {
+      const isLinked = (cropModule.target.dualSides?.length ?? 2) >= 2;
+      if (!isLinked && cropModule.target.dualSides?.[0] !== side) {
+        focusCropPage?.(targetPage.id, [selectedPage.id, secondaryPage.id]);
+        const draft = pageCrops?.[targetPage.id];
+        setCropModule?.((prev) => ({
+          ...prev,
+          cropBox: draft?.cropBox ?? prev.cropBox,
+          splitLines: draft?.splitLines ? draft.splitLines.map((l) => ({ ...l })) : prev.splitLines,
+          splitPos: draft?.splitPos ?? prev.splitPos,
+          target: { ...prev.target, dualSides: [side] },
+        }));
+      }
+    } else if (focusedModule === "cleanup" && cleanupModule?.scope.mode === "current") {
+      const isLinked = (cleanupModule.scope.dualSides?.length ?? 2) >= 2;
+      if (!isLinked && cleanupModule.scope.dualSides?.[0] !== side) {
+        setSelectedPageId?.(targetPage.id);
+        setCleanupModule?.((prev) => ({
+          ...prev,
+          draftMaskBox: prev.pageDraftMasks?.[targetPage.id] ?? prev.draftMaskBox,
+          spineBox: prev.pageSpineBoxes?.[targetPage.id] ?? prev.spineBox,
+          scope: { ...prev.scope, dualSides: [side] },
+        }));
+      }
+    } else if (focusedModule === "deskew" && deskewModule?.scope.mode === "current") {
+      const isLinked = (deskewModule.scope.dualSides?.length ?? 2) >= 2;
+      if (!isLinked && deskewModule.scope.dualSides?.[0] !== side) {
+        setSelectedPageId?.(targetPage.id);
+        setDeskewModule?.((prev) => ({ ...prev, scope: { ...prev.scope, dualSides: [side] } }));
+      }
+    } else if (focusedModule === "restore" && restorationModule?.scope.mode === "current") {
+      const isLinked = (restorationModule.scope.dualSides?.length ?? 2) >= 2;
+      if (!isLinked && restorationModule.scope.dualSides?.[0] !== side) {
+        setSelectedPageId?.(targetPage.id);
+        setRestorationModule?.((prev) => ({ ...prev, scope: { ...prev.scope, dualSides: [side] } }));
+      }
+    } else if (focusedModule === "bleed" && bleedModule?.scope.mode === "current") {
+      const isLinked = (bleedModule.scope.dualSides?.length ?? 2) >= 2;
+      if (!isLinked && bleedModule.scope.dualSides?.[0] !== side) {
+        setSelectedPageId?.(targetPage.id);
+        setBleedModule?.((prev) => ({ ...prev, scope: { ...prev.scope, dualSides: [side] } }));
+      }
+    }
+  }, [
+    isDualPage,
+    secondaryPage,
+    selectedPage,
+    focusedModule,
+    cropModule?.target,
+    cleanupModule?.scope,
+    deskewModule?.scope,
+    restorationModule?.scope,
+    bleedModule?.scope,
+    focusCropPage,
+    pageCrops,
+    setCropModule,
+    setSelectedPageId,
+    setCleanupModule,
+    setDeskewModule,
+    setRestorationModule,
+    setBleedModule,
+  ]);
 
   const handleMaskPointerDown = (handle: string, e: React.PointerEvent) => {
     if (isPanMode) return;
     e.stopPropagation(); e.preventDefault();
     setActiveMaskDrag(handle);
-    if (overlayRef.current && cleanupModule?.draftMaskBox) {
-      const rect = overlayRef.current.getBoundingClientRect();
+    const grabbed = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-page-overlay]");
+    maskOverlayElRef.current = grabbed ?? overlayRef.current;
+    const overlayEl = maskOverlayElRef.current;
+    const side = grabbed?.getAttribute("data-page-overlay") === "secondary" ? "secondary" : "primary";
+    maskDragSideRef.current = side;
+
+    if (isDualPage && secondaryPage && selectedPage && cleanupModule?.scope.mode === "current") {
+      const isLinked = (cleanupModule.scope.dualSides?.length ?? 2) >= 2;
+      if (!isLinked) {
+        if (side === "secondary" && cleanupModule.scope.dualSides?.[0] !== "right") {
+          setSelectedPageId(secondaryPage.id);
+          setCleanupModule?.((prev) => ({
+            ...prev,
+            draftMaskBox: prev.pageDraftMasks?.[secondaryPage.id] ?? prev.draftMaskBox,
+            scope: { ...prev.scope, dualSides: ["right"] },
+          }));
+        } else if (side === "primary" && cleanupModule.scope.dualSides?.[0] !== "left") {
+          setSelectedPageId(selectedPage.id);
+          setCleanupModule?.((prev) => ({
+            ...prev,
+            draftMaskBox: prev.pageDraftMasks?.[selectedPage.id] ?? prev.draftMaskBox,
+            scope: { ...prev.scope, dualSides: ["left"] },
+          }));
+        }
+      }
+    }
+
+    const boxToUse = side === "secondary" ? (secondaryDraftMaskBox ?? cleanupModule?.draftMaskBox) : (primaryDraftMaskBox ?? cleanupModule?.draftMaskBox);
+    if (overlayEl && boxToUse) {
+      const rect = overlayEl.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        const b = cleanupModule.draftMaskBox;
+        const b = boxToUse;
+        maskDragMovedRef.current = false;
         maskDragStartRef.current = {
           relX: (e.clientX - rect.left) / rect.width,
           relY: (e.clientY - rect.top) / rect.height,
@@ -516,88 +724,96 @@ export function BookWorkspace({
   useEffect(() => {
     if (!activeMaskDrag) return;
     const onMove = (e: PointerEvent) => {
-      if (!overlayRef.current || !setCleanupModule || !maskDragStartRef.current) return;
-      const rect = overlayRef.current.getBoundingClientRect();
+      const overlayEl = maskOverlayElRef.current ?? overlayRef.current;
+      if (!overlayEl || !setCleanupModule || !maskDragStartRef.current) return;
+      const rect = overlayEl.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
       const relX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const relY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
 
       const { relX: sx, relY: sy, box: b } = maskDragStartRef.current;
-      const minX = Math.min(b.x1, b.x2);
-      const maxX = Math.max(b.x1, b.x2);
-      const minY = Math.min(b.y1, b.y2);
-      const maxY = Math.max(b.y1, b.y2);
+      if (Math.abs(relX - sx) > 0.001 || Math.abs(relY - sy) > 0.001) {
+        maskDragMovedRef.current = true;
+      }
+      const nextCoords = computeDraggedBox(activeMaskDrag, relX, relY, sx, sy, b, 0.005);
 
-      if (activeMaskDrag === "move") {
-        const w = maxX - minX;
-        const h = maxY - minY;
-        const nx1 = Math.max(0, Math.min(1 - w, minX + relX - sx));
-        const ny1 = Math.max(0, Math.min(1 - h, minY + relY - sy));
-        setCleanupModule((prev) => {
-          if (!prev.draftMaskBox) return prev;
-          return {
-            ...prev,
-            draftMaskBox: {
-              ...prev.draftMaskBox,
-              x1: Math.round(nx1 * 1000) / 1000,
-              y1: Math.round(ny1 * 1000) / 1000,
-              x2: Math.round((nx1 + w) * 1000) / 1000,
-              y2: Math.round((ny1 + h) * 1000) / 1000,
-            },
-          };
-        });
-        return;
-      }
-
-      let x1 = minX;
-      let x2 = maxX;
-      let y1 = minY;
-      let y2 = maxY;
-
-      if (activeMaskDrag === "w" || activeMaskDrag === "nw" || activeMaskDrag === "sw") {
-        x1 = Math.min(relX, maxX - 0.005);
-      }
-      if (activeMaskDrag === "e" || activeMaskDrag === "ne" || activeMaskDrag === "se") {
-        x2 = Math.max(relX, minX + 0.005);
-      }
-      if (activeMaskDrag === "n" || activeMaskDrag === "nw" || activeMaskDrag === "ne") {
-        y1 = Math.min(relY, maxY - 0.005);
-      }
-      if (activeMaskDrag === "s" || activeMaskDrag === "sw" || activeMaskDrag === "se") {
-        y2 = Math.max(relY, minY + 0.005);
-      }
-
+      const targetPageId = maskDragSideRef.current === "secondary" && secondaryPage ? secondaryPage.id : selectedPage?.id;
       setCleanupModule((prev) => {
-        if (!prev.draftMaskBox) return prev;
+        const baseMask = (targetPageId && prev.pageDraftMasks?.[targetPageId]) || prev.draftMaskBox;
+        if (!baseMask) return prev;
+        const updatedMask: MaskBox = { ...baseMask, ...nextCoords };
+        const isLinked = !isDualPage || prev.scope.mode !== "current" || (prev.scope.dualSides?.length ?? 2) >= 2;
+        const nextPageDrafts = { ...(prev.pageDraftMasks || {}) };
+        if (isLinked) {
+          if (selectedPage) nextPageDrafts[selectedPage.id] = updatedMask;
+          if (isDualPage && secondaryPage) nextPageDrafts[secondaryPage.id] = updatedMask;
+        } else if (targetPageId) {
+          nextPageDrafts[targetPageId] = updatedMask;
+        }
         return {
           ...prev,
-          draftMaskBox: {
-            ...prev.draftMaskBox,
-            x1: Math.round(x1 * 1000) / 1000,
-            y1: Math.round(y1 * 1000) / 1000,
-            x2: Math.round(x2 * 1000) / 1000,
-            y2: Math.round(y2 * 1000) / 1000,
-          },
+          draftMaskBox: updatedMask,
+          pageDraftMasks: nextPageDrafts,
         };
       });
     };
-    const onUp = () => { setActiveMaskDrag(null); maskDragStartRef.current = null; };
+    const onUp = () => {
+      const moved = maskDragMovedRef.current;
+      setActiveMaskDrag(null);
+      maskDragStartRef.current = null;
+      maskDragMovedRef.current = false;
+      if (moved) {
+        onCommitBoxDrag?.("Adjust Erase Box");
+      }
+    };
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
     return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-  }, [activeMaskDrag, setCleanupModule]);
+  }, [activeMaskDrag, setCleanupModule, isDualPage, selectedPage, secondaryPage, onCommitBoxDrag]);
 
   const [activeSpineDrag, setActiveSpineDrag] = useState<string | null>(null);
   const spineDragStartRef = useRef<{ relX: number; relY: number; box: CropBox } | null>(null);
+  const spineDragMovedRef = useRef<boolean>(false);
+  const spineOverlayElRef = useRef<HTMLElement | null>(null);
+  const spineDragSideRef = useRef<"primary" | "secondary">("primary");
 
   const handleSpinePointerDown = (handle: string, e: React.PointerEvent) => {
     if (isPanMode) return;
     e.stopPropagation();
     e.preventDefault();
     setActiveSpineDrag(handle);
-    if (overlayRef.current && cleanupModule?.spineBox) {
-      const rect = overlayRef.current.getBoundingClientRect();
+    const grabbed = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-page-overlay]");
+    spineOverlayElRef.current = grabbed ?? overlayRef.current;
+    const overlayEl = spineOverlayElRef.current;
+    const side = grabbed?.getAttribute("data-page-overlay") === "secondary" ? "secondary" : "primary";
+    spineDragSideRef.current = side;
+
+    if (isDualPage && secondaryPage && selectedPage && cleanupModule?.scope.mode === "current") {
+      const isLinked = (cleanupModule.scope.dualSides?.length ?? 2) >= 2;
+      if (!isLinked) {
+        if (side === "secondary" && cleanupModule.scope.dualSides?.[0] !== "right") {
+          setSelectedPageId(secondaryPage.id);
+          setCleanupModule?.((prev) => ({
+            ...prev,
+            spineBox: prev.pageSpineBoxes?.[secondaryPage.id] ?? prev.spineBox,
+            scope: { ...prev.scope, dualSides: ["right"] },
+          }));
+        } else if (side === "primary" && cleanupModule.scope.dualSides?.[0] !== "left") {
+          setSelectedPageId(selectedPage.id);
+          setCleanupModule?.((prev) => ({
+            ...prev,
+            spineBox: prev.pageSpineBoxes?.[selectedPage.id] ?? prev.spineBox,
+            scope: { ...prev.scope, dualSides: ["left"] },
+          }));
+        }
+      }
+    }
+
+    const boxToUse = side === "secondary" ? (secondarySpineBox ?? cleanupModule?.spineBox) : (primarySpineBox ?? cleanupModule?.spineBox);
+    if (overlayEl && boxToUse) {
+      const rect = overlayEl.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        const b = cleanupModule.spineBox;
+        const b = boxToUse;
+        spineDragMovedRef.current = false;
         spineDragStartRef.current = {
           relX: (e.clientX - rect.left) / rect.width,
           relY: (e.clientY - rect.top) / rect.height,
@@ -615,57 +831,44 @@ export function BookWorkspace({
   useEffect(() => {
     if (!activeSpineDrag) return;
     const onMove = (e: PointerEvent) => {
-      if (!overlayRef.current || !setCleanupModule || !spineDragStartRef.current) return;
-      const rect = overlayRef.current.getBoundingClientRect();
+      const overlayEl = spineOverlayElRef.current ?? overlayRef.current;
+      if (!overlayEl || !setCleanupModule || !spineDragStartRef.current) return;
+      const rect = overlayEl.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
       const relX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const relY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
 
       const { relX: sx, relY: sy, box: b } = spineDragStartRef.current;
-      const minX = Math.min(b.x1, b.x2);
-      const maxX = Math.max(b.x1, b.x2);
-      const minY = Math.min(b.y1, b.y2);
-      const maxY = Math.max(b.y1, b.y2);
-
-      if (activeSpineDrag === "move") {
-        const w = maxX - minX;
-        const h = maxY - minY;
-        const nx1 = Math.max(0, Math.min(1 - w, minX + relX - sx));
-        const ny1 = Math.max(0, Math.min(1 - h, minY + relY - sy));
-        setCleanupModule((prev) => {
-          if (!prev.spineBox) return prev;
-          return {
-            ...prev,
-            spineBox: {
-              x1: Math.round(nx1 * 1000) / 1000,
-              y1: Math.round(ny1 * 1000) / 1000,
-              x2: Math.round((nx1 + w) * 1000) / 1000,
-              y2: Math.round((ny1 + h) * 1000) / 1000,
-            },
-          };
-        });
-        return;
+      if (Math.abs(relX - sx) > 0.001 || Math.abs(relY - sy) > 0.001) {
+        spineDragMovedRef.current = true;
       }
+      const nextBox = computeDraggedBox(activeSpineDrag, relX, relY, sx, sy, b, 0.02);
 
-      let x1 = minX, x2 = maxX, y1 = minY, y2 = maxY;
-      if (activeSpineDrag.includes("w")) x1 = Math.max(0, Math.min(relX, x2 - 0.02));
-      if (activeSpineDrag.includes("e")) x2 = Math.min(1, Math.max(relX, x1 + 0.02));
-      if (activeSpineDrag.includes("n")) y1 = Math.max(0, Math.min(relY, y2 - 0.02));
-      if (activeSpineDrag.includes("s")) y2 = Math.min(1, Math.max(relY, y1 + 0.02));
-
-      setCleanupModule((prev) => ({
-        ...prev,
-        spineBox: {
-          x1: Math.round(Math.min(x1, x2) * 1000) / 1000,
-          y1: Math.round(Math.min(y1, y2) * 1000) / 1000,
-          x2: Math.round(Math.max(x1, x2) * 1000) / 1000,
-          y2: Math.round(Math.max(y1, y2) * 1000) / 1000,
-        },
-      }));
+      const targetPageId = spineDragSideRef.current === "secondary" && secondaryPage ? secondaryPage.id : selectedPage?.id;
+      setCleanupModule((prev) => {
+        const isLinked = !isDualPage || prev.scope.mode !== "current" || (prev.scope.dualSides?.length ?? 2) >= 2;
+        const nextPageSpines = { ...(prev.pageSpineBoxes || {}) };
+        if (isLinked) {
+          if (selectedPage) nextPageSpines[selectedPage.id] = nextBox;
+          if (isDualPage && secondaryPage) nextPageSpines[secondaryPage.id] = nextBox;
+        } else if (targetPageId) {
+          nextPageSpines[targetPageId] = nextBox;
+        }
+        return {
+          ...prev,
+          spineBox: nextBox,
+          pageSpineBoxes: nextPageSpines,
+        };
+      });
     };
     const onUp = () => {
+      const moved = spineDragMovedRef.current;
       setActiveSpineDrag(null);
       spineDragStartRef.current = null;
+      spineDragMovedRef.current = false;
+      if (moved) {
+        onCommitBoxDrag?.("Adjust Spine Box");
+      }
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -673,7 +876,7 @@ export function BookWorkspace({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [activeSpineDrag, setCleanupModule]);
+  }, [activeSpineDrag, setCleanupModule, isDualPage, selectedPage, secondaryPage, onCommitBoxDrag]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -828,42 +1031,8 @@ export function BookWorkspace({
           rawImageSrc={getThumbnailUrl(selectedPage.id, false, 150)}
           secondaryImageSrc={secondaryPage ? getThumbnailUrl(secondaryPage.id, !isViewingOriginal, 150) : null}
           secondaryImageAlt={secondaryPage ? `Page ${pairStartIdx + 2}` : undefined}
-          onSelectPrimaryPage={() => {
-            if (isDualPage && secondaryPage && selectedPage && cropModule?.target.base === "current") {
-              const isDualLinked = (cropModule.target.dualSides?.length ?? 2) >= 2;
-              if (!isDualLinked && cropModule.target.dualSides?.[0] !== "left") {
-                focusCropPage?.(selectedPage.id, [selectedPage.id, secondaryPage.id]);
-                const priDraft = pageCrops?.[selectedPage.id];
-                setCropModule?.((prev) => ({
-                  ...prev,
-                  cropBox: priDraft?.cropBox ?? prev.cropBox,
-                  splitLines: priDraft?.splitLines ? priDraft.splitLines.map((l) => ({ ...l })) : prev.splitLines,
-                  splitPos: priDraft?.splitPos ?? prev.splitPos,
-                  target: { ...prev.target, dualSides: ["left"] },
-                }));
-              }
-            }
-          }}
-          onSelectSecondaryPage={
-            secondaryPage
-              ? () => {
-                  if (isDualPage && selectedPage && cropModule?.target.base === "current") {
-                    const isDualLinked = (cropModule.target.dualSides?.length ?? 2) >= 2;
-                    if (!isDualLinked && cropModule.target.dualSides?.[0] !== "right") {
-                      focusCropPage?.(secondaryPage.id, [selectedPage.id, secondaryPage.id]);
-                      const secDraft = pageCrops?.[secondaryPage.id];
-                      setCropModule?.((prev) => ({
-                        ...prev,
-                        cropBox: secDraft?.cropBox ?? prev.cropBox,
-                        splitLines: secDraft?.splitLines ? secDraft.splitLines.map((l) => ({ ...l })) : prev.splitLines,
-                        splitPos: secDraft?.splitPos ?? prev.splitPos,
-                        target: { ...prev.target, dualSides: ["right"] },
-                      }));
-                    }
-                  }
-                }
-              : undefined
-          }
+          onSelectPrimaryPage={() => selectDualSpreadSide("left")}
+          onSelectSecondaryPage={secondaryPage ? () => selectDualSpreadSide("right") : undefined}
           secondaryCropBox={secondaryCropBox}
           isSplitCurtain={isSplitCurtain}
           curtainPos={curtainPos}
@@ -883,11 +1052,19 @@ export function BookWorkspace({
           onApplyStraightenAngle={onApplyStraightenAngle}
           maskToolActive={maskToolActive}
           pageMasks={isViewingOriginal ? [] : visiblePageMasks}
+          secondaryPageMasks={isViewingOriginal ? [] : visibleSecondaryPageMasks}
+          primaryDraftMaskBox={isViewingOriginal ? null : primaryDraftMaskBox}
+          secondaryDraftMaskBox={isViewingOriginal ? null : secondaryDraftMaskBox}
+          primarySpineBox={isViewingOriginal ? null : primarySpineBox}
+          secondarySpineBox={isViewingOriginal ? null : secondarySpineBox}
           onApplyMaskBox={onApplyMaskBox}
           onRemoveMaskBox={onRemoveMaskBox}
           cropModule={cropModule}
           bleedModule={bleedModule}
           cleanupModule={cleanupModule}
+          restorationModule={restorationModule}
+          pageColorMode={selectedPage.color_mode ?? null}
+          secondaryPageColorMode={secondaryPage?.color_mode ?? null}
           onMaskPointerDown={handleMaskPointerDown}
           onSpinePointerDown={handleSpinePointerDown}
           splitLines={primarySplitLines}

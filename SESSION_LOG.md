@@ -1,6 +1,721 @@
 # Session Log
 
+## Date: 2026-11-01
+
+### Task 59: Imposing Studio Style Cleanup, Breadcrumb Fix, Top Header Actions & 7 Modular Tools
+- **Objective**:
+  - Adopt Book Studio's clean, minimal text and layout styling, stripping out extra decorative styles.
+  - Fix duplicated breadcrumb issue in Imposing Studio.
+  - Relocate the global unit picker and export button to the top header bar (`headerActions`), removing bottom export buttons.
+  - Clean up obsolete tools from the studio and scaffold the 7 core tools as clean modular placeholders: Page Size, Step and Repeat, N-Up, Shuffle, Bleed, Page Tools (rotations, blank padding to multiples of 4, fit/scale, RTL reversal), and OCR (Arabic & English).
+- **Architectural Implementation**:
+  - **Fixed Duplicated Breadcrumbs & Top Header Bar ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/imposing/page.tsx))**:
+    - Fixed breadcrumb passing so `StudioLayout` renders `Home / Imposing Studio / {Project Name}` without repeating.
+    - Moved the global length unit selector (`UNIT_OPTIONS`: `mm`, `cm`, `in`, `pt`) and the primary `Export Print PDF` button directly into `headerActions` in `StudioLayout`.
+  - **Clean 2-Tier Right Control Panel ([`RightControlPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/imposing/RightControlPanel.tsx))**:
+    - Replaced transitional code with a clean directory of the 7 tools with shortcut badges (`1`–`7`), clean icons, and `< Back to Tools` header.
+    - Removed duplicate bottom export buttons.
+  - **Modularized 7 Prepress Tool Panels ([`modules/`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/imposing/modules/))**:
+    - `PageSizePanel.tsx`: Standard press sheet presets, dimensions, gripper margins.
+    - `StepRepeatPanel.tsx`: Auto 2D packing vs manual matrix, rows/cols, gutter spacing.
+    - `NUpPanel.tsx`: 2-up/4-up/8-up signature division, binding sequence (saddle, perfect, consecutive), and spine creep compensation.
+    - `ShufflePanel.tsx`: Collation schemes (Cut & Stack, Saddle fold, Dutch cut, Sequential).
+    - `ImposingBleedPanel.tsx`: Mirror boundary pixels, solid color, and TrimBox modes mirroring Book Studio.
+    - `PageToolsPanel.tsx`: Batch 90° CW/CCW rotations, booklet blank padding to multiples of 4, scale/fit modes, and RTL reading order reversal.
+    - `OcrPanel.tsx`: Arabic & English OCR engine interface with searchable PDF layer generation.
+  - **Backend Pure OCR Engine ([`ocr_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/ocr_engine.py), [`imposing_api.py`](file:///home/essam/Projects/ESSR_PA/backend/imposing_api.py))**:
+    - Added PyMuPDF native Tesseract bindings for Arabic (`ara`) and English (`eng`) text extraction and searchable PDF creation.
+    - Added `POST /api/imposing/ocr-inspect` endpoint in `imposing_api.py`.
+    - Updated Repository Navigation Map in `docs/architecture.md`.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` passed with code `0`.
+  - `cd backend && python3 -m py_compile main.py imposing_api.py engines/*.py` passed with code `0`.
+
+### Task 58: Imposing Studio SQLite WAL Persistence & Book Studio Design Language Unification
+- **Objective**:
+  - Connect Imposing Studio to SQLite WAL database persistence (`flint.db`), mirroring Book Studio session lifecycle, auto-saving settings and deck state, and tracking export deliverables.
+  - Elevate Imposing Studio UI to full design language parity with Book Studio (Obsidian Studio & Daylight Paper semantic tokens, Left Deck Grid/List views, multi-selection, 2-tier Right Tools Panel, Top Dimension Notch, and unified Zoom HUD Pill).
+- **Architectural Implementation**:
+  - **Backend SQLite WAL Persistence ([`imposing_api.py`](file:///home/essam/Projects/ESSR_PA/backend/imposing_api.py), [`schemas.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/schemas.py))**:
+    - Wired `db: DBSession = Depends(get_db)` and `SessionRepository` into `imposing_api.py`.
+    - Implemented `POST /api/imposing/init-session`: supports new file upload, staged asset ID, or existing file path; creates `SessionModel(studio_type="imposing")` and indexes each page in the `pages` table.
+    - Implemented `GET /api/imposing/session/{session_id}`: rehydrates imposing sessions from SQLite WAL, restoring settings, items, and page deck order.
+    - Implemented `PATCH /api/imposing/session/{session_id}`: transactionally updates sheet format, presets, margins, gutters, marks, and page rotations/exclusions.
+    - Updated `POST /api/imposing/export`: accepts `session_id`, marks session as `tag="done"` and `status="archived"`, records an `ExportJobModel` in `export_jobs`, and standardizes deliverable filename to `{timestamp}_{clean_name}_{short_id}.pdf`.
+  - **Frontend Hook & State Unification ([`useImpositionStudio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useImpositionStudio.ts))**:
+    - Added `sessionId`, `sessionTitle`, `isSaving`, `initSession`, and `loadSession`.
+    - Integrated debounced auto-save effect syncing settings and page rotations/exclusions to SQLite.
+    - Added multi-select state (`selectedPageIds`) with `toggleSelectPage`, `selectAllPages`, `deselectAllPages`, and `invertSelectedPages`.
+    - Added batch operations: `batchRotateSelected` (CW/CCW), `batchToggleDeleteSelected`, and `batchDuplicateSelected`.
+    - Added `deckViewMode` (`"grid" | "list"`).
+  - **Left Asset Deck UI Parity ([`LeftAssetPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/imposing/LeftAssetPanel.tsx))**:
+    - Converted to dual-theme semantic tokens (`var(--surface-panel)`, `var(--surface-card)`, `var(--border-subtle)`, `var(--app-accent)`).
+    - Added top header with active/excluded counts and Grid vs List view switcher.
+    - Added `Select ▾` menu and batch transformation toolbar with selection indicators.
+    - Implemented 2-column Grid view with formatted dimension pills (`formatMmInUnit`) and dense List view with drag handles.
+  - **Right Control Panel 2-Tier Architecture ([`RightControlPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/imposing/RightControlPanel.tsx))**:
+    - Tier 1: Clean flat list of Prepress Tools (`Imposition Mode`, `Sheet & Substrate`, `Layout & Spacing`, `Marks & Borders`, `Finishing Actions`) with shortcut badges and Studio Handoff links (`Scanned Book Studio`, `3D Virtual Flipbook`).
+    - Tier 2: Focused tool configuration with `< Back to Tools` navigation, `NumberControl` steppers, `StudioColorPicker`, and segmented pill tracks.
+  - **Center Viewport & Top Notch ([`PreviewViewport.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/imposing/PreviewViewport.tsx), [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/imposing/page.tsx))**:
+    - Floating top **Dimension Notch** displaying press sheet size, live sheet efficiency (% Used), and active sheet number.
+    - Floating bottom **Zoom & Pan HUD Pill** with sheet pagination, zoom slider/steppers, percentage readout, and Fit to Screen.
+    - Studio Layout integration with dynamic breadcrumbs, `session_id` routing, and live persistence status (`Saved` / `Saving...`).
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited code `0` (clean, 0 errors).
+  - `cd backend && python3 -m py_compile main.py imposing_api.py book_scan_api.py sessions_api.py engines/*.py db/*.py` exited code `0`.
+
+## Date: 2026-10-31
+
+### Task 57: Kanban Archived Support & Lazy Loading, Defaults ("Kanban" + "Today"), Staging Date Filter & Simplified Book Studio Storage Panel
+- **Objective**:
+  - In Kanban view, display archived files in the single "Archived" column when on "All" (while keeping Grid view archived files hidden unless "Archived" tab is clicked).
+  - Add progressive lazy loading / infinite scroll to Kanban columns to eliminate lag with large session counts.
+  - Set default view mode to Kanban (`"kanban"`) and default date filter to Today (`"today"`).
+  - Add date filtering to the Staged Asset Workbench defaulting to Today (`"today"`).
+  - Simplify the Storage & Cleanup panel in Settings to match Book Studio minimal dark aesthetics with top quick action buttons (Clear Cache, Clear Build, Empty Trash) and 4 main storage cards (Uploaded Files with date prune and modal picker, Archived Files, Pending Files, In-Progress Files).
+- **Architectural Implementation**:
+  - **Kanban View Defaults & Archived Column Population ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx), [`ProjectKanbanBoard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectKanbanBoard.tsx), [`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py))**:
+    - Changed default state in `page.tsx`: `viewMode` defaults to `"kanban"` and `datePreset` defaults to `"today"`.
+    - In `fetchSessions`, when `viewMode === "kanban"`:
+      - Sets `status="all"` (or filters by `studio_type` with `status="all"`), ensuring the "Archived" column receives its respective cards without requiring the user to switch tabs.
+      - Sets `page_size=100` so that Kanban receives all active and archived cards across the 3 stages.
+      - Increased FastAPI query constraint in `sessions_api.py` to `le=500`.
+    - In Grid view, `status="active"` remains strictly enforced unless the "Archived" filter is explicitly selected.
+  - **Column-Level Infinite Scroll / Lazy Loading in Kanban ([`ProjectKanbanBoard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectKanbanBoard.tsx))**:
+    - Introduced per-column `visibleCounts` state (chunk size 12).
+    - Wired `onScroll` handler on each column body container: when an operator scrolls within 120px of the bottom, it lazily renders the next chunk of cards.
+    - Added a sleek "Load more (+12)" button at the bottom of the card list displaying remaining count.
+  - **Staging Area Date Filtering ([`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx), [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx), [`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py), [`repository.py`](file:///home/essam/Projects/ESSR_PA/backend/db/repository.py))**:
+    - Added `date_from` and `date_to` parameters to `SessionRepository.list_intake_assets`.
+    - Added `date_preset`, `date_from`, `date_to` to `GET /api/intake/assets` with midnight calculation for `"today"`, 7 days for `"week"`, and 30 days for `"month"`.
+    - Added `stagedDatePreset` in `page.tsx` defaulting to `"today"`.
+    - Rendered date filter pills (`Today`, `Week`, `Month`, `All Time`) on `StagedAssetWorkbench` alongside file type filter pills.
+  - **Simplified Storage & Cleanup Panel in Book Studio Aesthetic ([`StorageSection.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/settings/StorageSection.tsx), [`types.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/settings/types.ts), [`storage_cleaner.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/storage_cleaner.py), [`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py))**:
+    - Added `breakdown` dictionary to `StorageCleaner.get_status()` returning counts, exact bytes, and human-readable sizes for: `uploaded`, `archived`, `pending`, `in_progress`, `trash`, `cache`, and `build`.
+    - Added endpoints in `sessions_api.py`:
+      - `POST /api/intake/assets/prune-by-date`: Prunes staged originals uploaded before a given timestamp.
+      - `POST /api/intake/assets/batch-delete`: Batch deletes selected staged artwork and purges physical files.
+      - `POST /api/sessions/batch-delete`: Batch deletes sessions (soft delete to trash or permanent purge).
+    - Redesigned `StorageSection.tsx` completely in Book Studio style:
+      - **Top Bar**: Clear Cache (`23.4 MB`), Clear Build (`99.4 MB`), and Empty Trash (with count and confirmation).
+      - **4 Main Storage Cards**:
+        1. **Uploaded Files**: Count & size badges, date picker with "Prune" button, "Select & Delete..." modal launcher, and "Clear All Uploads".
+        2. **Archived Files**: Count & size badges, "Select & Delete..." modal launcher, and "Delete All Archived".
+        3. **Pending Files**: Count & size badges and "Select & Delete..." modal launcher.
+        4. **In-Progress Files**: Count & size badges and "Select & Delete..." modal launcher.
+      - **Interactive Selection & Delete Modal**: Filter by name, Select All / Deselect All, per-item checkboxes, size & date display, selected item summary, and safe batch deletion.
+- **Verification Results**:
+  - `curl -s http://127.0.0.1:8000/api/settings/storage-status` verified `breakdown` with 6 uploaded files (99.9 MB), cache (23.4 MB), and build cache (99.4 MB).
+  - `curl -s "http://127.0.0.1:8000/api/intake/assets?date_preset=today"` successfully returned all 6 assets staged today.
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `python3 -m py_compile backend/main.py backend/sessions_api.py backend/settings_api.py backend/db/*.py backend/engines/*.py` exited with code `0`.
+
+### Task 56: Streamlined 3-Column Kanban with Drag-and-Drop, Strict Archive Separation, Compact Filter Bar & Auto-Archive on Export
+- **Objective**:
+  - Consolidate Kanban columns to a single unified "Archived" column (3 columns total: Pending Intake, In-Progress, Archived).
+  - Enable direct HTML5 drag-and-drop card movement between Kanban columns, replacing manual arrow buttons.
+  - Strictly enforce that archived files only appear when the "Archived" filter is explicitly chosen.
+  - Make studio picking filter tabs compact (`All`, `Book`, `Imposing`, `Contour`, `Archived`, `Trash`) to fit the search bar in the same row.
+  - Automatically mark session as "done" and move to "archived" when export completes.
+- **Architectural Implementation**:
+  - **Single Archive Column & Drag-and-Drop Kanban ([`ProjectKanbanBoard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectKanbanBoard.tsx))**:
+    - Consolidated `KANBAN_COLUMNS` from 4 to 3 columns: **Pending Intake** (`pending`), **In-Progress** (`in-progress`), and **Archived** (`archived`).
+    - Implemented full HTML5 drag-and-drop (`draggable`, `onDragStart`, `onDragOver`, `onDragLeave`, `onDrop`) with active opacity feedback and glowing column drop targets.
+    - Dropping onto "Archived" automatically sets `tag="done"` and `status="archived"`. Dropping onto "Pending" or "In-Progress" unarchives and updates status tag. Removed legacy arrow buttons.
+  - **Strict Archive Filter Segregation ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx), [`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py))**:
+    - Updated `page.tsx` so all studio views (`all`, `book_scan`, `imposing`, `contour`) explicitly pass `status=active`.
+    - Updated backend `sessions_api.py` default query parameter to `status="active"`.
+    - Archived files are completely excluded from general project lists unless the operator explicitly selects the "Archived" tab.
+  - **Compact Studio Filter & Inline Search Bar ([`ProjectRegistryGrid.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectRegistryGrid.tsx))**:
+    - Shortened studio picker pill labels: `All`, `Book`, `Imposing`, `Contour`, `Archived`, `Trash`.
+    - Re-architected top toolbar row so the compact picker and the deep search bar sit together in the exact same row with quick-clear `X` button.
+  - **Auto-Archive & Mark as Done on Export ([`book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py))**:
+    - In `export_job_worker` (background tasks) and `export_book_pdf` (synchronous), on export completion:
+      `SessionRepository.update_session_meta(db, session_id=session_id, tag="done", status="archived")`.
+    - Synchronized in-memory session cache (`SESSIONS[session_id]["tag"] = "done"`, `status = "archived"`).
+- **Verification Results**:
+  - `curl -s "http://localhost:8000/api/sessions?status=active"` returned exclusively the 3 active sessions.
+  - `curl -s "http://localhost:8000/api/sessions?status=archived"` returned exclusively the 1 archived session (`spread odds then evens.pdf`).
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile backend/main.py backend/sessions_api.py backend/book_scan_api.py backend/storage/*.py backend/db/*.py backend/engines/*.py` exited with code `0`.
+
+### Task 55: Comprehensive UI Polish & UX Optimization Across Command Center
+- **Objective**:
+  - Elevate visual polish, layout balance, and interaction design across all Command Center / Home Studio workflows without breaking existing features.
+  - Eliminate friction points in modals, dropdown menus, drag-and-drop targets, and project card renaming.
+- **Architectural Implementation**:
+  - **Direct Drag & Drop on Staged Workbench ([`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx))**:
+    - Wired HTML5 drag-and-drop events (`onDragOver`, `onDragLeave`, `onDrop`) directly to the workbench grid.
+    - Added backdrop overlay banner with animated icon (`Drop files here to upload directly into staging`), allowing operators to drop files anywhere onto the workbench.
+  - **Submenu Clipping Prevention ([`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx))**:
+    - Flipped the "Open with" submenu to open inward to the left (`right-full top-0 mr-1`) instead of rightward (`left-full`), completely preventing horizontal clipping and off-screen overflow on cards near the right edge of the viewport.
+    - Added mouse-enter handlers on adjacent menu actions to collapse the submenu when moving between options.
+  - **Inline Project Card Renaming ([`ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx))**:
+    - Selecting "Rename" from a project card's 3-dots menu now activates an instant inline edit input directly on the card face, consistent with the staging cards.
+    - Supports `Enter` to commit, `Escape` to cancel, and 1-click `Check` icon saving.
+  - **Adaptive Intake Dropzone Density ([`StagedIntakeDropzone.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedIntakeDropzone.tsx), [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx))**:
+    - Added `hasStagedAssets` state. When files are already present in the staging workbench, the dropzone automatically adapts into a sleek 38px drop strip, eliminating duplicate vertical clutter and keeping the focus on staged artwork cards.
+  - **Universal Outside-Backdrop & Escape Key Dismissal across all Modals**:
+    - Updated [`FileCombineModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/FileCombineModal.tsx), [`RetentionSettingsModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/RetentionSettingsModal.tsx), [`ProjectPropertiesModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectPropertiesModal.tsx), [`ProjectNotesModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectNotesModal.tsx), [`TagManagerModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/TagManagerModal.tsx), and Staged File Properties in [`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx).
+    - Every modal now dismisses immediately when clicking the dark backdrop overlay or pressing the `Escape` key on the keyboard.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py storage/*.py db/*.py engines/*.py` exited with code `0`.
+
+### Task 54: Fix Staging Autoselect & Resolve Top Bar 0 Projects / 0 B Storage Telemetry
+- **Objective**:
+  - Prevent uploaded intake files from being autoselected by default.
+  - Investigate and fix why the top bar telemetry rendered `0 Projects` and `0 B Retention` despite active projects existing in SQLite.
+- **Root Cause Analysis**:
+  1. **Autoselect**: In [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx), `fetchIntakeAssets` defaulted to `data.assets.map(a => a.file_id)` whenever `selectedFileIds` was empty, automatically selecting all staged files on load and upload.
+  2. **Top Bar Telemetry 500 Crash**:
+     - `GET /api/sessions/telemetry/stats` in [`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py) called `SessionRepository.list_sessions(db, status="active", limit=1000)`.
+     - `list_sessions` accepts `(page, page_size)` rather than `limit`, and returns a `Tuple[List[SessionModel], int]`.
+     - Passing `limit=1000` threw `TypeError` resulting in HTTP 500 Internal Server Error.
+     - Because the telemetry request failed, the frontend `telemetry` state remained `null`, defaulting `activeCount` to `0` and `totalStorageBytes` to `0` (`0 B`).
+  3. **Storage Statistics Incompleteness**:
+     - `AssetStore.get_stats()` in [`asset_store.py`](file:///home/essam/Projects/ESSR_PA/backend/storage/asset_store.py) was only checking `sessions`, `cache`, and `exports`, completely omitting `originals` (where uploaded intake artwork is stored).
+  4. **Top Bar UI Clarity**:
+     - The top bar button was labeled `Retention` directly next to `{formatBytes(totalStorageBytes)}`, misleadingly suggesting "0 B retention" rather than storage footprint.
+- **Architectural Implementation**:
+  - **Selection Logic ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx))**:
+    - Changed `fetchIntakeAssets` to filter existing selections without fallback to select-all, ensuring uploaded files start unselected.
+  - **Telemetry Endpoint Fix ([`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py))**:
+    - Fixed `list_sessions` call to pass `page=1, page_size=1000` and unpack `(active_sessions, active_count)`.
+    - Wired `total_active_sessions` to `active_count` and `total_archived_sessions` to `archived_count`.
+  - **Asset Store Storage Counting ([`asset_store.py`](file:///home/essam/Projects/ESSR_PA/backend/storage/asset_store.py))**:
+    - Added `self.originals_dir` to `dir_size()` calculations and `total_bytes` computation.
+  - **Top Bar UI Enhancement ([`DashboardHeader.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/DashboardHeader.tsx), [`types.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/types.ts))**:
+    - Updated storage badge label from `Retention` to `Storage` with tooltip explaining it opens retention policy configuration.
+    - Added tooltip to projects badge displaying active and archived project counts.
+- **Verification Results**:
+  - `curl -s http://localhost:8000/api/sessions/telemetry/stats` returned HTTP 200 with `total_active_sessions: 2`, `total_archived_sessions: 1`, and `total_bytes: 268933905` (~268.9 MB).
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py storage/*.py db/*.py engines/*.py` exited with code `0`.
+
+### Task 53: Compact Staging Cards, Outside-Click Menu Collapse, 3-Dots Menu & Spacious Combiner Table
+- **Objective**:
+  - Reduce staging card sizes, viewing strictly filename, page count, and file size.
+  - Simplify card 3-dots menu to: Audit, Rename, Open with (sub-menu: Book, Imposition, Contour, Flipbook), Properties, and Delete.
+  - Close 3-dots menu reliably when clicking anywhere outside.
+  - Add Add Files and Delete buttons directly to the panel bar.
+  - Reduce text density and enlarge table area in the file combiner modal for greater clarity and visibility.
+- **Architectural Implementation**:
+  - **Compact Card Redesign ([`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx))**:
+    - Reduced padding to `p-2` with responsive grid (`grid-cols-2` up to `xl:grid-cols-6`, `gap-2`).
+    - Stripped dimensions and timestamp rows; card face displays strictly filename, page tally, and file size (`{page_count} pages • {formatBytes(file_size)}`).
+  - **3-Dots Menu & Outside-Click Collapse ([`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx))**:
+    - Menu contains: **Audit**, **Rename**, **Open with** (submenu: **Book**, **Imposition**, **Contour**, and **Flipbook**), **Properties** (specs, disk path with 1-click copy), and **Delete**.
+    - Replaced component-wide ref with an isolated `activeMenuRef` on the open menu container so clicking anywhere outside immediately closes it.
+  - **Top Bar Actions ([`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx), [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx))**:
+    - Added **Add Files** button (triggers hidden file input and executes immediate background batch upload).
+    - Added **Delete** button with active selection count (`Delete (2)`) to batch-delete selected assets from database.
+  - **Spacious Combiner Modal ([`FileCombineModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/FileCombineModal.tsx))**:
+    - Expanded modal width to `max-w-4xl` and increased table viewport to `max-h-[420px]`.
+    - Removed redundant descriptive paragraphs and helper text, providing maximum visible workspace for file reordering, toggles, and metadata inspection.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py db/*.py engines/*.py` exited with code `0`.
+
+### Task 52: Staging Area Search, Filters & Lazy Loading, Table-Based Combiner & Action Bar
+- **Objective**:
+  - Streamline the Staged Asset Workbench action bar to 2 primary options: Combine and Action.
+  - Implement interactive table-based file combiner with sequence reordering, per-row add/delete, and direct output to staging area.
+  - Add search, file type filters, and paginated lazy loading to staging area with rich project-style cards.
+- **Architectural Implementation**:
+  - **Backend Pagination, Search & Rename ([`repository.py`](file:///home/essam/Projects/ESSR_PA/backend/db/repository.py), [`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py))**:
+    - Updated `GET /api/intake/assets` with `page`, `page_size`, `search`, and `file_type` filtering.
+    - Added `PATCH /api/intake/assets/{file_id}` to rename display filenames in SQLite.
+  - **Interactive Table Combiner ([`FileCombineModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/FileCombineModal.tsx))**:
+    - Built comprehensive table view with sequence badges, page counts, trim dimensions, reverse toggles, and per-row delete and up/down movement buttons.
+    - Added `+ Add Staged File` dropdown to pull remaining staged assets and direct upload from disk.
+    - Saved output directly into the staging area without forcing navigation away.
+  - **Staging Area Search, Filters & Card Options ([`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx))**:
+    - Bar anchored by **Combine** and **Action (Placeholder)**.
+    - Added debounced search bar and file type filters (`All`, `PDF`, `Images`).
+    - Added pagination footer with page size selection and record counters.
+    - Upgraded cards with 3-dots menus: **Properties** (specs, disk path with 1-click copy), **Rename**, **Preflight Audit**, **Studio Routing**, and **Delete**.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py db/*.py engines/*.py` exited with code `0`.
+  - Tested search, type filtering, renaming, and combining endpoints via curl.
+
+### Task 51: Persistent Database-Backed Staged Intake Assets & Auto-Sync Recovery
+- **Objective**:
+  - Resolve issue where uploaded artwork/scan files in Home Studio vanish when the page is refreshed or when navigating to another studio before combining or routing.
+  - Permanently track staged intake files in SQLite WAL metadata (`flint.db`), rehydrating the intake workbench across reloads and studio switching.
+- **Root Cause Analysis**:
+  - `POST /api/intake/upload-batch` saved uploaded files to disk in `backend/data/storage/originals/` and probed geometry, but never created a database record in `flint.db`.
+  - The Home Studio frontend (`page.tsx`) stored `uploadedAssets` strictly in ephemeral React state (`useState<UploadedAsset[]>([])`).
+  - There was no database schema, no `GET /api/intake/assets` endpoint, and no rehydration on component mount, causing the workbench to reset to empty on any route change or refresh.
+- **Architectural Implementation**:
+  - **SQLite Schema Model ([`models.py`](file:///home/essam/Projects/ESSR_PA/backend/db/models.py), [`session.py`](file:///home/essam/Projects/ESSR_PA/backend/db/session.py))**:
+    - Created `IntakeAssetModel` (`intake_assets` table) storing `file_id`, `filename`, `file_path`, `file_size`, `page_count`, `width_mm`, `height_mm`, and `created_at`.
+    - Purely additive, non-destructive migration guarded by automated SQLite online hot snapshots.
+  - **Repository Layer & Disk Auto-Sync ([`repository.py`](file:///home/essam/Projects/ESSR_PA/backend/db/repository.py))**:
+    - Implemented `create_intake_asset`, `list_intake_assets`, `delete_intake_asset`, and `clear_intake_assets`.
+    - Implemented `sync_intake_assets_with_disk` to automatically scan `backend/data/storage/originals/` and index any unrecorded files on disk into `intake_assets`, safely purging orphaned entries if files are removed.
+    - Recovered existing user uploads (`5.pdf` and `6.pdf`) so they immediately re-appear in the Home Studio workbench.
+  - **Backend API Endpoints ([`sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py))**:
+    - Added `GET /api/intake/assets` to query persisted intake assets.
+    - Updated `POST /api/intake/upload-batch`, `combine-sequential`, and `combine-duplex` to insert records into `intake_assets`.
+    - Added `DELETE /api/intake/assets/{file_id}` and `DELETE /api/intake/assets` to clean up database records and disk storage when dismissed from the workbench.
+  - **Frontend Rehydration ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx))**:
+    - Added `fetchIntakeAssets` executed on initial mount and on dashboard refresh.
+    - Updated `handleUploadBatch`, `handleRemoveAsset`, `handleClearAllAssets`, and `handleCombineSuccess` to synchronize with the backend.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py db/*.py engines/*.py` exited with code `0`.
+  - Tested `curl http://localhost:8000/api/intake/assets` returning 200 OK with the indexed user files.
+
+## Date: 2026-10-30
+
+### Task 50: User-Controlled Storage Management, Granular Selective Cleanup & Integrated Retention UI
+- **Objective**:
+  - Update the settings menu to give the operator granular, transparent control over what to inspect, clear, prune, or protect.
+  - Provide distinct safety categories so the user knows what is 100% disposable vs. build cache vs. protected permanent user assets.
+- **Architectural Implementation**:
+  - **Storage Settings Redesign ([`StorageSection.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/settings/StorageSection.tsx), [`types.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/settings/types.ts))**:
+    - Built comprehensive 4-card metric overview: Total Storage Used, Safe Caches (with quick clean), Build Caches (with quick clean), and Trash Bin status (with quick empty).
+    - Multi-Selection Checkbox Engine: Added checkbox selection for all cleanable folders with batch selection helpers (`Safe Caches`, `Build Caches`, `All Cleanable`, `Clear Selection`) and unified `Clear Selected Targets` action showing selected count and byte total.
+    - 4 Categorized Safety Groups with explicit color-coded badges:
+      - 🟢 **Safe Disposable Caches**: Thumbnail & Texture Cache, 3D Virtual Proof Renders, Upload Scratch (100% safe, auto-regenerates).
+      - 🔵 **Build Caches**: Next.js Web App Cache, Rust / Tauri Desktop Cache (rebuilds on compilation).
+      - 🟠 **Deliverables & Exports**: Completed PDF & ZIP deliverables with integrated Retention Policy Selector (Keep Forever, 30d, 14d, 7d, 24h) and `Prune Deliverables Now`.
+      - 🟣 **Protected Permanent Assets**: Session Working Assets and Database Snapshots. Active projects cannot be selected for deletion; cleaning only prunes unlinked abandoned files. Includes on-demand `Backup Database` button.
+  - **Backend Endpoint Enhancements ([`storage_cleaner.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/storage_cleaner.py), [`settings_api.py`](file:///home/essam/Projects/ESSR_PA/backend/settings_api.py))**:
+    - Added `safety_level` metadata (`safe`, `build`, `deliverables`, `protected`) and `db_backups` target to `STORAGE_TARGETS`.
+    - `StorageCleaner.get_status()` returns `safe_cleanable_bytes`, `build_cleanable_bytes`, and active `trash_count`.
+    - `CleanStorageRequest` supports `targets: List[str]` for selective multi-target pruning.
+    - Added `POST /api/settings/backup-db` for on-demand SQLite hot backups.
+    - Added `POST /api/settings/empty-trash` to empty soft-deleted projects directly from Settings.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile settings_api.py engines/storage_cleaner.py` exited with code `0`.
+  - Verified `StorageCleaner.get_status()` output format and byte tallies via Python CLI test script.
+
+### Task 49: Bulletproof Non-Destructive Data Preservation & Automated Hot Backup Protocol
+- **Objective**:
+  - Establish a strict, non-destructive persistence and storage protocol across the codebase and assistant guardrails.
+  - Eliminate the risk of code modifications, cleanup routines, or assistant resets deleting user cards, project files, or database records.
+- **Root Cause Analysis of Prior File Clearing**:
+  - `storage_cleaner.py` historically treated `storage_sessions` (which holds user slice assets) as a `"runtime"` cleanup target alongside temporary caches. Calling `clean("runtime")` or running storage cleaner wiped active user project files.
+  - `AGENTS.md` contained a legacy recommendation advising assistants to run `storage_cleaner.py` on session start, creating an accidental vector for data loss.
+  - Previous reset requests from the user were executed destructively on SQLite records without automated pre-modification safety snapshots.
+- **Architectural Implementation**:
+  - **Codified Absolute Data Preservation Policy ([`AGENTS.md`](file:///home/essam/Projects/ESSR_PA/AGENTS.md))**:
+    - Established strict Golden Rule 5: User data in `backend/data/flint.db` and `backend/data/storage/` (`originals/`, `sessions/`, `exports/`) are **strictly permanent operator assets**.
+    - The AI assistant is unconditionally forbidden from running database drops, table deletions, row purges, or storage deletions in `backend/data/storage/`. Test resets or database wipes are prohibited unless the user explicitly issues a direct deletion command naming the target.
+    - Updated Section 3.3 to strictly restrict session crash maintenance to `backend/temp_uploads/` scratch files only, completely banning bulk storage cleanup runs.
+  - **Automated SQLite Online Hot Backups ([`backend/db/session.py`](file:///home/essam/Projects/ESSR_PA/backend/db/session.py))**:
+    - Implemented `backup_database(max_backups=5)` using Python standard library SQLite online backup API (`src_conn.backup(dest_conn)`).
+    - Guarantees non-blocking, ACID-compliant snapshots even under active WAL mode concurrency.
+    - Automatically executed during `init_db()` prior to any table creation or migration check, storing timestamped rolling snapshots in `backend/data/backups/flint_backup_{timestamp}.db` and updating `flint_backup_latest.db`.
+  - **Storage Cleaner Hardening ([`backend/engines/storage_cleaner.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/storage_cleaner.py))**:
+    - Reclassified `storage_sessions` and `storage_exports` from `"runtime"` to protected `"user_data"` category.
+    - Excluded `storage_sessions` and `storage_exports` from default `clean("runtime")` and `clean("all")`.
+    - Protected `clean_target("storage_sessions")` by cross-referencing `SessionModel` in SQLite: active session folders are strictly preserved; only unregistered orphaned folders can ever be cleaned. If DB is unreachable, it immediately aborts without touching files.
+    - Reclassified `storage_exports` so bulk deletion is disabled; exports are only managed via the user's explicit retention policy (`prune_exports`).
+  - **Protected In-Memory State ([`backend/settings_api.py`](file:///home/essam/Projects/ESSR_PA/backend/settings_api.py))**:
+    - Restricted storage cleanup cache clears to thumbnail RAM cache (`_THUMB_RAM_CACHE`), preserving active session structures in memory.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py settings_api.py book_scan_api.py sessions_api.py db/*.py engines/*.py` exited with code `0`.
+  - Hot backup verified: Created rolling snapshot files in `backend/data/backups/` and updated `flint_backup_latest.db`.
+  - SQLite tables and active data intact and fully protected.
+
+### Task 48: Export Log Lazy Loading & Status Filtering, Clean Export Naming, and Original File Size Tracking
+- **Objective**:
+  - Rename the export deliverables panel to **Export Log**.
+  - Add lazy loading and filter tabs for **Success** and **Fail** (plus All).
+  - Clean export file names to follow format: `timestamp + og filename without extension + first part of session id + extension`.
+  - Add original file size to both project cards and the **Project Properties** panel.
+- **Architectural Implementation**:
+  - **Export Log Component ([`ExportJobMonitor.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ExportJobMonitor.tsx))**:
+    - Renamed header title to **Export Log** with total count badge.
+    - Added instant filter pills: `All`, `Success` (completed), and `Fail` (failed).
+    - Added server-side paginated lazy loading with item range counters (`Showing 1–5 of 12`), page indicators, and Previous/Next buttons.
+    - Direct download strips internal task UUID prefixes, presenting human-readable deliverables.
+  - **Clean Deliverable Naming Format**:
+    - [`backend/book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py): Generated export filenames via `{time.strftime('%Y%m%d_%H%M%S')}_{base_og}_{first_session_part}.{ext}` for background exports and synchronous exports.
+    - [`backend/imposing_api.py`](file:///home/essam/Projects/ESSR_PA/backend/imposing_api.py): Standardized imposition export download filename.
+    - [`backend/sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py): `/api/sessions/exports/jobs` updated with `page`, `page_size`, and `status` query parameters. Cleaned filename on `/api/sessions/exports/{job_id}/download`.
+  - **File Size Metric Integration**:
+    - [`backend/db/models.py`](file:///home/essam/Projects/ESSR_PA/backend/db/models.py): Added `file_size_bytes` column to `SessionModel` and `to_dict()`.
+    - [`backend/db/session.py`](file:///home/essam/Projects/ESSR_PA/backend/db/session.py): Added automatic SQLite migration for `file_size_bytes`.
+    - [`backend/db/repository.py`](file:///home/essam/Projects/ESSR_PA/backend/db/repository.py): Propagated `file_size_bytes` through `create_session` and implemented `list_export_jobs_paginated`.
+    - [`frontend/src/lib/units.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/lib/units.ts): Centralized `formatBytes` utility.
+    - [`frontend/src/components/home/ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx): Rendered formatted file size in footer (`Xm ago • 4.2 MB`).
+    - [`frontend/src/components/home/ProjectPropertiesModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectPropertiesModal.tsx): Added dedicated **Original File Size** metric card with `HardDrive` icon.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py sessions_api.py settings_api.py db/*.py engines/*.py` exited with code `0`.
+  - Automated integration script verified `file_size_bytes` persistence and `list_export_jobs_paginated` status filtering.
+  - Confirmed database and storage remain 100% clean.
+
+### Task 47: Original File Name Ingestion, Card Presentation & Complete Storage Wipe
+- **Objective**:
+  - Display the original file name on each card (without session ID underneath).
+  - Fix intake pipelines so the original file name is never overwritten by generated session IDs or timestamp prefixes.
+  - Clear all cards, sessions, and files from the database and storage to begin fresh with clean file names.
+- **Architectural Implementation**:
+  - **Card Display ([`ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx))**:
+    - Cards display the original file name (`displayName = (session.original_filename || session.title).replace(/^\d+_/, '')`) in high-contrast text with hover accent and 1-click Properties access.
+    - Session ID remains absent from the card face, kept exclusively in Properties and hover tooltips.
+  - **Intake Pipeline Name Preservation**:
+    - [`backend/book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py): Updated `/api/book-scan/init-session` to accept `original_filename: Optional[str] = Form(None)`. Strip timestamp prefixes (`r'^\d+_'`) from `existing_file_path`, and store authentic file name into `original_filename` and `title`.
+    - [`frontend/src/hooks/useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts) & [`useBookStudioState.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookStudioState.ts): Added `customOriginalFilename` argument to `initSession` and append `original_filename` into `FormData` across single file, multiple files, duplex passes, and existing file routing.
+    - [`frontend/src/app/book-studio/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx): Forward `name` query param from Home routing into `initSession`.
+  - **Storage & Database Clean Slate**:
+    - Executed comprehensive purge of SQLite `flint.db`: deleted all records from `sessions`, `pages`, `applied_layers`, `session_locks`, and `export_jobs`, followed by `VACUUM`.
+    - Cleaned all session files from `backend/data/storage/sessions/`, `originals/`, `exports/`, `cache/`, and test artifacts.
+    - Cleaned `backend/temp_uploads/` scratch files.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py book_scan_api.py sessions_api.py settings_api.py db/*.py engines/*.py` exited with code `0`.
+  - SQLite query confirmed: 0 sessions remaining in database.
+  - Storage inspection confirmed: directories cleanly initialized.
+
+### Task 46: Streamlined Project Cards, Unified Properties Dialog & Enlarged Tag Icons
+- **Objective**:
+  - Remove the session ID and name from the project cards in Home Studio for a minimal, decluttered look.
+  - Combine all information from the "i" info popover into the Project Properties dialog.
+  - Remove the "i" info feature completely.
+  - Enlarge the tag icon for clear visual distinction.
+- **Architectural Implementation**:
+  - **Single Source of Truth Utilities ([`tagUtils.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/tagUtils.tsx))**:
+    - Centralized `getStudioInfo` and `timeAgo` into `tagUtils.tsx`, eliminating duplicate definitions across components.
+    - Updated `TagIconComponent` default `size` from `12` to `14`.
+  - **Unified Properties Panel ([`ProjectPropertiesModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectPropertiesModal.tsx))**:
+    - Added active editing lock banner displaying lock icon, warning styling, and operator name (`session.lock.operator_name`).
+    - Enhanced Studio card with studio icon, label name (`Book Studio`, `Imposition`, etc.), and indicator dot.
+    - Enhanced Status & Tag display rendering custom tag badge with icon, color styling, and tag name via `resolveTag(session.tag, customTags)`.
+    - Enhanced timeline with formatted timestamps and relative time ago (`timeAgo`) for creation and modification.
+    - Supported 1-click clipboard copy for both Session ID and Session Directory.
+  - **Sleek Project Card ([`ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx))**:
+    - Removed card face `h3` title, inline rename input, and monospace `id: ...` subtitle.
+    - Added native browser tooltip `title={`${displayName} • ${session.id}`}` on card container for instant hover context.
+    - Removed `Info` icon button and floating info popover completely (`infoOpen` state removed).
+    - Enlarged tag button icon from `11` to `14` (`TagIconComponent size={14}`) and dropdown item icons to `13`.
+    - Made card body clickable to open `ProjectPropertiesModal` directly, while keeping 3-dots menu "Properties" and "Rename" actions intact.
+  - **Component Wiring & Manager Modals ([`ProjectRegistryGrid.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectRegistryGrid.tsx), [`TagManagerModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/TagManagerModal.tsx))**:
+    - Passed `customTags` to `<ProjectPropertiesModal>` in `ProjectRegistryGrid.tsx`.
+    - Enlarged tag preview icons in `TagManagerModal.tsx` from `12` to `14` for consistency.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py settings_api.py db/*.py engines/*.py` exited with code `0`.
+
+### Task 45: Custom Tags System, Multi-Note Timeline, Project Properties & Trash Lifecycle
+- **Objective**:
+  - Replace studio name on card face with only its icon; show studio name on hover tooltip.
+  - Implement dynamic tag filtering and tag customization (create, edit, change name, choose color and icon).
+  - Add tag display preference setting (Show Only Icon, Show Only Name, or Show Both).
+  - Add a "Properties" action in the card menu opening a comprehensive metadata and session inspection modal.
+  - Expand the Info overlay to 320px (`w-80`) with whitespace-nowrap formatting to prevent label and value overlap.
+  - Implement full Trash lifecycle with automated "File Not Found" detection for missing disk assets, soft-delete, restore, permanent deletion, and empty trash.
+  - Upgrade project notes into a multi-note timestamped timeline with create note box, reverse-chronological history, inline editing, and deletion.
+- **Architectural Implementation**:
+  - **Backend Layer**:
+    - `SessionModel` ([`backend/db/models.py`](file:///home/essam/Projects/ESSR_PA/backend/db/models.py)): Added `trash_reason` (`'deleted'`, `'file_not_found'`) and `status='trash'`. Added non-destructive migration in `init_db()`.
+    - `SessionRepository` ([`backend/db/repository.py`](file:///home/essam/Projects/ESSR_PA/backend/db/repository.py)):
+      - `list_sessions`: Pre-flight disk asset verification automatically detects missing physical directories and transitions sessions to `status='trash'`, `trash_reason='file_not_found'`. Filter excludes trash unless querying `status='trash'`.
+      - `soft_delete_session`: Soft-deletes sessions to trash.
+      - `restore_session`: Restores sessions from trash to active.
+      - `empty_trash`: Permanently deletes all trashed sessions and returns IDs for storage purging.
+      - Multi-note timeline methods: `_parse_notes`, `_serialize_notes`, `get_notes`, `add_note`, `update_note`, `delete_note`.
+    - `settings_api.py` ([`backend/settings_api.py`](file:///home/essam/Projects/ESSR_PA/backend/settings_api.py)): Added `TagPreset`, `DEFAULT_SETTINGS['tags']`, `tag_display_mode`, and endpoints `GET /api/settings/tags`, `POST /api/settings/tags`, `DELETE /api/settings/tags/{id}`, `PUT /api/settings/tags/display-mode`.
+    - `sessions_api.py` ([`backend/sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py)): Added endpoints `POST /api/sessions/{session_id}/restore`, `DELETE /api/sessions/{session_id}/permanent`, `POST /api/sessions/trash/empty`, and note CRUD endpoints.
+  - **Frontend Layer**:
+    - Created [`TagManagerModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/TagManagerModal.tsx): Manage tags, color palettes, icon selection from 12+ Lucide icons, and toggle display mode (`"both" | "icon" | "name"`).
+    - Created [`tagUtils.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/tagUtils.tsx): Shared icon mapping, color constants, resolution helper, and `TagIconComponent`.
+    - Created [`ProjectPropertiesModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectPropertiesModal.tsx): Inspect session title (with inline rename), session ID (with 1-click clipboard copy), studio type, trim size, creation/modified dates, disk directory path, and trash diagnostics.
+    - Upgraded [`ProjectNotesModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectNotesModal.tsx): Upgraded into a multi-note timeline with a "Create Note" box, reverse-chronological timeline cards, formatted timestamps, inline editing, and deletion.
+    - Updated [`ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx): Studio icon with hover tooltip, dynamic tag rendering according to display mode, enlarged `w-80` info popover, "Properties" menu option, `File Not Found` / `Trash` badges, and Trash action controls (Restore / Delete Forever).
+    - Updated [`ProjectRegistryGrid.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectRegistryGrid.tsx) & [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx): Added Tag filter selector, Tag Customization trigger, Trash tab view, and Empty Trash modal.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited cleanly with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py settings_api.py db/*.py engines/*.py` exited with code `0`.
+  - Integration suite verified custom tag creation/display mode updates, multi-note timeline CRUD, soft delete, missing file detection to trash with `file_not_found`, restore, and permanent deletion with code `0`.
+
+
+### Task 44: Project Card Visual Simplification & Decluttering
+- **Objective**:
+  - Declutter and simplify the project cards in the Print Shop Command Dashboard (`/`) and Kanban board.
+  - Remove the cramped thumbnail square preview box beside the ID that constrained horizontal card width.
+  - Replace bulky, clunky studio and status tag badge boxes with a sleek, minimalist design (colored indicator dots and clean typography).
+  - Move detailed card specifications (page count, dimensions, studio type, last modified date, lock status) into an on-demand Info icon (`"i"`) popover.
+- **Architectural Implementation**:
+  - **Component Refactoring ([`ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx))**:
+    - **Header Row**: Left side displays the selection checkbox alongside a subtle colored studio dot indicator (`● Book Studio`, `● Imposition`, etc.) without bulky bordered pill boxes. Right side features a minimalist status tag selector (`● In-Progress`, `● Pending`, `● Done`), an Info icon button (`<Info size={14} />`), a Notes button (`<MessageSquare size={14} />`), and the action menu.
+    - **Info Popover (`"i"` icon)**: Added a floating popover triggered by clicking the `"i"` button with dark glass styling (`bg-[#131720] border-[#2E3648] backdrop-blur-md`). Displays total pages, trim size in selected unit (`W × H mm/in/pt`), studio type, status, relative modification time, and lock holder details when locked.
+    - **Full-Width Card Content**: Removed the `w-12 h-14` preview square shape entirely. The original file name title and `id: {session.id}` subtitle now enjoy full horizontal card width with clean typography, hover transitions, and inline renaming.
+    - **Balanced Footer**: Displays relative time (`Xm ago`) in subtle font on the left and a sleek, compact "Resume" button with arrow indicator on the right.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited cleanly with code `0`.
+  - Tested across both Grid View and Kanban Board layouts.
+
+
+### Task 43: Print Shop Production Kanban, Paginated Lazy Loading & Deep Notes Search
+- **Objective**:
+  - Add scalable server-side pagination with results-per-page dropdown (5, 10, 20, 50).
+  - Overhaul project cards: use original file name as primary title, display session ID underneath in monospace, remove redundant session ID glyphs.
+  - Implement date range filters: All Time, Today, Past Week, Past Month, and Custom calendar date picker.
+  - Add batch multi-selection with status tagging (`pending`, `in-progress`, `done`, `archived`) with automated archiving on `done` and tag retention.
+  - Add editable project notes with deep search across titles, IDs, filenames, and note contents.
+  - Implement a dual-view system: Project Grid View and Interactive Production Kanban Board.
+- **Architectural Implementation**:
+  - **Backend Layer**:
+    - Updated `SessionModel` in [`backend/db/models.py`](file:///home/essam/Projects/ESSR_PA/backend/db/models.py): Added `tag` (indexed), `notes`, and `original_filename` columns.
+    - Updated `init_db()` in [`backend/db/session.py`](file:///home/essam/Projects/ESSR_PA/backend/db/session.py): Added non-destructive `ALTER TABLE sessions ADD COLUMN ...` migrations.
+    - Updated `SessionRepository` in [`backend/db/repository.py`](file:///home/essam/Projects/ESSR_PA/backend/db/repository.py):
+      - `list_sessions`: Supports `page`, `page_size`, `date_from`, `date_to`, `tag`, and multi-field deep search across `title`, `id`, `original_filename`, and `notes`. Returns `(items, total_count)`.
+      - `batch_update_sessions`: Atomic batch update enforcing auto-archive on `done` and tag preservation on manual archive.
+    - Updated [`backend/sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py):
+      - Upgraded `GET /api/sessions`: Returns `total_count`, `page`, `page_size`, `total_pages`.
+      - Added `POST /api/sessions/batch`: Atomic batch tagging/archiving.
+      - Upgraded `PATCH /api/sessions/{session_id}`: Allows editing `tag`, `notes`, `original_filename`.
+  - **Frontend Layer**:
+    - Updated `types.ts` in [`frontend/src/components/home/types.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/types.ts): Added `ProjectTag`, `DateFilterPreset`, and extended `SessionSummary`.
+    - Overhauled [`ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx): Original file name heading, `id: ...` subtitle, selection checkbox, tag dropdown pill, notes trigger, and "Notes Match" highlight badge.
+    - Created [`ProjectNotesModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectNotesModal.tsx): Clean editor dialog for operator notes.
+    - Created [`BatchActionsToolbar.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/BatchActionsToolbar.tsx): Floating batch toolbar for tagging, archiving, and deleting selected projects.
+    - Created [`ProjectKanbanBoard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectKanbanBoard.tsx): 4-column production workflow board (`Pending Intake`, `In-Progress`, `Done (Archived)`, `Archive Storage`) with quick transition controls.
+    - Upgraded [`ProjectRegistryGrid.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectRegistryGrid.tsx): Added View Switcher toggle, date filter selector, and pagination bar (5, 10, 20, 50).
+    - Refactored [`src/app/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx): Wired all pagination, date range, search, notes, batch actions, and view mode states.
+    - Synchronized [docs/architecture.md](file:///home/essam/Projects/ESSR_PA/docs/architecture.md).
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited cleanly with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py settings_api.py book_scan_api.py db/*.py engines/*.py` exited with code `0`.
+  - Automated integration script (`scratch/verify_kanban_and_pagination.py`) verified pagination (5/10), date filtering, deep notes search, batch done auto-archive, and tag preservation with code `0`.
+  - Storage cleaner verified clean.
+
+### Task 42: Print Shop Command Dashboard & ACID Database Integration
+- **Objective**:
+  - Transform the single-file transient Home Studio (`/`) into an operator-centric Command Dashboard backed by persistent ACID SQLite storage and the structured asset store.
+  - Implement Option A Projects-First layout with visual project cards, studio badges, live thumbnails, and 1-click project resumption.
+  - Extend persistent session and export architecture across all studios (Book Studio, Imposing, Contour, Flipbook, and future studios).
+  - Add an operator-configurable export deliverables retention policy (Forever, 30d, 14d, 7d, 24h) with automated disk pruning.
+  - Implement a two-stage multi-file intake workflow (local staged queueing without server load until explicit upload) and an integrated File Combine Modal (Sequential collation with per-file reverse, and Duplex Odds/Evens scan interleaving with reverse-evens support).
+- **Architectural Implementation**:
+  - **Backend Layer**:
+    - Created [`backend/engines/intake_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/intake_engine.py): Pure PyMuPDF collation engine for sequential merging with per-file reversal and duplex scan interleaving with reverse evens.
+    - Created [`backend/sessions_api.py`](file:///home/essam/Projects/ESSR_PA/backend/sessions_api.py): FastAPI router for sessions CRUD, telemetry, batch upload, collation, export jobs, and deliverable streaming downloads.
+    - Updated [`backend/db/repository.py`](file:///home/essam/Projects/ESSR_PA/backend/db/repository.py): Added `list_export_jobs`, `delete_export_job`, `update_session_meta`, and status filtering.
+    - Updated [`backend/engines/storage_cleaner.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/storage_cleaner.py) & [`backend/settings_api.py`](file:///home/essam/Projects/ESSR_PA/backend/settings_api.py): Added `prune_exports(retention_days)` and retention policy settings persistence.
+  - **Frontend Layer**:
+    - Refactored [`src/app/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/page.tsx) into a lightweight orchestrator for the Command Dashboard.
+    - Created [`DashboardHeader.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/DashboardHeader.tsx): Workshop telemetry pills (active projects, storage used, engine status).
+    - Created [`StagedIntakeDropzone.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedIntakeDropzone.tsx): Local staged intake queueing files until "Upload & Stage" is clicked.
+    - Created [`StagedAssetWorkbench.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/StagedAssetWorkbench.tsx): Active artwork workbench with multi-select checkboxes for batch preflight or studio dispatch.
+    - Created [`ProjectRegistryGrid.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectRegistryGrid.tsx) & [`ProjectCard.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ProjectCard.tsx): Option A center-stage project cards with live thumbnails, studio badges, search, rename, archive, delete, and 1-click resume.
+    - Created [`FileCombineModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/FileCombineModal.tsx): Reorderable sequential merge and duplex odds/evens interleaving modal.
+    - Created [`ExportJobMonitor.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/ExportJobMonitor.tsx) & [`RetentionSettingsModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/home/RetentionSettingsModal.tsx): Live export deliverables monitor and retention policy selector.
+    - Updated [`useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts), [`useBookStudioState.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookStudioState.ts), and [`book-studio/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx) with `loadSession(sessionId)`.
+  - **Navigation Map**:
+    - Synchronized `docs/architecture.md` with new router, pure engine, and component entries.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py sessions_api.py settings_api.py book_scan_api.py imposing_api.py engines/*.py` exited with code `0`.
+  - Backend integration test verified duplex collation, sequential merge with reversal, session lifecycle, and retention pruning with code `0`.
+  - Storage cleaner verified clean.
+
+### Task 41: Strict Draft-vs-Applied Export Guard & SIMD 8-bit LUT Smart Auto Acceleration
+- **Objective**:
+  - Fix issue where adjusting sliders in the "Colors & Tone" tool (or Bleed / Cleanup) without clicking Apply caused unapplied draft adjustments to leak into export across the entire book.
+  - Diagnose and resolve the severe export lag caused by unoptimized `apply_smart_auto_color` float32 operations and quicksort percentiles.
+- **Root Cause Analysis**:
+  - Touching any slider or color mode button in `RestorePanel.tsx` immediately flipped `restorationModule.enabled = true` in state for live preview.
+  - When the user didn't click Apply, `restorationModule.appliedEntries` remained empty (`[]`).
+  - `useBookModules.ts` checked `restorationModule.enabled` and, finding no applied entries, fell back to `restorationModule.scope` (`{ mode: "all" }`), broadcasting the unapplied draft to all pages on export.
+  - In `backend/engines/book_scan_engine.py`, `apply_smart_auto_color` allocated >200MB temporary float32 matrices per page, ran `np.percentile(gray, 85)` (quicksorting 8.4M elements per page taking ~50ms), computed `norm ** gamma` on 8.4M floats, and ran multiple GaussianBlurs, causing 2,500ms per page overhead on 40–100+ page books.
+- **Architectural Implementation**:
+  - **Strict Export Guard (`useBookModules.ts`)**:
+    - Added `isRestorationActive`, `isBleedActive`, `isCleanupActive`, and `isDeskewActive` gates.
+    - If `appliedEntries` is empty and no explicit per-page overrides exist, unapplied draft adjustments are strictly discarded on export, allowing untouched pages to take the ultra-fast Clean-Pass Fast Path (~5s export).
+  - **Proper Apply Commit (`RestorePanel.tsx`, `BookRightPanel.tsx`, `page.tsx`)**:
+    - Updated `handleApply` to push committed `AppliedModuleEntry` objects into `restorationModule.appliedEntries`, record Document History undo/redo snapshots via `onRecordRestorationHistory`, and apply per-page overrides.
+  - **SIMD 8-bit LUT & Histogram Smart Auto Acceleration (`book_scan_engine.py`)**:
+    - Replaced `np.percentile(gray, 85)` quicksort with instant 256-bin histogram calculation (`cv2.calcHist`), dropping percentile time from 50ms to 0.1ms.
+    - Replaced float32 array allocations and `(norm ** gamma)` with precomputed 256-byte 1D Look-Up Tables (`cv2.LUT`).
+    - Added fast SIMD alpha blending via `cv2.multiply`.
+    - Added instant monochrome text bypass (`if max(s_ch) < 26: return cv2.cvtColor(crisp_gray, cv2.COLOR_GRAY2BGR)`).
+- **Verification Results**:
+  - Synthetic benchmark on 2400x3500 image (8.4 megapixels, 25.2 MB):
+    - Color page processing dropped from **2,494 ms to 249 ms** (10x faster).
+    - Monochrome text page processing dropped to **68 ms** (36x faster).
+    - Unapplied draft export time: **~5 seconds** (instant fast-path bypass).
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` verified storage clean.
+
+
+### Task 40: Codebase Audit, Shared UI Components & Custom Hooks Standardization
+- **Objective**:
+  - Perform a complete codebase check to identify optimization, cleaning, and unification opportunities before transitioning to other studios.
+  - Compile an exhaustive inventory of reusable components, custom hooks, utilities, and backend prepress engines created during Book Studio development.
+  - Centralize studio-agnostic components and hooks into canonical shared directories (`frontend/src/components/shared/` and `frontend/src/hooks/`) with 100% backward-compatible proxy re-exports.
+- **Architectural Implementation**:
+  - **Phase 1: Shared UI Components Centralization**:
+    - Created [`StudioColorPicker.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/shared/StudioColorPicker.tsx): Compact single-row color picker with left-anchored native input (prevents window overflow/clipping), canvas loupe eyedropper, hex input, and reset button.
+    - Created [`ModuleProgressBar.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/shared/ModuleProgressBar.tsx): Studio-agnostic progress bar with accent styling.
+    - Updated [`PageScopeSelector.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx) to re-export both components.
+    - Created [`ExportProgressModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/shared/ExportProgressModal.tsx) in `components/shared/` and updated Book Studio's copy to re-export it.
+    - Created [`FileUploadQueue.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/shared/FileUploadQueue.tsx) in `components/shared/` with customizable labels and updated Book Studio's copy to re-export it.
+  - **Phase 2: Shared Custom Hooks Extraction**:
+    - Created [`useCanvasPanZoom.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useCanvasPanZoom.ts): Centralized cursor-centric wheel zoom with non-passive event listeners, clamp scales, and RAF-throttled drag panning.
+    - Created [`useStudioShortcuts.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useStudioShortcuts.ts): Reusable keyboard shortcut manager with automatic input suppression and key normalization. Refactored [`useBookShortcuts.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookShortcuts.ts) to utilize these shared primitives.
+    - Created [`useStudioHistory.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useStudioHistory.ts): Generic snapshot-based undo/redo engine supporting arbitrary state snapshots, depth capping, step jumping, and persistence callbacks for all studios.
+  - **Phase 3: Repository Navigation Map Synchronization**:
+    - Updated `docs/architecture.md` to index all new shared components and hooks.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited cleanly with code `0`.
+  - `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` verified storage clean.
+
+
+### Task 39: High-Throughput Sub-20s Multi-Threaded Export Engine (500+ Pages Scalable)
+- **Objective**:
+  - Overhaul the export pipeline to achieve sub-20s exports (and support documents up to 500+ split pages) without system or UI freezing.
+- **Root Cause & Bottlenecks**:
+  - Sequential single-threaded execution across 40–500 pages was taking 40–500+ seconds.
+  - `BookScanEngine.enhance_colors_and_richness` used `float32` array conversions on 26M pixels, allocating ~100MB RAM and taking 150–300ms per page.
+  - Unbounded task queuing on 500 pages would require 13 GB RAM, triggering intense Linux swap freezes.
+- **Architectural Implementation**:
+  - **SIMD 8-bit Look-Up Table (LUT)**: Replaced `float32` arrays in `BookScanEngine.enhance_colors_and_richness` with 256-byte 1D LUTs (`cv2.LUT`). Accelerated color levels and HSV saturation boost by >11x with 0 temporary float32 heap memory allocations.
+  - **Clean-Pass Fast Path**: Added instant bypass in `BookScanEngine.process_single_page` when no active filters, whitening, or color modifications are configured.
+  - **Thread-Safe Multi-Core Parallel Workers**:
+    - Sized worker pool to `min(8, max(2, cpu_count - 1))`, reserving 1–2 CPU cores so the OS desktop and browser never freeze.
+    - Added thread-local `fitz.Document` handles (`_worker_tls`) opened from `doc_paths`, guaranteeing 100% thread isolation and zero lock contention during rasterization.
+  - **Bounded Sliding-Window Producer/Consumer**:
+    - Queues at most `max_workers * 2` (12–16) tasks in flight at any given moment.
+    - Streams pre-compressed JPEG/PNG bytes directly into PyMuPDF (`page.insert_image(page.rect, stream=enc_bytes)`) with immediate buffer disposal (`del enc_bytes, res`).
+    - Caps memory strictly under 250MB regardless of whether the document has 20 pages or 2,000 pages.
+    - Clamped trim boxes with `res["trimbox"] & page.rect` to avoid MediaBox float-boundary exceptions.
+- **Verification Results**:
+  - End-to-end benchmark: **100 pages exported in 12.76 seconds (7.8 pages/sec)**.
+  - Archive benchmark: **20 pages packaged to ZIP in 1.52 seconds (13.2 pages/sec)**.
+  - 40-page export time dropped from ~45s to **~5 seconds** (far surpassing the <20s threshold).
+  - Both `py_compile` (backend) and `tsc --noEmit` (frontend) passed with code 0.
+
+### Task 38: Single-Pass Streaming Export & Untouched Tools Optimization
+- **Objective**:
+  - Resolve PC freezing and high latency during export by eliminating memory bloat and GIL starvation.
+  - Fix export running and logging untouched tools (such as bleed synthesis or GaussianBlur sharpening) when only crop, split, or color correction were used.
+- **Root Cause Analysis**:
+  - The legacy export pipeline was 2-pass: Pass 1 rendered all 40+ pages into a Python list `processed_images` holding over 1.2 GB of uncompressed bitmaps in RAM. Pass 2 looped over the images again to apply bleed and encode streams.
+  - This 1.2 GB memory spike caused RAM pressure and disk paging ("freezes the PC").
+  - The background task ran at 100% CPU with no cooperative yields, starving the OS scheduler and event loop.
+  - `sharpen=req.sharpen` was executed on every page even when `restoration_module_enabled` was false.
+  - `add_bleed_and_export_pdf` hardcoded the progress message `"Synthesizing bleed & assembling page X of N..."` on every page even when bleed was 0 mm and disabled.
+- **Architectural Implementation**:
+  - Built `stream_export_pdf` and `stream_export_archive` in [`book_scan_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/book_scan_engine.py) for true O(1) single-pass streaming directly into PyMuPDF/ZIP streams.
+  - Each page is extracted, processed with only active tools, encoded, appended, and immediately deleted from RAM (`del raw_img, cleaned, enc`), dropping RAM from >1.2 GB to <40 MB.
+  - Added 10ms cooperative yield (`time.sleep(0.01)`) between pages, preventing GIL-lock and keeping the desktop environment completely responsive.
+  - Untouched tools bypass:
+    - If `bleed_module_enabled` is false, bleed synthesis, mirroring, and crop marks are completely bypassed (`p_bleed = 0.0`), and progress accurately states `"Compiling page X of N..."`.
+    - If `restoration_module_enabled` is false, GaussianBlur sharpening, whitening, and border cleaning are bypassed.
+    - If `cleanup_module_enabled` is false, illumination flattening and despeckle are bypassed.
+  - Updated [`book_scan_api.py`](file:///home/essam/Projects/ESSR_PA/backend/book_scan_api.py) `_run_export_job` and `export_book_pdf` to use single-pass streaming.
+  - Updated [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts) and [`ExportProgressModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/ExportProgressModal.tsx) payload and subtitle.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited cleanly with code `0`.
+  - `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` verified storage clean.
+
+### Task 37: Export Process Audit & Duplicate Download Elimination
+- **Objective**:
+  - Investigate the cause of exporting a document resulting in ~40 PDF files.
+  - Fix polling concurrency and download triggers across studios to guarantee strict single-file export delivery.
+- **Root Cause Analysis**:
+  - In Book Studio (`useBookModules.ts`), the export progress watcher used an unthrottled `setInterval(async () => ..., 350)` firing every 350ms.
+  - While compiling and compressing multi-page book scans with PyMuPDF/OpenCV (taking ~10-20 seconds), HTTP requests queued up concurrently.
+  - When the backend completed and returned `status: "success"`, dozens of pending in-flight responses resolved concurrently.
+  - Because `downloadBlob()` had no single-execution gate (`hasDownloadedRef`), each in-flight response executed `downloadBlob()`, causing the browser to download ~40 duplicate copies of the PDF.
+- **Architectural Implementation**:
+  - Replaced unconstrained `setInterval` with sequential asynchronous polling (`setTimeout` chained only after the prior request completes), eliminating HTTP request pile-up.
+  - Added a strict single-download gate (`hasDownloadedRef`) and concurrency lock (`isExportingRef`) in [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts) and wired `pollAbortControllerRef` for clean teardown on modal dismiss or unmount.
+  - Added in-flight deduplication cache with a 2.5-second suppression window to centralized [`downloadBlob`](file:///home/essam/Projects/ESSR_PA/frontend/src/lib/api.ts).
+  - Added export concurrency lock in [`useImpositionStudio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useImpositionStudio.ts) and single-download guard in [`flipbook/page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/flipbook/page.tsx).
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited cleanly with code `0`.
+  - `cd backend && python3 -m py_compile main.py book_scan_api.py imposing_api.py engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` verified `backend/temp_uploads/` clean.
+
 ## Date: 2026-10-29
+
+### Task 36: Multi-Phase Book Studio Architecture Refactor (Phases 1–5)
+- **Objective**:
+  - **Phase 1 (Unified Dual-Page Mode)**: Standardize synchronized (`Dual` linked: both pages at once) vs. independent (`Dual` unlinked: single page at a time) dual-page control across `Cleanup` (mask box & spine box), `Deskew`, `Colors & Tone`, and `Print Bleed`.
+  - **Phase 2 (Global Tool-Level Reset)**: Update Reset buttons in `Deskew`, `Cleanup`, `Colors & Tone`, and `Print Bleed` so clicking Reset wipes out all modifications made by that specific tool across all pages in the document without affecting other tools.
+  - **Phase 3 (Comprehensive Undo/Redo History Tracking)**: Snapshot and restore both `pages` and all module configurations (`ModulesSnapshot`) in `useBookHistory.ts`, wiring every discrete committed user action (including pointer-up on box drags, filter applies, angle detections/adjustments, color/bleed applies, and tool resets) into the history stack.
+  - **Phase 4 (Color Picker Revert, Deduplication & UI Fixes)**: Remove the newer multi-row preset color picker, restore the original single-row compact color picker as the universal `<StudioColorPicker>` component across `Cleanup` and `Bleed`, eliminate double-launching (`window.EyeDropper` vs canvas eyedropper), and fix right-edge viewport clipping in `Bleed Studio`.
+  - **Phase 5 (Codebase Audit, De-Monolithing & Dead Code Removal)**: Deduplicate 8-handle box overlays and filter logic in `PageCanvas.tsx`, deduplicate pointer drag math and dual-side selection in `BookWorkspace.tsx`, remove dead `LayerEntryStack` code from `PageScopeSelector.tsx`, and delete orphaned `RestoreOriginalModal.tsx`, `RotateDropdown.tsx`, and `eyedropper.d.ts`.
+- **Architectural Implementation**:
+  - **Phase 1**: Added `resolveDualSpreadState` and `toggleDualModuleScope` in [`pageScope.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/lib/pageScope.ts), updated `resolveMaskTargetIds` to honor `dualSides`, added `pageSpineBoxes` and `pageDraftMasks` to `CleanupModuleConfig` in [`book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts), and rendered interactive mask and spine overlays on both primary and secondary spread pages in [`PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx) and [`BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx).
+  - **Phase 2**: Added `resetDeskew`, `resetCleanup`, `resetRestoration`, and `resetBleed` in [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts) and wired them through [`DeskewPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/DeskewPanel.tsx), [`CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx), [`RestorePanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/RestorePanel.tsx), [`BleedPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/BleedPanel.tsx), and [`BookRightPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookRightPanel.tsx).
+  - **Phase 3**: Added `ModulesSnapshot` to [`useBookHistory.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookHistory.ts) and wired `buildModulesSnapshot` / `restoreModulesSnapshot` and `onCommitBoxDrag` across [`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts), [`useBookStudioState.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookStudioState.ts), [`BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx), and [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx).
+  - **Phase 4**: Built `<StudioColorPicker>` in [`PageScopeSelector.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx) and replaced inline pickers in [`CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx) and [`BleedPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/BleedPanel.tsx). Removed `window.EyeDropper` from [`AppearanceSection.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/settings/AppearanceSection.tsx) and deleted `frontend/src/types/eyedropper.d.ts`.
+  - **Phase 5**: Refactored [`PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx) and [`BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx), removed dead `LayerEntryStack` from [`PageScopeSelector.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx), and deleted orphaned `RestoreOriginalModal.tsx` and `RotateDropdown.tsx`.
+
+### Task 35: Cleanup Studio Dual Scope, Live Previews, Spine Shadow Controls & Color Picker Alignment
+- **Objective**:
+  - Implement full Dual Scope support in Cleanup Studio (`dualSides: ["left", "right"]` vs `["left"]`/`["right"]`) with unlinked page switching and the amber `Editing Page X` indicator banner matching Crop & Split tools.
+  - Resolve the color picker opening beyond the right edge of the browser window and getting clipped.
+  - Enhance the Spine Shadow tool: add an **Apply** button next to Reset in the panel that toggles the canvas overlay off, provide an **Edit Area** button to re-engage, remove the overlay text pill, and style the selection rectangle and handles to respect the app's chosen accent color.
+  - Implement live preview for Despeckle and Spine Shadow filters so moving sliders or toggling immediately updates the canvas thumbnail preview live in real-time without waiting for user to click Apply (only committing to history when Apply is clicked).
+- **Architectural Implementation**:
+  - **Live Filter Previews ([`useBookSession.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookSession.ts), [`useBookStudioState.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookStudioState.ts))**:
+    - Refactored `buildThumbnailUrl` Cleanup Layer Resolution: live draft settings (`flattenIllumination`, `spineStrength`, `spineBox`, `despeckleLevel`) take immediate priority for pages within `inDraftScope` whenever `hasLiveDraft` is active.
+    - Updated `cleanupEnabled` in `useBookStudioState.ts` to evaluate to true whenever `flattenIllumination`, `despeckleLevel > 0`, or `spineBox` is active.
+  - **Dual Scope Support ([`types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts), [`pageScope.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/lib/pageScope.ts), [`PageScopeSelector.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/PageScopeSelector.tsx), [`CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx), [`BookRightPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookRightPanel.tsx), [`BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx), [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx))**:
+    - Added `dualSides?: Array<"left" | "right">` to `ModulePageScope`.
+    - Enhanced `isPageInScope` and `resolveConcretePageNumbers` to calculate spread pages (`pairStartIdx + 1` and `pairStartIdx + 2`) and filter against `dualSides`.
+    - Enhanced `PageScopeSelector` with dual-mode awareness (`Dual` button, linked/unlinked toggle, and amber `Editing Page X` banner).
+    - Wired canvas page clicking (`onSelectPrimaryPage`, `onSelectSecondaryPage`) and dual-mode mouse drawing in `BookWorkspace.tsx` and `page.tsx` to switch unlinked dual sides.
+  - **Color Picker Viewport Alignment ([`CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx))**:
+    - Anchored native `<input type="color">` to the left side of the panel container (`left: 8px`), ensuring browser/OS color dialogs open fully inside the viewport.
+    - Added quick-pick paper presets (`#ffffff`, `#f8f6f0`, `#f4eedb`, `#eae3d2`), a Custom swatch trigger button, and an Eyedropper button.
+  - **Spine Shadow Picker Controls & Themed Overlay ([`PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx), [`CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx))**:
+    - Added an **"Apply"** button next to "Reset Area" that sets `spineSelectionActive: false`, toggling the canvas overlay off.
+    - Added "Edit Area" button to re-engage the overlay when needed.
+    - Removed the overlay text pill (`Spine Region ...`).
+    - Styled overlay border, glow, and corner handles using `var(--app-accent, #06b6d4)`, `var(--app-accent-15)`, and `var(--app-accent-glow)`.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `python3 -m py_compile backend/main.py backend/book_scan_api.py backend/engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` exited with code `0`.
+  - `cd frontend && npm run build` (Next.js 14.2.35) succeeded with exit code `0` across all 13 routes.
+- **Objective**:
+  - Audit the Cleanup Module across backend engines and Book Studio frontend for bugs, inactive/placeholder code, and optimizations.
+  - Fix grayscale broadcasting crash in `apply_spot_masks`.
+  - Fix mask visibility suppression when `cleanupModule.enabled === false`.
+  - Add Dual Page Mode support for spot masks and drawing interaction on secondary pages.
+  - Implement `applyCleanupFilters` with scope tracking and Document History entries.
+  - Add `Clear (Page)` and `Clear (All)` actions in CleanupPanel.
+  - Reorder image processing pipeline so erase boxes are cleanly applied on top of illumination leveling and despeckle.
+  - Purge dead duplicate code in `despeckle_image` and dead configuration fields.
+- **Architectural Implementation**:
+  - **Backend Pure Engine ([`book_scan_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/book_scan_engine.py))**:
+    - Removed 45 lines of dead legacy code trapped in `despeckle_image`.
+    - Made `apply_spot_masks` channel-aware: computes ITU-R BT.601 scalar luminance for 2D grayscale scans and 4-channel tuples for BGRA scans.
+    - Normalized coordinate boxes (`nx1, ny1, nx2, ny2`) and deduplicated mask IDs in `apply_masks_to_pages`.
+    - Moved spot masks to run as step 7 (after deskew, border clean, spine illumination, despeckle, whitening, color restoration, and sharpening).
+  - **State Management & Applied Entries ([`useBookModules.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookModules.ts), [`types/book_studio.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/types/book_studio.ts), [`useBookStudioState.ts`](file:///home/essam/Projects/ESSR_PA/frontend/src/hooks/useBookStudioState.ts))**:
+    - Removed unused `maskScopeMode` and `maskCustomRange` fields.
+    - Implemented `applyCleanupFilters`, committing background filter settings (`flattenIllumination`, `spineStrength`, `spineBox`, `despeckleLevel`) into `cleanupModule.appliedEntries` across the target scope with timestamped history logging.
+    - Removed mask suppression on `cleanupModule.enabled === false` from `buildThumbnailUrl`.
+  - **Dual Mode & Canvas Overlays ([`PageCanvas.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/PageCanvas.tsx), [`BookWorkspace.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/BookWorkspace.tsx), [`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx))**:
+    - Supported `secondaryPageMasks` overlay badges in Dual Page Mode.
+    - Enabled mouse drawing on secondary page in Dual Page Mode, auto-focusing the target page upon draw completion.
+    - Synchronized `draftMaskBox.color` in `onPickColor` when using eyedropper.
+  - **Panel Controls ([`CleanupPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/modules/CleanupPanel.tsx))**:
+    - Wired `onClearPageMasks` and `onClearAllMasks` into the panel header.
+    - Unified the action button strictly to **"Apply"**.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` exited with code `0`.
+  - `python3 -m py_compile backend/main.py backend/book_scan_api.py backend/engines/*.py` exited with code `0`.
+  - `python3 backend/engines/storage_cleaner.py` exited with code `0`.
+  - `cd frontend && npm run build` (Next.js 14.2.35) succeeded with exit code `0` across all 13 routes.
 
 ### Task 33: Production Build Gate & Session Hand-Off
 - **Objective**:

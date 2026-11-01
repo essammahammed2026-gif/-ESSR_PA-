@@ -6,7 +6,7 @@ import { getNextCutLine } from "@/lib/splitLines";
 import { useBookSession } from "./useBookSession";
 import { useBookModules } from "./useBookModules";
 import { useBookPageOps } from "./useBookPageOps";
-import { useBookHistory } from "./useBookHistory";
+import { useBookHistory, type ModulesSnapshot } from "./useBookHistory";
 import { useBookShortcuts, DEFAULT_BOOK_SHORTCUTS } from "./useBookShortcuts";
 import type { CropBox, MaskBox, DetectCropResult, FocusedModuleId, ExportOptions } from "@/types/book_studio";
 
@@ -67,6 +67,8 @@ export function useBookStudioState() {
   }, [session.pages, session.selectedPageId]);
 
   const onStepRestoredRef = useRef<() => void>(() => {});
+  const getModulesSnapshotRef = useRef<(() => ModulesSnapshot) | undefined>(undefined);
+  const onRestoreModulesRef = useRef<((snap: ModulesSnapshot) => void) | undefined>(undefined);
 
   const history = useBookHistory({
     sessionId: session.sessionId,
@@ -74,6 +76,8 @@ export function useBookStudioState() {
     setPages: session.setPages,
     selectedPageId: session.selectedPageId,
     setSelectedPageId: session.setSelectedPageId,
+    getModulesSnapshot: () => getModulesSnapshotRef.current!(),
+    onRestoreModules: (snap) => onRestoreModulesRef.current?.(snap),
     onStepRestored: () => onStepRestoredRef.current(),
     maxLimit: historyLimit,
   });
@@ -96,6 +100,9 @@ export function useBookStudioState() {
     recordStep: history.recordStep,
   });
 
+  getModulesSnapshotRef.current = modules.buildModulesSnapshot;
+  onRestoreModulesRef.current = modules.restoreModulesSnapshot;
+
   useEffect(() => {
     onStepRestoredRef.current = () => {
       modules.clearPageCrops();
@@ -113,19 +120,16 @@ export function useBookStudioState() {
   }, [modules]);
 
   const jumpToStep = useCallback(async (index: number) => {
-    modules.clearPageCrops();
     await history.jumpToStep(index);
-  }, [modules, history]);
+  }, [history]);
 
   const undo = useCallback(() => {
-    modules.clearPageCrops();
     history.undo();
-  }, [modules, history]);
+  }, [history]);
 
   const redo = useCallback(() => {
-    modules.clearPageCrops();
     history.redo();
-  }, [modules, history]);
+  }, [history]);
 
   const revertToOriginal = useCallback(() => {
     modules.clearPageCrops();
@@ -134,40 +138,79 @@ export function useBookStudioState() {
   }, [modules, history]);
 
   // Initialize history when session loads pages
-  const initSession = useCallback(async (arg?: string | File[]) => {
-    const data = await session.initSession(arg);
+  const initSession = useCallback(async (arg?: string | File[], customOriginalFilename?: string) => {
+    const data = await session.initSession(arg, customOriginalFilename);
     if (data?.pages && data.pages.length > 0) {
-      history.initHistory(data.pages, data.pages[0]?.id ?? null);
+      history.initHistory(data.pages, data.pages[0]?.id ?? null, modules.buildModulesSnapshot());
       setSelectedPageIds([data.pages[0].id]);
     }
     return data;
-  }, [session, history]);
+  }, [session, history, modules]);
+
+  // Load existing session and initialize history
+  const loadSession = useCallback(async (targetSessionId: string) => {
+    const data = await session.loadSession(targetSessionId);
+    if (data?.pages && data.pages.length > 0) {
+      history.initHistory(data.pages, data.pages[0]?.id ?? null, modules.buildModulesSnapshot());
+      setSelectedPageIds([data.pages[0].id]);
+    }
+    return data;
+  }, [session, history, modules]);
 
   useEffect(() => {
     if (session.sessionId && session.pages.length > 0 && history.history.length === 0) {
-      history.initHistory(session.pages, session.selectedPageId);
+      history.initHistory(session.pages, session.selectedPageId, modules.buildModulesSnapshot());
     }
-  }, [session.sessionId, session.pages, session.selectedPageId, history]);
+  }, [session.sessionId, session.pages, session.selectedPageId, history, modules]);
 
   // Detect deskew angle using the live deskew-module tolerances
   const detectPageAngle = useCallback(async (pageId?: string): Promise<number | null> => {
-    modules.setDeskewModule((prev) => ({ ...prev, enabled: true }));
-    return session.detectPageAngle(pageId, {
+    const nextDeskew = { ...modules.deskewModule, enabled: true };
+    modules.setDeskewModule(nextDeskew);
+    const angle = await session.detectPageAngle(pageId, {
       maxAngle: modules.deskewModule.maxAngle,
       ignoreBorders: modules.deskewModule.ignoreBorders,
     });
-  }, [session, modules]);
+    if (angle !== null) {
+      const targetId = pageId || session.selectedPageId;
+      const updatedPages = session.pages.map((p) =>
+        p.id === targetId ? { ...p, deskew_angle: angle, rev: (p.rev ?? 0) + 1 } : p
+      );
+      const snap = modules.buildModulesSnapshot({ deskewModule: { ...nextDeskew, angle } });
+      history.recordStep(
+        `Detect Tilt (${angle > 0 ? "+" : ""}${angle.toFixed(2)}°)`,
+        updatedPages,
+        session.selectedPageId,
+        snap
+      );
+    }
+    return angle;
+  }, [session, modules, history]);
 
   const detectAllPageAngles = useCallback(async (targetPageIds?: string[]): Promise<Record<string, number> | null> => {
-    modules.setDeskewModule((prev) => ({ ...prev, enabled: true }));
-    return session.detectAllPageAngles(
+    const nextDeskew = { ...modules.deskewModule, enabled: true };
+    modules.setDeskewModule(nextDeskew);
+    const anglesMap = await session.detectAllPageAngles(
       {
         maxAngle: modules.deskewModule.maxAngle,
         ignoreBorders: modules.deskewModule.ignoreBorders,
       },
       targetPageIds
     );
-  }, [session, modules]);
+    if (anglesMap && Object.keys(anglesMap).length > 0) {
+      const updatedPages = session.pages.map((p) =>
+        p.id in anglesMap ? { ...p, deskew_angle: Number(anglesMap[p.id]), rev: (p.rev ?? 0) + 1 } : p
+      );
+      const snap = modules.buildModulesSnapshot({ deskewModule: nextDeskew });
+      history.recordStep(
+        `Detect All Tilt (${Object.keys(anglesMap).length}p)`,
+        updatedPages,
+        session.selectedPageId,
+        snap
+      );
+    }
+    return anglesMap;
+  }, [session, modules, history]);
 
   const deskewSyncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -182,22 +225,31 @@ export function useBookStudioState() {
   const setPageDeskewAngle = useCallback((pageId: string, angle: number) => {
     if (!session.sessionId) return;
     const rounded = Math.round(angle * 100) / 100;
-    // Optimistically update local page deskew_angle + rev so canvas updates immediately
-    session.setPages((prev) =>
-      prev.map((p) => (p.id === pageId ? { ...p, deskew_angle: rounded, rev: (p.rev ?? 0) + 1 } : p))
+    const updatedPages = session.pages.map((p) =>
+      p.id === pageId ? { ...p, deskew_angle: rounded, rev: (p.rev ?? 0) + 1 } : p
     );
-    modules.setDeskewModule((prev) => ({
-      ...prev,
+    // Optimistically update local page deskew_angle + rev so canvas updates immediately
+    session.setPages(updatedPages);
+    const nextDeskew = {
+      ...modules.deskewModule,
       enabled: true,
       angle: rounded,
-    }));
+    };
+    modules.setDeskewModule(nextDeskew);
 
-    // Debounce network persistence (~350ms) to prevent server flooding while dragging slider
+    // Debounce network persistence + history commit (~350ms) to prevent server/history flooding while dragging slider
     if (deskewSyncTimeoutRef.current) {
       clearTimeout(deskewSyncTimeoutRef.current);
     }
     const currentSessionId = session.sessionId;
+    const snap = modules.buildModulesSnapshot({ deskewModule: nextDeskew });
     deskewSyncTimeoutRef.current = setTimeout(async () => {
+      history.recordStep(
+        `Deskew Angle (${rounded > 0 ? "+" : ""}${rounded.toFixed(2)}°)`,
+        updatedPages,
+        session.selectedPageId,
+        snap
+      );
       try {
         await apiFetch(`/api/book-scan/deskew-page/${currentSessionId}`, {
           method: "POST",
@@ -208,7 +260,7 @@ export function useBookStudioState() {
         console.error("Failed to persist per-page deskew angle:", err);
       }
     }, 350);
-  }, [session, modules]);
+  }, [session, modules, history]);
 
   // Detect crop boundary, then apply the result to the crop module
   const detectCrop = useCallback(async (
@@ -217,15 +269,27 @@ export function useBookStudioState() {
     const mode = modules.cropModule.detectMode || "paper";
     const data: DetectCropResult | null = await session.detectCrop(pageId, mode);
     if (data) {
-      modules.setCropModule((prev) => ({
-        ...prev,
+      const nextCrop = {
+        ...modules.cropModule,
         enabled: true,
         cropBox: data.crop_box,
         splitPos: data.split_pos,
-      }));
+      };
+      modules.setCropModule(nextCrop);
+      const targetId = pageId || session.selectedPageId;
+      const nextPageCrops = { ...modules.pageCrops };
+      if (targetId) {
+        nextPageCrops[targetId] = {
+          cropBox: data.crop_box,
+          splitPos: data.split_pos,
+          splitLines: modules.cropModule.splitLines,
+        };
+      }
+      const snap = modules.buildModulesSnapshot({ cropModule: nextCrop, pageCrops: nextPageCrops });
+      history.recordStep(`Auto-Detect Crop (${mode})`, session.pages, session.selectedPageId, snap);
     }
     return data;
-  }, [session, modules]);
+  }, [session, modules, history]);
 
   const detectAllCrops = useCallback(async (): Promise<void> => {
     const mode = modules.cropModule.detectMode || "paper";
@@ -233,35 +297,40 @@ export function useBookStudioState() {
     const cropsMap = await session.detectAllCrops(mode, resolved.ids);
     if (cropsMap) {
       modules.setBatchPageCrops(cropsMap, false);
+      const nextPageCrops = { ...modules.pageCrops };
+      for (const [pid, item] of Object.entries(cropsMap)) {
+        nextPageCrops[pid] = {
+          cropBox: item.crop_box,
+          splitPos: item.split_pos,
+          splitLines: nextPageCrops[pid]?.splitLines ?? [],
+        };
+      }
+      const activeItem = session.selectedPageId ? cropsMap[session.selectedPageId] : undefined;
+      const nextCrop = activeItem
+        ? {
+            ...modules.cropModule,
+            enabled: true,
+            cropBox: activeItem.crop_box,
+            splitPos: activeItem.split_pos,
+          }
+        : modules.cropModule;
+      const snap = modules.buildModulesSnapshot({ cropModule: nextCrop, pageCrops: nextPageCrops });
+      history.recordStep(
+        `Auto-Detect All Crops (${Object.keys(cropsMap).length}p)`,
+        session.pages,
+        session.selectedPageId,
+        snap
+      );
     }
-  }, [session, modules]);
+  }, [session, modules, history]);
 
   const clearAllDeskewAngles = useCallback(async () => {
-    if (!session.sessionId) return;
-    session.setPages((prev) =>
-      prev.map((p) => {
-        if (p.deskew_angle === undefined && p.deskew_angle === null) return p;
-        const next = { ...p, rev: (p.rev ?? 0) + 1 };
-        delete next.deskew_angle;
-        return next;
-      })
-    );
-    modules.setDeskewModule((prev) => ({
-      ...prev,
-      enabled: false,
-      angle: 0,
-      appliedEntries: [],
-    }));
-    try {
-      await apiFetch(`/api/book-scan/deskew-page/${session.sessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clear_all: true }),
-      });
-    } catch (err) {
-      console.error("Failed to clear all deskew angles:", err);
-    }
-  }, [session, modules]);
+    await modules.resetDeskew();
+  }, [modules]);
+
+  const recordHistoryStep = useCallback((label: string, snapshotOverride?: ModulesSnapshot) => {
+    history.recordStep(label, session.pages, session.selectedPageId, snapshotOverride);
+  }, [history, session.pages, session.selectedPageId]);
 
   const openModule = useCallback((mod: FocusedModuleId | null) => {
     setFocusedModule(mod);
@@ -428,34 +497,32 @@ export function useBookStudioState() {
   // Thumbnail URL builder wired with debounced module values (for Center Canvas Preview)
   const getThumbnailUrl = useCallback((pageId: string, isClean: boolean, dpi: number = 100): string => {
     const hiddenMaskIds: string[] = [];
-    const editingMaskId = modules.cleanupModule.draftMaskBox?.id;
+    const editingMaskId = modules.cleanupModule.pageDraftMasks?.[pageId]?.id || modules.cleanupModule.draftMaskBox?.id;
     if (editingMaskId) {
       hiddenMaskIds.push(editingMaskId);
     }
     const pageIdx = session.pages.findIndex((p) => p.id === pageId);
     const pageNum = pageIdx >= 0 ? pageIdx + 1 : 1;
 
-    if (!modules.cleanupModule.enabled) {
-      hiddenMaskIds.push("*");
-    } else {
-      for (const e of modules.cleanupModule.appliedEntries || []) {
-        if (e.visible === false) {
-          const isMask = Boolean(e.params?.isMaskEntry || e.id.startsWith("mask_"));
-          if (isMask) {
-            const appliesToPage =
-              (!e.excludedPages || !e.excludedPages.includes(pageNum)) &&
-              ((!e.targetPageIds || e.targetPageIds.length === 0 || e.targetPageIds.includes(pageId)) &&
-               (!e.targetPages || e.targetPages.length === 0 || e.targetPages.includes(pageNum)));
-            if (appliesToPage) {
-              const maskId = e.params?.maskBox?.id || (e.id.startsWith("mask_") ? e.id.slice(5) : null);
-              if (maskId) {
-                hiddenMaskIds.push(maskId);
-              }
+    for (const e of modules.cleanupModule.appliedEntries || []) {
+      if (e.visible === false) {
+        const isMask = Boolean(e.params?.isMaskEntry || e.id.startsWith("mask_"));
+        if (isMask) {
+          const appliesToPage =
+            (!e.excludedPages || !e.excludedPages.includes(pageNum)) &&
+            ((!e.targetPageIds || e.targetPageIds.length === 0 || e.targetPageIds.includes(pageId)) &&
+             (!e.targetPages || e.targetPages.length === 0 || e.targetPages.includes(pageNum)));
+          if (appliesToPage) {
+            const maskId = e.params?.maskBox?.id || (e.id.startsWith("mask_") ? e.id.slice(5) : null);
+            if (maskId) {
+              hiddenMaskIds.push(maskId);
             }
           }
         }
       }
     }
+
+    const pageSpecificSpineBox = modules.cleanupModule.pageSpineBoxes?.[pageId] ?? modules.cleanupModule.spineBox;
 
     return session.buildThumbnailUrl(pageId, isClean, dpi, {
       deskewEnabled: modules.deskewModule.enabled,
@@ -464,11 +531,11 @@ export function useBookStudioState() {
       deskewAngle: modules.debouncedDeskewAngle,
       deskewMaxAngle: modules.deskewModule.maxAngle,
       deskewIgnoreBorders: modules.deskewModule.ignoreBorders,
-      cleanupEnabled: modules.cleanupModule.enabled,
+      cleanupEnabled: modules.cleanupModule.enabled || modules.cleanupModule.flattenIllumination || modules.cleanupModule.despeckleLevel > 0 || Boolean(pageSpecificSpineBox),
       cleanupScope: modules.cleanupModule.scope,
       flattenIllumination: modules.cleanupModule.flattenIllumination,
       spineStrength: modules.debouncedSpineStrength ?? modules.cleanupModule.spineStrength ?? 1.0,
-      spineBox: modules.cleanupModule.spineBox,
+      spineBox: pageSpecificSpineBox,
       despeckleLevel: modules.debouncedDespeckle ?? modules.cleanupModule.despeckleLevel,
       restorationEnabled: modules.restorationModule.enabled,
       restorationScope: modules.restorationModule.scope,
@@ -628,6 +695,9 @@ export function useBookStudioState() {
     revertCropLevel: modules.revertCropLevel,
     resetCrop: modules.resetCrop,
     resetDeskew: modules.resetDeskew,
+    resetCleanup: modules.resetCleanup,
+    resetRestoration: modules.resetRestoration,
+    resetBleed: modules.resetBleed,
     removeAppliedCrop: modules.removeAppliedCrop,
     removeAllAppliedCrops: modules.removeAllAppliedCrops,
     clearAllDeskewAngles,
@@ -635,6 +705,7 @@ export function useBookStudioState() {
     removeMaskBox: modules.removeMaskBox,
     clearPageMasks: modules.clearPageMasks,
     clearAllMasks: modules.clearAllMasks,
+    applyCleanupFilters: modules.applyCleanupFilters,
     setPageColorMode: modules.setPageColorMode,
     isDetectingAngle: session.isDetectingAngle, detectedAngle: session.detectedAngle,
     detectPageAngle,
@@ -643,6 +714,7 @@ export function useBookStudioState() {
     settings: modules.settings,
     resetJob,
     initSession,
+    loadSession,
     rotatePage: pageOps.rotatePage,
     rotatePages: pageOps.rotatePages,
     deletePage: pageOps.deletePage,
@@ -669,6 +741,8 @@ export function useBookStudioState() {
     redo,
     jumpToStep,
     revertToOriginal,
+    recordHistoryStep,
+    buildModulesSnapshot: modules.buildModulesSnapshot,
     shortcuts,
     shortcutLabels,
   };

@@ -1,15 +1,16 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { Square, Pipette } from "lucide-react";
+import { Square, RotateCcw } from "lucide-react";
 import {
   CleanupModuleConfig,
   ModuleTaskProgress,
   BookStudioPage,
   CropBox,
   MaskBox,
+  ModulePageScope,
 } from "@/types/book_studio";
-import { PageScopeSelector, ModuleProgressBar, formatScopeLabel } from "./PageScopeSelector";
+import { PageScopeSelector, ModuleProgressBar, StudioColorPicker, formatScopeLabel } from "./PageScopeSelector";
 import { resolveConcretePageNumbers } from "@/lib/pageScope";
 
 export interface CleanupPanelProps {
@@ -24,10 +25,14 @@ export interface CleanupPanelProps {
   onClearAllMasks?: () => void;
   applyMaskBox?: (box: CropBox, selectedPageIds?: string[], customColor?: string, existingMaskId?: string) => Promise<MaskBox | undefined>;
   removeMaskBox?: (maskId: string) => Promise<void>;
+  applyCleanupFilters?: (targetScope?: ModulePageScope) => void;
+  resetCleanup?: () => Promise<void> | void;
   taskProgress?: ModuleTaskProgress;
   pages?: BookStudioPage[];
   selectedPageId?: string | null;
   activePageNum?: number;
+  isDualPage?: boolean;
+  onSelectPageId?: (id: string) => void;
   shortcutLabels?: Record<string, string>;
 }
 
@@ -39,49 +44,88 @@ export function CleanupPanel({
   onActivateMaskEyedropper,
   pageMasksCount,
   totalMasksCount,
+  onClearPageMasks,
+  onClearAllMasks,
   applyMaskBox,
+  applyCleanupFilters,
+  resetCleanup,
   taskProgress,
   pages = [],
   selectedPageId,
   activePageNum,
+  isDualPage = false,
+  onSelectPageId,
   shortcutLabels = {},
 }: CleanupPanelProps) {
-  const activePage = useMemo(() => {
-    if (!pages || pages.length === 0) return null;
-    if (selectedPageId) return pages.find((p) => p.id === selectedPageId) || pages[0];
-    return pages[0];
-  }, [pages, selectedPageId]);
+  const rawIdx = pages && selectedPageId ? pages.findIndex((p) => p.id === selectedPageId) : -1;
+  const pairStartIdx = isDualPage && rawIdx >= 0 ? Math.floor(rawIdx / 2) * 2 : rawIdx;
+  const leftPageId = (pairStartIdx >= 0 && pages[pairStartIdx]) ? pages[pairStartIdx].id : (selectedPageId ?? pages[0]?.id ?? "");
+  const leftPageNum = pairStartIdx >= 0 ? pairStartIdx + 1 : 1;
+  const hasRightPage = Boolean(isDualPage && pages && pairStartIdx >= 0 && pairStartIdx + 1 < pages.length);
+  const rightPageId = hasRightPage && pages ? pages[pairStartIdx + 1].id : "";
+  const rightPageNum = hasRightPage ? leftPageNum + 1 : undefined;
 
-  const handleNativeMaskEyedropper = async () => {
-    if (typeof window !== "undefined" && window.EyeDropper) {
-      try {
-        const eyeDropper = new window.EyeDropper();
-        const result = await eyeDropper.open();
-        if (result?.sRGBHex) {
-          setCleanupModule((prev) => ({ ...prev, maskColor: result.sRGBHex }));
-          return;
-        }
-      } catch {
-        // Fallback to canvas click sampling
-      }
+  const isDualActive = Boolean(isDualPage && hasRightPage);
+  const isDualLinked = isDualActive && (cleanupModule.scope.dualSides?.length ?? 2) >= 2;
+  const activeDualSide = isDualActive && cleanupModule.scope.dualSides?.length === 1
+    ? cleanupModule.scope.dualSides[0]
+    : null;
+
+  const handleToggleDual = () => {
+    if (cleanupModule.scope.mode !== "current") {
+      setCleanupModule((prev) => ({
+        ...prev,
+        scope: { ...prev.scope, mode: "current", dualSides: ["left", "right"] },
+      }));
+      return;
     }
-    if (onActivateMaskEyedropper) {
-      onActivateMaskEyedropper();
+    if (isDualLinked) {
+      if (leftPageId && onSelectPageId) onSelectPageId(leftPageId);
+      setCleanupModule((prev) => ({
+        ...prev,
+        draftMaskBox: prev.pageDraftMasks?.[leftPageId] ?? prev.draftMaskBox,
+        spineBox: prev.pageSpineBoxes?.[leftPageId] ?? prev.spineBox,
+        scope: { ...prev.scope, dualSides: ["left"] },
+      }));
+    } else {
+      setCleanupModule((prev) => ({
+        ...prev,
+        scope: { ...prev.scope, dualSides: ["left", "right"] },
+      }));
     }
   };
 
+  const activePage = useMemo(() => {
+    if (!pages || pages.length === 0) return null;
+    if (isDualActive && activeDualSide === "right" && rightPageId) {
+      return pages.find((p) => p.id === rightPageId) || pages[0];
+    }
+    if (isDualActive && leftPageId) {
+      return pages.find((p) => p.id === leftPageId) || pages[0];
+    }
+    if (selectedPageId) return pages.find((p) => p.id === selectedPageId) || pages[0];
+    return pages[0];
+  }, [pages, selectedPageId, isDualActive, activeDualSide, rightPageId, leftPageId]);
+
   const handleApply = async () => {
     const concrete = resolveConcretePageNumbers(pages, cleanupModule.scope, selectedPageId);
-    const hasDraftMask = Boolean(cleanupModule.draftMaskBox);
+    const pageDraftEntries = Object.entries(cleanupModule.pageDraftMasks || {});
+    const hasDraftMask = Boolean(cleanupModule.draftMaskBox || pageDraftEntries.length > 0);
 
     // 1. If draft mask box is active (new box or editing box)
-    if (hasDraftMask && cleanupModule.draftMaskBox) {
-      const draftBox = cleanupModule.draftMaskBox;
-      if (applyMaskBox) {
+    if (hasDraftMask && applyMaskBox) {
+      if (!isDualLinked && cleanupModule.scope.mode === "current" && pageDraftEntries.length > 0) {
+        for (const [pid, draft] of pageDraftEntries) {
+          if (draft) {
+            await applyMaskBox(draft, [pid], draft.color || cleanupModule.maskColor, draft.id);
+          }
+        }
+      } else if (cleanupModule.draftMaskBox) {
+        const draftBox = cleanupModule.draftMaskBox;
         await applyMaskBox(
           draftBox,
           concrete.pageIds,
-          cleanupModule.maskColor,
+          draftBox.color || cleanupModule.maskColor,
           draftBox.id
         );
       }
@@ -90,15 +134,20 @@ export function CleanupPanel({
         ...prev,
         enabled: true,
         draftMaskBox: null,
+        pageDraftMasks: {},
       }));
       return;
     }
 
-    // 2. Filter-only commit (Spine Shadow / Despeckle)
-    setCleanupModule((prev) => ({
-      ...prev,
-      enabled: true,
-    }));
+    // 2. Filter commit (Spine Shadow / Despeckle)
+    if (applyCleanupFilters) {
+      applyCleanupFilters(cleanupModule.scope);
+    } else {
+      setCleanupModule((prev) => ({
+        ...prev,
+        enabled: true,
+      }));
+    }
   };
 
   return (
@@ -111,10 +160,32 @@ export function CleanupPanel({
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
             Erase Box
           </span>
-          <span className="text-[10px] font-mono text-slate-400">
-            Page: <strong className="text-slate-200">{pageMasksCount}</strong> • All:{" "}
-            <strong className="text-slate-200">{totalMasksCount}</strong>
-          </span>
+          <div className="flex items-center space-x-2 text-[10px]">
+            <span className="font-mono text-slate-400">
+              Page: <strong className="text-slate-200">{pageMasksCount}</strong> • All:{" "}
+              <strong className="text-slate-200">{totalMasksCount}</strong>
+            </span>
+            {pageMasksCount > 0 && onClearPageMasks && (
+              <button
+                type="button"
+                onClick={() => onClearPageMasks(selectedPageId ? [selectedPageId] : undefined)}
+                className="text-rose-400 hover:text-rose-300 hover:underline cursor-pointer font-medium"
+                title="Clear erase boxes on active page"
+              >
+                Clear (Page)
+              </button>
+            )}
+            {totalMasksCount > 0 && onClearAllMasks && (
+              <button
+                type="button"
+                onClick={onClearAllMasks}
+                className="text-rose-400 hover:text-rose-300 hover:underline cursor-pointer font-medium"
+                title="Clear all erase boxes across entire book"
+              >
+                Clear (All)
+              </button>
+            )}
+          </div>
         </div>
 
         <button
@@ -131,58 +202,23 @@ export function CleanupPanel({
           <span>{maskToolActive ? "Drag on Canvas..." : "Draw Box"}</span>
         </button>
 
-        {/* Fill Color Picker */}
-        <div className="flex items-center justify-between py-1 text-xs">
-          <span className="text-slate-400">Fill Color</span>
-          <div className="flex items-center space-x-1.5">
-            <input
-              type="color"
-              value={cleanupModule.maskColor || "#ffffff"}
-              onChange={(e) =>
-                setCleanupModule((prev) => ({
-                  ...prev,
-                  maskColor: e.target.value,
-                  draftMaskBox: prev.draftMaskBox
-                    ? { ...prev.draftMaskBox, color: e.target.value }
-                    : prev.draftMaskBox,
-                }))
-              }
-              className="w-5 h-5 rounded border border-white/20 bg-transparent cursor-pointer p-0"
-              title="Choose erase box fill color (Default: #FFFFFF)"
-            />
-            {onActivateMaskEyedropper && (
-              <button
-                type="button"
-                onClick={handleNativeMaskEyedropper}
-                className="p-1 rounded hover:bg-[#1C212C] text-slate-300 hover:text-white transition-colors cursor-pointer"
-                title={`Sample paper color directly from page (${shortcutLabels.eyedropper || "I"})`}
-              >
-                <Pipette size={13} />
-              </button>
-            )}
-            <span className="font-mono text-[10px] text-slate-300 uppercase">
-              {(cleanupModule.maskColor || "#ffffff").slice(0, 7)}
-            </span>
-            {(cleanupModule.maskColor || "#ffffff").toLowerCase() !== "#ffffff" && (
-              <button
-                type="button"
-                onClick={() =>
-                  setCleanupModule((prev) => ({
-                    ...prev,
-                    maskColor: "#ffffff",
-                    draftMaskBox: prev.draftMaskBox
-                      ? { ...prev.draftMaskBox, color: "#ffffff" }
-                      : prev.draftMaskBox,
-                  }))
-                }
-                className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer ml-1"
-                title="Reset fill color to pure white (#FFFFFF)"
-              >
-                White
-              </button>
-            )}
-          </div>
-        </div>
+        {/* Universal Single-Row Fill Color Picker */}
+        <StudioColorPicker
+          label="Fill Color"
+          color={cleanupModule.maskColor || "#ffffff"}
+          defaultColor="#ffffff"
+          onChange={(hex) =>
+            setCleanupModule((prev) => ({
+              ...prev,
+              maskColor: hex,
+              draftMaskBox: prev.draftMaskBox
+                ? { ...prev.draftMaskBox, color: hex }
+                : prev.draftMaskBox,
+            }))
+          }
+          onActivateEyedropper={onActivateMaskEyedropper}
+          eyedropperShortcut={shortcutLabels.eyedropper || "I"}
+        />
 
         {/* Draft Mask Active Badge */}
         {cleanupModule.draftMaskBox && (
@@ -225,7 +261,8 @@ export function CleanupPanel({
               onChange={(e) =>
                 setCleanupModule((prev) => ({ ...prev, enabled: true, flattenIllumination: e.target.checked }))
               }
-              className="rounded shrink-0 accent-blue-600"
+              className="rounded shrink-0 cursor-pointer"
+              style={{ accentColor: "var(--app-accent, #06b6d4)" }}
             />
           </label>
 
@@ -249,29 +286,85 @@ export function CleanupPanel({
                     const val = Number(e.target.value) / 100;
                     setCleanupModule((prev) => ({ ...prev, enabled: true, spineStrength: val }));
                   }}
-                  className="w-full h-1.5 bg-[#161A23] rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  className="w-full h-1.5 bg-[#161A23] rounded-lg appearance-none cursor-pointer"
+                  style={{ accentColor: "var(--app-accent, #06b6d4)" }}
                   title="Spine shadow flattening strength (10% to 100%)"
                 />
               </div>
 
               {/* Manual Spine Area Selection */}
-              <div className="pt-1 flex items-center justify-between gap-1.5">
+              <div className="pt-1">
                 {cleanupModule.spineBox ? (
-                  <div className="flex items-center justify-between w-full p-1.5 rounded bg-[#161A23] text-xs">
-                    <span className="text-slate-300 font-medium">
-                      Spine Box Active
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCleanupModule((prev) => ({ ...prev, spineBox: null, spineSelectionActive: false }))
-                      }
-                      className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
-                      title="Reset spine region to full-sheet illumination flattening"
-                    >
-                      Reset Area
-                    </button>
-                  </div>
+                  cleanupModule.spineSelectionActive ? (
+                    <div className="flex items-center justify-between w-full p-1.5 rounded bg-[#161A23] text-xs">
+                      <span className="text-slate-300 font-medium text-[11px]">
+                        Adjusting Spine Area
+                      </span>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCleanupModule((prev) => ({ ...prev, spineSelectionActive: false }))
+                          }
+                          className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                          title="Apply spine area selection (hides canvas overlay)"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCleanupModule((prev) => ({
+                          ...prev,
+                          spineBox: null,
+                          pageSpineBoxes: {},
+                          spineSelectionActive: false,
+                        }))
+                          }
+                          className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                          title="Reset spine region to full-sheet illumination flattening"
+                        >
+                          Reset Area
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between w-full p-1.5 rounded bg-[#161A23] text-xs">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span className="text-slate-300 font-medium text-[11px]">
+                          Spine Area Set
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCleanupModule((prev) => ({ ...prev, spineSelectionActive: true }))
+                          }
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 underline cursor-pointer font-medium"
+                          title="Show spine selection box on canvas to adjust region"
+                        >
+                          Edit Area
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCleanupModule((prev) => ({
+                          ...prev,
+                          spineBox: null,
+                          pageSpineBoxes: {},
+                          spineSelectionActive: false,
+                        }))
+                          }
+                          className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                          title="Reset spine region to full-sheet illumination flattening"
+                        >
+                          Reset Area
+                        </button>
+                      </div>
+                    </div>
+                  )
                 ) : (
                   <button
                     type="button"
@@ -283,13 +376,23 @@ export function CleanupPanel({
                         : isRight
                         ? { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 }
                         : { x1: 0.38, y1: 0.0, x2: 0.62, y2: 1.0 };
-                      setCleanupModule((prev) => ({
-                        ...prev,
-                        enabled: true,
-                        flattenIllumination: true,
-                        spineSelectionActive: true,
-                        spineBox: defaultBox,
-                      }));
+                      setCleanupModule((prev) => {
+                        const nextPageSpines = { ...(prev.pageSpineBoxes || {}) };
+                        if (isDualLinked) {
+                          if (leftPageId) nextPageSpines[leftPageId] = defaultBox;
+                          if (rightPageId) nextPageSpines[rightPageId] = defaultBox;
+                        } else if (activePage?.id) {
+                          nextPageSpines[activePage.id] = defaultBox;
+                        }
+                        return {
+                          ...prev,
+                          enabled: true,
+                          flattenIllumination: true,
+                          spineSelectionActive: true,
+                          spineBox: defaultBox,
+                          pageSpineBoxes: nextPageSpines,
+                        };
+                      });
                     }}
                     className="w-full py-1.5 px-2 bg-[#161A23] hover:bg-[#1C212C] text-slate-200 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
                     title="Draw or adjust a targeted spine rectangle on the canvas to isolate gutter shadow"
@@ -334,7 +437,8 @@ export function CleanupPanel({
               const val = parseFloat(e.target.value) || 0;
               setCleanupModule((prev) => ({ ...prev, enabled: true, despeckleLevel: val }));
             }}
-            className="w-full h-1.5 bg-[#161A23] rounded-lg appearance-none cursor-pointer accent-blue-500"
+            className="w-full h-1.5 bg-[#161A23] rounded-lg appearance-none cursor-pointer"
+            style={{ accentColor: "var(--app-accent, #06b6d4)" }}
             title="Continuous scanner dust and speckle removal filter (0.0 to 10.0)"
           />
         </div>
@@ -344,6 +448,12 @@ export function CleanupPanel({
             scope={cleanupModule.scope}
             onChange={(sc) => setCleanupModule((prev) => ({ ...prev, scope: sc }))}
             activePageNum={activePageNum}
+            isDualActive={isDualActive}
+            isDualLinked={isDualLinked}
+            onToggleDual={handleToggleDual}
+            activeDualSide={activeDualSide}
+            leftPageNum={leftPageNum}
+            rightPageNum={rightPageNum}
           />
         </div>
 
@@ -354,7 +464,37 @@ export function CleanupPanel({
             className="flex-1 py-2 px-3 rounded-md bg-slate-100 hover:bg-white text-slate-950 text-xs font-semibold transition-all cursor-pointer flex items-center justify-center space-x-1"
             title={`Apply filters to ${formatScopeLabel(cleanupModule.scope, activePageNum)} (${shortcutLabels.apply_action || "Enter"})`}
           >
-            <span>{`Apply (${formatScopeLabel(cleanupModule.scope, activePageNum)})`}</span>
+            <span>Apply</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (resetCleanup) {
+                void resetCleanup();
+              } else {
+                onClearAllMasks?.();
+                setCleanupModule((prev) => ({
+                  ...prev,
+                  enabled: false,
+                  maskColor: "#ffffff",
+                  flattenIllumination: false,
+                  spineStrength: 1.0,
+                  spineBox: null,
+                  pageSpineBoxes: {},
+                  spineSelectionActive: false,
+                  despeckleLevel: 0,
+                  draftMaskBox: null,
+                  pageDraftMasks: {},
+                  appliedEntries: [],
+                }));
+              }
+            }}
+            className="px-3 py-2 bg-[#161A23] hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1"
+            title="Reset all cleanup & erase modifications across the entire document"
+          >
+            <RotateCcw size={12} />
+            <span>Reset</span>
           </button>
         </div>
       </div>

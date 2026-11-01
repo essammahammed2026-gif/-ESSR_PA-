@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, type Dispatch, type 
 import { apiFetch, downloadBlob } from "@/lib/api";
 import { useDebounce } from "@/lib/useDebounce";
 import { groupSplitLines } from "@/lib/splitLines";
-import { resolveCropTarget, resolveMaskTargetIds, formatPageNumbersToRange } from "@/lib/pageScope";
+import { resolveCropTarget, resolveMaskTargetIds, formatPageNumbersToRange, resolveConcretePageNumbers } from "@/lib/pageScope";
+import type { ModulesSnapshot } from "./useBookHistory";
 import {
   BookIntakeMode,
   BookStudioPage,
@@ -19,6 +20,8 @@ import {
   SplitLine,
   ExportJobProgress,
   ModuleTaskProgress,
+  AppliedModuleEntry,
+  ModulePageScope,
 } from "@/types/book_studio";
 
 /** Typed args for the unified module-config, split/crop, and export hook. */
@@ -28,7 +31,12 @@ export interface UseBookModulesArgs {
   setPages: Dispatch<SetStateAction<BookStudioPage[]>>;
   selectedPageId: string | null;
   setSelectedPageId: Dispatch<SetStateAction<string | null>>;
-  recordStep?: (label: string, nextPages: BookStudioPage[], nextSelectedId?: string | null) => void;
+  recordStep?: (
+    label: string,
+    nextPages: BookStudioPage[],
+    nextSelectedId?: string | null,
+    snapshotOverride?: ModulesSnapshot
+  ) => void;
 }
 
 interface PhaseResult {
@@ -73,6 +81,22 @@ export function useBookModules({
     error: null,
   });
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollAbortControllerRef = useRef<AbortController | null>(null);
+  const isExportingRef = useRef<boolean>(false);
+  const hasDownloadedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearTimeout(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      if (pollAbortControllerRef.current) {
+        pollAbortControllerRef.current.abort();
+        pollAbortControllerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -276,6 +300,8 @@ export function useBookModules({
     scope: { mode: "all", customRange: "" },
     appliedEntries: [],
   });
+  const deskewModuleRef = useRef(deskewModule);
+  deskewModuleRef.current = deskewModule;
 
   const [bleedModule, setBleedModule] = useState<BleedModuleConfig>({
     enabled: false,
@@ -288,11 +314,11 @@ export function useBookModules({
     scope: { mode: "all", customRange: "" },
     appliedBleeds: [],
   });
+  const bleedModuleRef = useRef(bleedModule);
+  bleedModuleRef.current = bleedModule;
 
   const [cleanupModule, setCleanupModule] = useState<CleanupModuleConfig>({
     enabled: false,
-    maskScopeMode: "current",
-    maskCustomRange: "",
     maskColor: "#ffffff",
     flattenIllumination: false,
     spineStrength: 1.0,
@@ -303,6 +329,8 @@ export function useBookModules({
     draftMaskBox: null,
     appliedEntries: [],
   });
+  const cleanupModuleRef = useRef(cleanupModule);
+  cleanupModuleRef.current = cleanupModule;
 
   const [cleanupActionProgress, setCleanupActionProgress] = useState<ModuleTaskProgress>(IDLE_PROGRESS);
 
@@ -321,6 +349,26 @@ export function useBookModules({
     scope: { mode: "all", customRange: "" },
     appliedEntries: [],
   });
+  const restorationModuleRef = useRef(restorationModule);
+  restorationModuleRef.current = restorationModule;
+
+  const buildModulesSnapshot = useCallback((overrides?: Partial<ModulesSnapshot>): ModulesSnapshot => ({
+    cropModule: overrides?.cropModule ?? cropModuleRef.current,
+    pageCrops: overrides?.pageCrops ?? pageCropsRef.current,
+    deskewModule: overrides?.deskewModule ?? deskewModuleRef.current,
+    cleanupModule: overrides?.cleanupModule ?? cleanupModuleRef.current,
+    restorationModule: overrides?.restorationModule ?? restorationModuleRef.current,
+    bleedModule: overrides?.bleedModule ?? bleedModuleRef.current,
+  }), []);
+
+  const restoreModulesSnapshot = useCallback((snapshot: ModulesSnapshot) => {
+    setCropModule(snapshot.cropModule);
+    setPageCrops(snapshot.pageCrops || {});
+    setDeskewModule(snapshot.deskewModule);
+    setCleanupModule(snapshot.cleanupModule);
+    setRestorationModule(snapshot.restorationModule);
+    setBleedModule(snapshot.bleedModule);
+  }, []);
 
   // Responsive slider controls (50ms for live dragging preview, 350ms for heavy OpenCV filtering)
   const debouncedMargin = useDebounce(restorationModule.borderMarginPx, 50);
@@ -400,12 +448,14 @@ export function useBookModules({
     });
     setCleanupModule({
       enabled: false,
-      maskScopeMode: "current",
-      maskCustomRange: "",
       maskColor: "#ffffff",
       flattenIllumination: false,
+      spineStrength: 1.0,
+      spineBox: null,
+      spineSelectionActive: false,
       despeckleLevel: 0,
       scope: { mode: "current", customRange: "" },
+      draftMaskBox: null,
       appliedEntries: [],
     });
     setRestorationModule({
@@ -817,31 +867,178 @@ export function useBookModules({
     }
   }, [sessionId, selectedPageId, cropModule.cropBox, cropModule.target, cropModule.detectMode, pages, setPages, updateCropModule, clearPageCrops, recordStep]);
 
-  // Reset deskew angle on current page or all pages
-  const resetDeskew = useCallback(async (scopeMode: "current" | "all" = "current") => {
-    if (!sessionId || !selectedPageId) return;
-    const resolved = resolveCropTarget(pages, selectedPageId, { base: scopeMode, customRange: "", parity: "both" });
-    const res = await apiFetch(`/api/book-scan/deskew-page/${sessionId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        page_id: selectedPageId,
-        angle: 0.0,
-        clear_all: scopeMode === "all" || resolved.applyToAll,
-      }),
+  // Global tool-level reset for Deskew ("Like You Never Opened It")
+  const resetDeskew = useCallback(async () => {
+    if (!sessionId) return;
+    const nextDeskew: DeskewModuleConfig = {
+      ...deskewModuleRef.current,
+      enabled: false,
+      mode: "auto",
+      angle: 0.0,
+      maxAngle: 10.0,
+      ignoreBorders: true,
+      showGrid: false,
+      appliedEntries: [],
+    };
+    setDeskewModule(nextDeskew);
+    const cleanedPages = pages.map((p) => {
+      if (p.deskew_angle === undefined && p.deskew_angle === null) return p;
+      const next = { ...p, rev: (p.rev ?? 0) + 1 };
+      delete next.deskew_angle;
+      return next;
     });
-    if (res.ok) {
-      const data = await res.json();
-      setPages(data.pages);
-      recordStep?.(`Reset Deskew (${scopeMode === "all" ? "All" : "Page"})`, data.pages, selectedPageId);
+    setPages(cleanedPages);
+    const snap = buildModulesSnapshot({ deskewModule: nextDeskew });
+    try {
+      const res = await apiFetch(`/api/book-scan/deskew-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_id: selectedPageId ?? undefined,
+          angle: 0.0,
+          clear_all: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.("Reset Deskew (All Pages)", data.pages, selectedPageId, snap);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Reset deskew failed:", err);
     }
-  }, [sessionId, selectedPageId, pages, setPages, recordStep]);
+    recordStep?.("Reset Deskew (All Pages)", cleanedPages, selectedPageId, snap);
+  }, [sessionId, selectedPageId, pages, setPages, buildModulesSnapshot, recordStep]);
+
+  // Global tool-level reset for Cleanup & Erase ("Like You Never Opened It")
+  const resetCleanup = useCallback(async () => {
+    if (!sessionId) return;
+    const nextCleanup: CleanupModuleConfig = {
+      ...cleanupModuleRef.current,
+      enabled: false,
+      maskColor: "#ffffff",
+      flattenIllumination: false,
+      spineStrength: 1.0,
+      spineBox: null,
+      pageSpineBoxes: {},
+      spineSelectionActive: false,
+      despeckleLevel: 0,
+      draftMaskBox: null,
+      pageDraftMasks: {},
+      appliedEntries: [],
+    };
+    setCleanupModule(nextCleanup);
+    const cleanedPages = pages.map((p) =>
+      p.masks && p.masks.length > 0 ? { ...p, masks: [], rev: (p.rev ?? 0) + 1 } : p
+    );
+    setPages(cleanedPages);
+    const snap = buildModulesSnapshot({ cleanupModule: nextCleanup });
+    setCleanupActionProgress({ active: true, progress: 50, label: "Resetting cleanup & erase..." });
+    try {
+      const res = await apiFetch(`/api/book-scan/mask-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_all" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          setCleanupActionProgress({ active: true, progress: 100, label: "Cleanup reset complete" });
+          recordStep?.("Reset Cleanup (All Pages)", data.pages, selectedPageId, snap);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to reset cleanup:", err);
+    } finally {
+      setTimeout(() => setCleanupActionProgress(IDLE_PROGRESS), 250);
+    }
+    recordStep?.("Reset Cleanup (All Pages)", cleanedPages, selectedPageId, snap);
+  }, [sessionId, selectedPageId, pages, setPages, buildModulesSnapshot, recordStep]);
+
+  // Global tool-level reset for Colors & Tone ("Like You Never Opened It")
+  const resetRestoration = useCallback(async () => {
+    if (!sessionId) return;
+    const nextRestore: RestorationModuleConfig = {
+      ...restorationModuleRef.current,
+      enabled: false,
+      cleanBorders: false,
+      borderMarginPx: 15,
+      borderThreshold: 210,
+      enhanceColors: true,
+      saturation: 1.30,
+      contrast: 1.10,
+      colorMode: "auto",
+      bwThreshold: 180,
+      whitenBg: false,
+      sharpen: true,
+      appliedEntries: [],
+    };
+    setRestorationModule(nextRestore);
+    const cleanedPages = pages.map((p) => {
+      if (!p.color_mode) return p;
+      const next = { ...p, rev: (p.rev ?? 0) + 1 };
+      delete next.color_mode;
+      return next;
+    });
+    setPages(cleanedPages);
+    const snap = buildModulesSnapshot({ restorationModule: nextRestore });
+    try {
+      const res = await apiFetch(`/api/book-scan/color-mode-page/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_id: selectedPageId ?? undefined,
+          color_mode: "",
+          clear_all: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.("Reset Colors & Tone (All Pages)", data.pages, selectedPageId, snap);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to reset color modes:", err);
+    }
+    recordStep?.("Reset Colors & Tone (All Pages)", cleanedPages, selectedPageId, snap);
+  }, [sessionId, selectedPageId, pages, setPages, buildModulesSnapshot, recordStep]);
+
+  // Global tool-level reset for Print Bleed ("Like You Never Opened It")
+  const resetBleed = useCallback(() => {
+    const nextBleed: BleedModuleConfig = {
+      ...bleedModuleRef.current,
+      enabled: false,
+      bleedMm: 3.0,
+      mode: "mirror",
+      solidColor: "#ffffff",
+      placement: "outside",
+      showCropMarks: true,
+      appliedBleeds: [],
+    };
+    setBleedModule(nextBleed);
+    const snap = buildModulesSnapshot({ bleedModule: nextBleed });
+    recordStep?.("Reset Print Bleed (All Pages)", pages, selectedPageId, snap);
+  }, [pages, selectedPageId, buildModulesSnapshot, recordStep]);
 
   const dismissExportProgress = useCallback(() => {
     if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
+      clearTimeout(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    if (pollAbortControllerRef.current) {
+      pollAbortControllerRef.current.abort();
+      pollAbortControllerRef.current = null;
+    }
+    isExportingRef.current = false;
+    hasDownloadedRef.current = false;
     setExportProgress((prev) => ({ ...prev, status: "idle" }));
     setIsExporting(false);
   }, []);
@@ -851,12 +1048,14 @@ export function useBookModules({
     if (!sessionId || !selectedPageId) return;
     const scopeMode = cleanupModule.scope?.mode || "current";
     const scopeRange = cleanupModule.scope?.customRange || "";
+    const dualSides = cleanupModule.scope?.dualSides;
     const { ids: targetIds, label: targetLabel } = resolveMaskTargetIds(
       pages,
       selectedPageId,
       selectedPageIds,
       scopeMode,
-      scopeRange
+      scopeRange,
+      dualSides
     );
     if (targetIds.length === 0) return;
 
@@ -1041,6 +1240,59 @@ export function useBookModules({
     }
   }, [sessionId, selectedPageId, setPages, recordStep]);
 
+  // Commit cleanup filter adjustments (Spine Shadow & Despeckle) across scope into appliedEntries + record history
+  const applyCleanupFilters = useCallback((targetScope?: ModulePageScope) => {
+    const sc = targetScope || cleanupModule.scope;
+    const concrete = resolveConcretePageNumbers(pages, sc, selectedPageId);
+    const hasSpine = cleanupModule.flattenIllumination;
+    const hasDespeckle = cleanupModule.despeckleLevel > 0;
+    const isAll = sc.mode === "all";
+
+    const parts: string[] = [];
+    if (hasSpine) parts.push(`Spine ${Math.round((cleanupModule.spineStrength ?? 1.0) * 100)}%`);
+    if (hasDespeckle) parts.push(`Despeckle ${cleanupModule.despeckleLevel.toFixed(1)}`);
+    const details = parts.length > 0 ? parts.join(" • ") : "Off";
+
+    const entry: AppliedModuleEntry = {
+      id: `cleanup_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      label: "Cleanup",
+      details,
+      scopeLabel: concrete.scopeLabel,
+      origScope: isAll ? "all" : undefined,
+      excludedPages: [],
+      targetPages: concrete.pageNumbers,
+      targetPageIds: concrete.pageIds,
+      visible: true,
+      params: {
+        flattenIllumination: cleanupModule.flattenIllumination,
+        spineStrength: cleanupModule.spineStrength ?? 1.0,
+        spineBox: cleanupModule.spineBox ?? null,
+        despeckleLevel: cleanupModule.despeckleLevel,
+        isMaskEntry: false,
+      },
+    };
+
+    const nextCleanup: CleanupModuleConfig = {
+      ...cleanupModuleRef.current,
+      enabled: true,
+      appliedEntries: [
+        ...(cleanupModuleRef.current.appliedEntries || []).filter((e) => e.scopeLabel !== concrete.scopeLabel && !(e.params?.isMaskEntry)),
+        entry,
+      ],
+    };
+    setCleanupModule(nextCleanup);
+
+    setCleanupActionProgress({
+      active: true,
+      progress: 100,
+      label: `Applied filters (${concrete.scopeLabel})`,
+    });
+    setTimeout(() => setCleanupActionProgress(IDLE_PROGRESS), 250);
+
+    const snap = buildModulesSnapshot({ cleanupModule: nextCleanup });
+    recordStep?.(`Cleanup Filters (${concrete.scopeLabel} • ${details})`, pages, selectedPageId, snap);
+  }, [cleanupModule, pages, selectedPageId, buildModulesSnapshot, recordStep]);
+
   // Set or clear per-page color mode override ("auto" | "color" | "grayscale" | "bw" | null)
   const setPageColorMode = useCallback(async (
     colorMode: CleanupColorMode | null,
@@ -1053,29 +1305,60 @@ export function useBookModules({
 
     // Optimistic update
     const idSet = new Set(ids);
-    setPages((prev) =>
-      prev.map((p) => {
-        if (clearAll) {
-          if (!p.color_mode) return p;
-          const next = { ...p, rev: (p.rev ?? 0) + 1 };
-          delete next.color_mode;
-          return next;
+    const updatedPages = pages.map((p) => {
+      if (clearAll) {
+        if (!p.color_mode) return p;
+        const next = { ...p, rev: (p.rev ?? 0) + 1 };
+        delete next.color_mode;
+        return next;
+      }
+      if (idSet.has(p.id)) {
+        const next = { ...p, rev: (p.rev ?? 0) + 1 };
+        if (colorMode) next.color_mode = colorMode;
+        else delete next.color_mode;
+        return next;
+      }
+      return p;
+    });
+    setPages(updatedPages);
+
+    const concrete = resolveConcretePageNumbers(pages, restorationModuleRef.current.scope, selectedPageId);
+    const modeLabel = colorMode ? colorMode.toUpperCase() : "Reset";
+    const nextRestore: RestorationModuleConfig = colorMode
+      ? {
+          ...restorationModuleRef.current,
+          enabled: true,
+          colorMode,
+          appliedEntries: [
+            ...(restorationModuleRef.current.appliedEntries || []).filter((e) => e.scopeLabel !== concrete.scopeLabel),
+            {
+              id: `restore_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              label: "Colors & Tone",
+              details: modeLabel,
+              scopeLabel: concrete.scopeLabel,
+              origScope: restorationModuleRef.current.scope.mode === "all" ? "all" : undefined,
+              excludedPages: [],
+              targetPages: concrete.pageNumbers,
+              targetPageIds: concrete.pageIds,
+              visible: true,
+              params: {
+                colorMode,
+                whitenBg: restorationModuleRef.current.whitenBg,
+                saturation: restorationModuleRef.current.saturation,
+                contrast: restorationModuleRef.current.contrast,
+                bwThreshold: restorationModuleRef.current.bwThreshold,
+              },
+            },
+          ],
         }
-        if (idSet.has(p.id)) {
-          const next = { ...p, rev: (p.rev ?? 0) + 1 };
-          if (colorMode) next.color_mode = colorMode;
-          else delete next.color_mode;
-          return next;
-        }
-        return p;
-      })
-    );
+      : { ...restorationModuleRef.current };
     if (colorMode) {
-      setRestorationModule((prev) => ({ ...prev, enabled: true }));
+      setRestorationModule(nextRestore);
     }
+    const snap = buildModulesSnapshot({ restorationModule: nextRestore });
 
     try {
-      await apiFetch(`/api/book-scan/color-mode-page/${sessionId}`, {
+      const res = await apiFetch(`/api/book-scan/color-mode-page/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1085,10 +1368,29 @@ export function useBookModules({
           clear_all: clearAll,
         }),
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pages) {
+          setPages(data.pages);
+          recordStep?.(
+            clearAll ? "Clear Color Modes" : `Colors & Tone (${concrete.scopeLabel} • ${modeLabel})`,
+            data.pages,
+            selectedPageId,
+            snap
+          );
+          return;
+        }
+      }
     } catch (err) {
       console.error("Failed to persist per-page color mode:", err);
     }
-  }, [sessionId, selectedPageId, setPages]);
+    recordStep?.(
+      clearAll ? "Clear Color Modes" : `Colors & Tone (${concrete.scopeLabel} • ${modeLabel})`,
+      updatedPages,
+      selectedPageId,
+      snap
+    );
+  }, [sessionId, selectedPageId, pages, setPages, buildModulesSnapshot, recordStep]);
 
   // Export print-ready PDF or multi-format ZIP archive with real-time job progress tracking
   const exportPdf = useCallback(async (
@@ -1096,6 +1398,12 @@ export function useBookModules({
     options?: ExportOptions
   ) => {
     if (!sessionId) return;
+    if (isExportingRef.current) {
+      console.warn("[exportPdf] Export already running, ignoring concurrent click.");
+      return;
+    }
+    isExportingRef.current = true;
+    hasDownloadedRef.current = false;
     setIsExporting(true);
     setExportError(null);
 
@@ -1105,9 +1413,15 @@ export function useBookModules({
     const tiffCompression = options?.tiffCompression || "lzw";
 
     if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
+      clearTimeout(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    if (pollAbortControllerRef.current) {
+      pollAbortControllerRef.current.abort();
+      pollAbortControllerRef.current = null;
+    }
+    const abortController = new AbortController();
+    pollAbortControllerRef.current = abortController;
 
     setExportProgress({
       jobId: null,
@@ -1180,33 +1494,58 @@ export function useBookModules({
       });
     }
 
+    // Strict Draft vs Applied Guard: Discard unapplied draft slider adjustments on export.
+    // An effect is only exported if it was committed via Apply (recorded in appliedEntries or page entities).
+    const hasAppliedRestoration = Boolean(
+      (restorationModule.appliedEntries && restorationModule.appliedEntries.length > 0) ||
+      Object.keys(perPageColorsMap).length > 0
+    );
+    const isRestorationActive = restorationModule.enabled && hasAppliedRestoration;
+
+    const hasAppliedBleed = Boolean(
+      bleedModule.appliedBleeds && bleedModule.appliedBleeds.length > 0
+    );
+    const isBleedActive = bleedModule.enabled && hasAppliedBleed;
+
+    const hasAppliedCleanup = Boolean(
+      (cleanupModule.appliedEntries && cleanupModule.appliedEntries.length > 0) ||
+      Object.keys(perPageCleanupMap).length > 0
+    );
+    const isCleanupActive = cleanupModule.enabled && hasAppliedCleanup;
+
+    const hasAppliedDeskew = Boolean(
+      (deskewModule.appliedEntries && deskewModule.appliedEntries.length > 0) ||
+      Object.keys(perPageAnglesMap).length > 0
+    );
+    const isDeskewActive = deskewModule.enabled && hasAppliedDeskew;
+
     const exportPayload = {
       export_format: exportFormat,
       tiff_compression: tiffCompression,
-      bleed_mm: bleedModule.bleedMm,
+      bleed_mm: isBleedActive ? bleedModule.bleedMm : 0.0,
       bleed_mode: bleedModule.mode,
       bleed_color: bleedModule.solidColor,
       bleed_placement: bleedModule.placement,
-      show_crop_marks: bleedModule.showCropMarks,
+      show_crop_marks: isBleedActive ? bleedModule.showCropMarks : false,
       dpi: exportDpi,
       quality: exportQuality,
       optimize_compression: true,
-      clean_borders: restorationModule.cleanBorders,
+      clean_borders: isRestorationActive ? restorationModule.cleanBorders : false,
       border_margin_px: restorationModule.borderMarginPx,
       border_threshold: restorationModule.borderThreshold,
-      enhance_colors: restorationModule.enhanceColors,
-      saturation: restorationModule.saturation,
-      contrast: restorationModule.contrast,
-      color_mode: restorationModule.colorMode,
+      enhance_colors: isRestorationActive ? restorationModule.enhanceColors : false,
+      saturation: isRestorationActive ? restorationModule.saturation : 1.0,
+      contrast: isRestorationActive ? restorationModule.contrast : 1.0,
+      color_mode: isRestorationActive ? restorationModule.colorMode : "original",
       bw_threshold: restorationModule.bwThreshold,
-      whiten_bg: restorationModule.whitenBg,
+      whiten_bg: isRestorationActive ? restorationModule.whitenBg : false,
       deskew: false,
-      sharpen: restorationModule.sharpen,
+      sharpen: isRestorationActive ? restorationModule.sharpen : false,
 
       // Modular configurations & page scopes
-      deskew_module_enabled: deskewModule.enabled,
-      deskew_mode: deskewModule.mode,
-      deskew_angle: deskewModule.angle,
+      deskew_module_enabled: isDeskewActive,
+      deskew_mode: isDeskewActive ? deskewModule.mode : "manual",
+      deskew_angle: isDeskewActive ? deskewModule.angle : 0.0,
       deskew_max_angle: deskewModule.maxAngle,
       deskew_ignore_borders: deskewModule.ignoreBorders,
       deskew_scope_mode: resolveModuleExportScope(deskewModule.scope, deskewModule.appliedEntries).mode,
@@ -1215,20 +1554,20 @@ export function useBookModules({
       per_page_crops: cropModule.enabled && Object.keys(draftCropsMap).length > 0 ? draftCropsMap : undefined,
       per_page_color_modes: Object.keys(perPageColorsMap).length > 0 ? perPageColorsMap : undefined,
 
-      cleanup_module_enabled: cleanupModule.enabled,
-      flatten_illumination: cleanupModule.flattenIllumination,
+      cleanup_module_enabled: isCleanupActive,
+      flatten_illumination: isCleanupActive ? cleanupModule.flattenIllumination : false,
       spine_strength: cleanupModule.spineStrength ?? 1.0,
-      spine_box: cleanupModule.spineBox ?? undefined,
-      despeckle_level: cleanupModule.despeckleLevel,
+      spine_box: isCleanupActive ? (cleanupModule.spineBox ?? undefined) : undefined,
+      despeckle_level: isCleanupActive ? cleanupModule.despeckleLevel : 0,
       cleanup_scope_mode: resolveModuleExportScope(cleanupModule.scope, cleanupModule.appliedEntries).mode,
       cleanup_custom_range: resolveModuleExportScope(cleanupModule.scope, cleanupModule.appliedEntries).customRange,
       per_page_cleanup: Object.keys(perPageCleanupMap).length > 0 ? perPageCleanupMap : undefined,
 
-      bleed_module_enabled: bleedModule.enabled,
+      bleed_module_enabled: isBleedActive,
       bleed_scope_mode: resolveModuleExportScope(bleedModule.scope, bleedModule.appliedBleeds).mode,
       bleed_custom_range: resolveModuleExportScope(bleedModule.scope, bleedModule.appliedBleeds).customRange,
 
-      restoration_module_enabled: restorationModule.enabled,
+      restoration_module_enabled: isRestorationActive,
       restoration_scope_mode: resolveModuleExportScope(restorationModule.scope, restorationModule.appliedEntries).mode,
       restoration_custom_range: resolveModuleExportScope(restorationModule.scope, restorationModule.appliedEntries).customRange,
     };
@@ -1256,12 +1595,19 @@ export function useBookModules({
         totalPages: total_pages || pages.length,
       }));
 
-      // Poll every 350ms for smooth progress animation
-      pollIntervalRef.current = setInterval(async () => {
+      // Sequential polling: only schedule the next tick AFTER the previous response finishes.
+      // This eliminates concurrent request pile-up and guarantees exactly ONE download trigger.
+      const pollStatus = async () => {
+        if (abortController.signal.aborted || hasDownloadedRef.current) return;
+
         try {
-          const pollRes = await apiFetch(`/api/book-scan/export-job/${job_id}`);
+          const pollRes = await apiFetch(`/api/book-scan/export-job/${job_id}`, {
+            signal: abortController.signal,
+          });
           if (!pollRes.ok) return;
           const data = await pollRes.json();
+
+          if (abortController.signal.aborted || hasDownloadedRef.current) return;
 
           setExportProgress({
             jobId: job_id,
@@ -1276,10 +1622,13 @@ export function useBookModules({
           });
 
           if (data.status === "success") {
+            if (hasDownloadedRef.current) return;
+            hasDownloadedRef.current = true;
             if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
+              clearTimeout(pollIntervalRef.current);
               pollIntervalRef.current = null;
             }
+            isExportingRef.current = false;
             setIsExporting(false);
 
             const isArchive = exportFormat !== "pdf";
@@ -1287,22 +1636,38 @@ export function useBookModules({
               ? `book_${intakeMode}_${exportFormat}_${exportDpi}dpi.zip`
               : `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
             const downloadUrl = data.download_url || `/api/book-scan/export-download/${job_id}`;
-            downloadBlob(downloadUrl, targetFilename).catch((e) => {
+            await downloadBlob(downloadUrl, targetFilename).catch((e) => {
               console.error("Auto download failed:", e);
             });
-          } else if (data.status === "failed") {
+            return;
+          }
+
+          if (data.status === "failed") {
             if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
+              clearTimeout(pollIntervalRef.current);
               pollIntervalRef.current = null;
             }
+            isExportingRef.current = false;
             setIsExporting(false);
             setExportError(data.error || "Export failed.");
+            return;
           }
-        } catch (pollErr) {
+
+          // Schedule NEXT poll only AFTER previous response has cleanly returned
+          if (!abortController.signal.aborted && !hasDownloadedRef.current) {
+            pollIntervalRef.current = setTimeout(pollStatus, 350);
+          }
+        } catch (pollErr: unknown) {
+          const isAbort = pollErr instanceof Error && pollErr.name === "AbortError";
+          if (isAbort || abortController.signal.aborted || hasDownloadedRef.current) return;
           console.warn("Export polling hiccup:", pollErr);
+          pollIntervalRef.current = setTimeout(pollStatus, 800);
         }
-      }, 350);
+      };
+
+      pollIntervalRef.current = setTimeout(pollStatus, 350);
     } catch (err: unknown) {
+      isExportingRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setExportError(msg);
       setExportProgress((prev) => ({
@@ -1343,12 +1708,16 @@ export function useBookModules({
     revertCropLevel,
     resetCrop,
     resetDeskew,
+    resetCleanup,
+    resetRestoration,
+    resetBleed,
     removeAppliedCrop,
     removeAllAppliedCrops,
     applyMaskBox,
     removeMaskBox,
     clearPageMasks,
     clearAllMasks,
+    applyCleanupFilters,
     setPageColorMode,
     cropActionProgress,
     cleanupActionProgress,
@@ -1358,5 +1727,7 @@ export function useBookModules({
     exportPdf,
     exportProgress,
     dismissExportProgress,
+    buildModulesSnapshot,
+    restoreModulesSnapshot,
   };
 }

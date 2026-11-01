@@ -24,6 +24,7 @@ import {
   FocusedModuleId,
   BookStudioPage,
   ModuleTaskProgress,
+  ModulePageScope,
 } from "@/types/book_studio";
 import { LengthUnit } from "@/lib/units";
 import { CropSplitPanel } from "./modules/CropSplitPanel";
@@ -51,6 +52,9 @@ interface BookRightPanelProps {
   revertCropLevel?: (scopeMode?: "current" | "all") => Promise<void> | void;
   resetCrop?: (scopeMode?: "current" | "all") => Promise<void> | void;
   resetDeskew?: (scopeMode?: "current" | "all") => Promise<void> | void;
+  resetCleanup?: () => Promise<void> | void;
+  resetRestoration?: () => Promise<void> | void;
+  resetBleed?: () => void;
   removeAppliedCrop?: (id: string) => Promise<void> | void;
   removeAllAppliedCrops?: () => Promise<void> | void;
   pages: BookStudioPage[];
@@ -70,6 +74,7 @@ interface BookRightPanelProps {
   onClearAllMasks?: () => void;
   applyMaskBox?: (box: CropBox, selectedPageIds?: string[], customColor?: string, existingMaskId?: string) => Promise<MaskBox | undefined>;
   removeMaskBox?: (maskId: string) => Promise<void>;
+  applyCleanupFilters?: (targetScope?: ModulePageScope) => void;
   pageColorMode?: CleanupColorMode | null;
   onSetPageColorMode?: (mode: CleanupColorMode | null, targetIds?: string[], clearAll?: boolean) => void;
   focusedModule: FocusedModuleId | null;
@@ -89,6 +94,10 @@ interface BookRightPanelProps {
   bleedProgress?: ModuleTaskProgress;
   restoreProgress?: ModuleTaskProgress;
   selectedPageId?: string | null;
+  onSelectPageId?: (id: string) => void;
+  onRecordDeskewHistory?: (label: string, nextDeskew: DeskewModuleConfig) => void;
+  onRecordBleedHistory?: (label: string, nextBleed: BleedModuleConfig) => void;
+  onRecordRestorationHistory?: (label: string, nextRestore: RestorationModuleConfig) => void;
   sessionId: string | null;
   unit?: LengthUnit;
   onActivateEyedropper?: () => void;
@@ -114,6 +123,9 @@ export function BookRightPanel({
   revertCropLevel,
   resetCrop,
   resetDeskew,
+  resetCleanup,
+  resetRestoration,
+  resetBleed,
   removeAppliedCrop,
   removeAllAppliedCrops,
   pages,
@@ -133,6 +145,7 @@ export function BookRightPanel({
   onClearAllMasks,
   applyMaskBox,
   removeMaskBox,
+  applyCleanupFilters,
   pageColorMode = null,
   onSetPageColorMode,
   focusedModule = null,
@@ -152,6 +165,10 @@ export function BookRightPanel({
   bleedProgress,
   restoreProgress,
   selectedPageId,
+  onSelectPageId,
+  onRecordDeskewHistory,
+  onRecordBleedHistory,
+  onRecordRestorationHistory,
   sessionId,
   unit = "mm",
   onActivateEyedropper,
@@ -389,6 +406,9 @@ export function BookRightPanel({
             sessionId={sessionId}
             pages={pages}
             activePageNum={activePageNum}
+            isDualPage={isDualPage}
+            onSelectPageId={onSelectPageId}
+            onRecordHistory={onRecordDeskewHistory}
             shortcutLabels={shortcutLabels}
           />
         )}
@@ -406,10 +426,14 @@ export function BookRightPanel({
             onClearAllMasks={() => onClearAllMasks?.()}
             applyMaskBox={applyMaskBox}
             removeMaskBox={removeMaskBox}
+            applyCleanupFilters={applyCleanupFilters}
+            resetCleanup={resetCleanup}
             taskProgress={cleanupProgress}
             pages={pages}
             selectedPageId={selectedPageId}
             activePageNum={activePageNum}
+            isDualPage={isDualPage}
+            onSelectPageId={onSelectPageId}
             shortcutLabels={shortcutLabels}
           />
         )}
@@ -420,11 +444,15 @@ export function BookRightPanel({
             setRestorationModule={setRestorationModule}
             pageColorMode={pageColorMode}
             onSetPageColorMode={onSetPageColorMode}
+            resetRestoration={resetRestoration}
             colorOverridePagesCount={colorOverridePagesCount}
             taskProgress={restoreProgress}
             pages={pages}
             selectedPageId={selectedPageId}
             activePageNum={activePageNum}
+            isDualPage={isDualPage}
+            onSelectPageId={onSelectPageId}
+            onRecordHistory={onRecordRestorationHistory}
             shortcutLabels={shortcutLabels}
           />
         )}
@@ -435,10 +463,14 @@ export function BookRightPanel({
             setBleedModule={setBleedModule}
             unit={unit}
             onActivateEyedropper={onActivateEyedropper}
+            resetBleed={resetBleed}
             taskProgress={bleedProgress}
             pages={pages}
             selectedPageId={selectedPageId}
             activePageNum={activePageNum}
+            isDualPage={isDualPage}
+            onSelectPageId={onSelectPageId}
+            onRecordHistory={onRecordBleedHistory}
             shortcutLabels={shortcutLabels}
           />
         )}

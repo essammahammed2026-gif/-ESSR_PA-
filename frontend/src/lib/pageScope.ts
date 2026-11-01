@@ -47,7 +47,16 @@ export function isPageInScope(
     return true;
   }
   if (scope.mode === "current") {
-    return activePageNum !== undefined ? pageNum === activePageNum : true;
+    if (activePageNum === undefined) return true;
+    if (scope.dualSides && scope.dualSides.length > 0) {
+      const pairStartIdx = Math.floor((activePageNum - 1) / 2) * 2;
+      const leftPageNum = pairStartIdx + 1;
+      const rightPageNum = pairStartIdx + 2;
+      if (scope.dualSides.includes("left") && pageNum === leftPageNum) return true;
+      if (scope.dualSides.includes("right") && pageNum === rightPageNum) return true;
+      return false;
+    }
+    return pageNum === activePageNum;
   }
   if (scope.mode === "odds") {
     return pageNum % 2 !== 0;
@@ -117,45 +126,118 @@ export function resolveCropTarget(
   return { applyToAll: false, ids, label };
 }
 
+export interface DualSpreadState {
+  pairStartIdx: number;
+  leftPage: BookStudioPage | null;
+  rightPage: BookStudioPage | null;
+  leftPageId: string;
+  rightPageId: string;
+  leftPageNum: number;
+  rightPageNum: number | undefined;
+  isDualActive: boolean;
+  isDualLinked: boolean;
+  activeDualSide: "left" | "right" | null;
+  activePage: BookStudioPage | null;
+  activePageId: string | null;
+}
+
+/**
+ * Canonical dual-page spread state resolver shared across all Book Studio tools
+ * (Crop, Split, Deskew, Cleanup, Colors & Tone, and Print Bleed).
+ */
+export function resolveDualSpreadState(
+  pages: BookStudioPage[] | undefined,
+  selectedPageId: string | null | undefined,
+  isDualPage: boolean = false,
+  dualSides?: Array<"left" | "right">
+): DualSpreadState {
+  const list = pages || [];
+  const rawIdx = selectedPageId ? list.findIndex((p) => p.id === selectedPageId) : -1;
+  const pairStartIdx = isDualPage && rawIdx >= 0 ? Math.floor(rawIdx / 2) * 2 : rawIdx;
+  const leftPage = pairStartIdx >= 0 && list[pairStartIdx] ? list[pairStartIdx] : (list[0] ?? null);
+  const leftPageId = leftPage?.id ?? (selectedPageId ?? "");
+  const leftPageNum = pairStartIdx >= 0 ? pairStartIdx + 1 : 1;
+  const hasRightPage = Boolean(isDualPage && pairStartIdx >= 0 && pairStartIdx + 1 < list.length);
+  const rightPage = hasRightPage ? list[pairStartIdx + 1] : null;
+  const rightPageId = rightPage?.id ?? "";
+  const rightPageNum = hasRightPage ? leftPageNum + 1 : undefined;
+
+  const isDualActive = Boolean(isDualPage && hasRightPage);
+  const isDualLinked = isDualActive && (dualSides?.length ?? 2) >= 2;
+  const activeDualSide: "left" | "right" | null =
+    isDualActive && dualSides?.length === 1 ? dualSides[0] : null;
+
+  let activePage: BookStudioPage | null = leftPage;
+  if (isDualActive && activeDualSide === "right" && rightPage) {
+    activePage = rightPage;
+  } else if (!isDualActive && selectedPageId) {
+    activePage = list.find((p) => p.id === selectedPageId) ?? leftPage;
+  }
+
+  return {
+    pairStartIdx,
+    leftPage,
+    rightPage,
+    leftPageId,
+    rightPageId,
+    leftPageNum,
+    rightPageNum,
+    isDualActive,
+    isDualLinked,
+    activeDualSide,
+    activePage,
+    activePageId: activePage?.id ?? null,
+  };
+}
+
+/**
+ * Computes the next ModulePageScope when the user clicks the "Dual" scope button.
+ * Switches between Linked (both pages: ["left", "right"]) and Unlinked (individual page: ["left"]).
+ */
+export function toggleDualModuleScope(
+  scope: ModulePageScope,
+  dualState: DualSpreadState,
+  onSelectPageId?: (id: string) => void
+): ModulePageScope {
+  if (scope.mode !== "current") {
+    return { ...scope, mode: "current", dualSides: ["left", "right"] };
+  }
+  if (dualState.isDualLinked) {
+    if (dualState.leftPageId && onSelectPageId) {
+      onSelectPageId(dualState.leftPageId);
+    }
+    return { ...scope, dualSides: ["left"] };
+  }
+  return { ...scope, dualSides: ["left", "right"] };
+}
+
 /**
  * Resolves a ModulePageScopeMode ("current" | "all" | "odds" | "evens" | "range")
- * into explicit target page IDs and a human-readable summary label.
+ * into explicit target page IDs and a human-readable summary label,
+ * honoring dual-page sides when in "current" mode.
  */
 export function resolveMaskTargetIds(
   pages: BookStudioPage[],
   selectedPageId: string | null | undefined,
   selectedPageIds: string[],
   scopeMode: MaskApplyScopeMode,
-  customRange: string = ""
+  customRange: string = "",
+  dualSides?: Array<"left" | "right">
 ): { ids: string[]; label: string } {
-  if (scopeMode === "current") {
+  const concrete = resolveConcretePageNumbers(
+    pages,
+    { mode: scopeMode, customRange, dualSides },
+    selectedPageId
+  );
+  if (scopeMode === "current" && (!dualSides || dualSides.length === 0) && selectedPageIds.length > 0) {
     return {
-      ids: selectedPageId ? [selectedPageId] : [],
-      label: "Current Page",
+      ids: selectedPageIds,
+      label: selectedPageIds.length > 1 ? `Dual (${selectedPageIds.length}p)` : concrete.scopeLabel,
     };
   }
-  if (scopeMode === "all") {
-    return {
-      ids: pages.map((p) => p.id),
-      label: `All Pages (${pages.length})`,
-    };
-  }
-  if (scopeMode === "odds") {
-    const ids = pages.filter((_, i) => (i + 1) % 2 !== 0).map((p) => p.id);
-    return { ids, label: `Odd Pages (${ids.length})` };
-  }
-  if (scopeMode === "evens") {
-    const ids = pages.filter((_, i) => (i + 1) % 2 === 0).map((p) => p.id);
-    return { ids, label: `Even Pages (${ids.length})` };
-  }
-  // range
-  const wanted = parsePageRange(customRange);
-  const ids = wanted.size > 0
-    ? pages.filter((_, i) => wanted.has(i + 1)).map((p) => p.id)
-    : (selectedPageId ? [selectedPageId] : []);
   return {
-    ids,
-    label: customRange.trim() ? `Range (${customRange.trim()})` : "Range",
+    ids: concrete.pageIds,
+    label: concrete.scopeLabel,
   };
 }
 
@@ -186,6 +268,30 @@ export function resolveConcretePageNumbers(
   const resolvedNum = resolvedIdx + 1;
 
   if (scope.mode === "current") {
+    if (scope.dualSides && scope.dualSides.length > 0 && activeIdx >= 0) {
+      const pairStartIdx = Math.floor(activeIdx / 2) * 2;
+      const pageNumbers: number[] = [];
+      const pageIndices: number[] = [];
+      const pageIds: string[] = [];
+      if (scope.dualSides.includes("left") && pages[pairStartIdx]) {
+        pageIndices.push(pairStartIdx);
+        pageNumbers.push(pairStartIdx + 1);
+        pageIds.push(pages[pairStartIdx].id);
+      }
+      if (scope.dualSides.includes("right") && pages[pairStartIdx + 1]) {
+        pageIndices.push(pairStartIdx + 1);
+        pageNumbers.push(pairStartIdx + 2);
+        pageIds.push(pages[pairStartIdx + 1].id);
+      }
+      if (pageNumbers.length > 0) {
+        return {
+          pageNumbers,
+          pageIndices,
+          pageIds,
+          scopeLabel: pageNumbers.length > 1 ? `Dual (P.${pageNumbers.join(", P.")})` : `P.${pageNumbers[0]}`,
+        };
+      }
+    }
     const page = pages[resolvedIdx];
     return {
       pageNumbers: [resolvedNum],

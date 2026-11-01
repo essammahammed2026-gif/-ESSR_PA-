@@ -213,13 +213,19 @@ export interface PageCanvasProps {
   onApplyStraightenAngle?: (deltaAngle: number) => void;
   maskToolActive?: boolean;
   pageMasks?: MaskBox[];
-  onApplyMaskBox?: (box: CropBox) => void;
+  secondaryPageMasks?: MaskBox[];
+  primaryDraftMaskBox?: MaskBox | null;
+  secondaryDraftMaskBox?: MaskBox | null;
+  primarySpineBox?: CropBox | null;
+  secondarySpineBox?: CropBox | null;
+  onApplyMaskBox?: (box: CropBox, side?: "primary" | "secondary") => void;
   onRemoveMaskBox?: (maskId: string) => void;
   cropModule?: CropModuleConfig;
   bleedModule?: BleedModuleConfig;
   cleanupModule?: CleanupModuleConfig;
   restorationModule?: RestorationModuleConfig;
   pageColorMode?: CleanupColorMode | null;
+  secondaryPageColorMode?: CleanupColorMode | null;
   onMaskPointerDown?: (handle: string, e: React.PointerEvent) => void;
   onSpinePointerDown?: (handle: string, e: React.PointerEvent) => void;
   splitLines: SplitLine[];
@@ -265,6 +271,11 @@ export function PageCanvas({
   onApplyStraightenAngle,
   maskToolActive = false,
   pageMasks = [],
+  secondaryPageMasks = [],
+  primaryDraftMaskBox,
+  secondaryDraftMaskBox,
+  primarySpineBox,
+  secondarySpineBox,
   onApplyMaskBox,
   onRemoveMaskBox,
   cropModule,
@@ -272,6 +283,7 @@ export function PageCanvas({
   cleanupModule,
   restorationModule,
   pageColorMode = null,
+  secondaryPageColorMode = null,
   onMaskPointerDown,
   onSpinePointerDown,
   splitLines,
@@ -297,12 +309,14 @@ export function PageCanvas({
     x2: number;
     y2: number;
     deltaAngle: number;
+    side: "primary" | "secondary";
   } | null>(null);
   const [maskDrag, setMaskDrag] = useState<{
     x1: number;
     y1: number;
     x2: number;
     y2: number;
+    side: "primary" | "secondary";
   } | null>(null);
   const [isDraggingCurtain, setIsDraggingCurtain] = useState<boolean>(false);
   const [hintText, setHintText] = useState<string | null>(null);
@@ -351,9 +365,10 @@ export function PageCanvas({
   };
 
   // Real-time CSS visual filters for Colors & Tone WYSIWYG preview
-  const canvasImageFilter = useMemo(() => {
+  const computeCanvasImageFilter = (colorOverride?: CleanupColorMode | null) => {
+    if (!restorationModule?.enabled && !colorOverride) return "none";
     const filters: string[] = [];
-    const mode = restorationModule?.colorMode || pageColorMode || "auto";
+    const mode = colorOverride || (restorationModule?.enabled ? restorationModule.colorMode : "auto") || "auto";
 
     if (mode === "grayscale") {
       filters.push("grayscale(100%)");
@@ -363,7 +378,7 @@ export function PageCanvas({
       filters.push("grayscale(100%)", `contrast(${contrastVal}%)`);
     }
 
-    if (restorationModule) {
+    if (restorationModule?.enabled) {
       if (restorationModule.contrast !== undefined && restorationModule.contrast !== 1.0) {
         filters.push(`contrast(${Math.round(restorationModule.contrast * 100)}%)`);
       }
@@ -376,7 +391,12 @@ export function PageCanvas({
     }
 
     return filters.length > 0 ? filters.join(" ") : "none";
-  }, [restorationModule, pageColorMode]);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const canvasImageFilter = useMemo(() => computeCanvasImageFilter(pageColorMode), [restorationModule, pageColorMode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const secondaryCanvasImageFilter = useMemo(() => computeCanvasImageFilter(secondaryPageColorMode), [restorationModule, secondaryPageColorMode]);
 
   // Auto-fading tool hint pill so it never permanently blocks the preview canvas
   useEffect(() => {
@@ -425,16 +445,18 @@ export function PageCanvas({
     }
   };
 
-  const handleRulerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleRulerPointerDown = (side: "primary" | "secondary", e: React.PointerEvent<HTMLDivElement>) => {
     if (!straightenActive) return;
     e.stopPropagation();
     e.preventDefault();
+    if (side === "secondary") onSelectSecondaryPage?.();
+    else onSelectPrimaryPage?.();
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
     e.currentTarget.setPointerCapture(e.pointerId);
-    setRulerDrag({ x1: x, y1: y, x2: x, y2: y, deltaAngle: 0 });
+    setRulerDrag({ x1: x, y1: y, x2: x, y2: y, deltaAngle: 0, side });
   };
 
   const handleRulerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -462,7 +484,7 @@ export function PageCanvas({
     }
   };
 
-  const handleMaskPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleMaskPointerDown = (side: "primary" | "secondary", e: React.PointerEvent<HTMLDivElement>) => {
     if (!maskToolActive) return;
     e.stopPropagation();
     e.preventDefault();
@@ -471,7 +493,7 @@ export function PageCanvas({
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
     e.currentTarget.setPointerCapture(e.pointerId);
-    setMaskDrag({ x1: x, y1: y, x2: x, y2: y });
+    setMaskDrag({ x1: x, y1: y, x2: x, y2: y, side });
   };
 
   const handleMaskPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -492,6 +514,7 @@ export function PageCanvas({
     const y1 = Math.min(maskDrag.y1, maskDrag.y2);
     const x2 = Math.max(maskDrag.x1, maskDrag.x2);
     const y2 = Math.max(maskDrag.y1, maskDrag.y2);
+    const side = maskDrag.side;
     const wPx = (x2 - x1) * rect.width;
     const hPx = (y2 - y1) * rect.height;
     setMaskDrag(null);
@@ -501,7 +524,7 @@ export function PageCanvas({
         y1: Math.round(y1 * 1000) / 1000,
         x2: Math.round(x2 * 1000) / 1000,
         y2: Math.round(y2 * 1000) / 1000,
-      });
+      }, side);
     }
   };
 
@@ -545,7 +568,7 @@ export function PageCanvas({
   }
 
   const samplePixelColor = (e: React.MouseEvent<HTMLImageElement>): string | null => {
-    const img = imgRef.current;
+    const img = e.currentTarget || imgRef.current;
     if (!img) return null;
     const rect = img.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0 || img.naturalWidth <= 0 || img.naturalHeight <= 0) return null;
@@ -598,84 +621,271 @@ export function PageCanvas({
     }
   };
 
+  // Reusable 8-handle interactive box (used for Crop Box, Draft Mask Box, and Spine Selection Box)
+  const renderResizableBox = (opts: {
+    box: CropBox;
+    onPointerDown: (handle: string, e: React.PointerEvent) => void;
+    borderColor: string;
+    backgroundColor?: string;
+    boxShadow?: string;
+    borderStyle?: "solid" | "dashed";
+    handleColor: string;
+    edgeHoverClass?: string;
+    moveTitle: string;
+    zIndexClass?: string;
+    disabled?: boolean;
+  }) => {
+    const x1 = Math.min(opts.box.x1, opts.box.x2);
+    const y1 = Math.min(opts.box.y1, opts.box.y2);
+    const w = Math.max(0.005, Math.abs(opts.box.x2 - opts.box.x1));
+    const h = Math.max(0.005, Math.abs(opts.box.y2 - opts.box.y1));
+
+    return (
+      <div
+        className={`absolute border-2 ${opts.borderStyle === "dashed" ? "border-dashed" : "border-solid shadow-[0_0_0_1px_rgba(0,0,0,0.6),0_0_24px_rgba(0,0,0,0.35)]"} select-none touch-none ${opts.zIndexClass || ""} ${
+          opts.disabled ? "pointer-events-none" : "pointer-events-auto"
+        }`}
+        style={{
+          borderColor: opts.borderColor,
+          backgroundColor: opts.backgroundColor,
+          boxShadow: opts.boxShadow,
+          top: `${y1 * 100}%`,
+          left: `${x1 * 100}%`,
+          width: `${w * 100}%`,
+          height: `${h * 100}%`,
+        }}
+      >
+        <div
+          onPointerDown={(e) => opts.onPointerDown("move", e)}
+          className="absolute inset-2 cursor-move z-10"
+          title={opts.moveTitle}
+        />
+        <div
+          onPointerDown={(e) => opts.onPointerDown("n", e)}
+          className={`absolute -top-2 left-2 right-2 h-4 cursor-ns-resize z-20 ${opts.edgeHoverClass || "hover:bg-white/10"} transition-colors pointer-events-auto`}
+          title="Drag top edge to resize height"
+        />
+        <div
+          onPointerDown={(e) => opts.onPointerDown("s", e)}
+          className={`absolute -bottom-2 left-2 right-2 h-4 cursor-ns-resize z-20 ${opts.edgeHoverClass || "hover:bg-white/10"} transition-colors pointer-events-auto`}
+          title="Drag bottom edge to resize height"
+        />
+        <div
+          onPointerDown={(e) => opts.onPointerDown("w", e)}
+          className={`absolute top-2 bottom-2 -left-2 w-4 cursor-ew-resize z-20 ${opts.edgeHoverClass || "hover:bg-white/10"} transition-colors pointer-events-auto`}
+          title="Drag left edge to resize width"
+        />
+        <div
+          onPointerDown={(e) => opts.onPointerDown("e", e)}
+          className={`absolute top-2 bottom-2 -right-2 w-4 cursor-ew-resize z-20 ${opts.edgeHoverClass || "hover:bg-white/10"} transition-colors pointer-events-auto`}
+          title="Drag right edge to resize width"
+        />
+        {(["nw", "ne", "sw", "se"] as const).map((corner) => {
+          const posClass =
+            corner === "nw" ? "-top-2.5 -left-2.5 cursor-nwse-resize" :
+            corner === "ne" ? "-top-2.5 -right-2.5 cursor-nesw-resize" :
+            corner === "sw" ? "-bottom-2.5 -left-2.5 cursor-nesw-resize" :
+            "-bottom-2.5 -right-2.5 cursor-nwse-resize";
+          return (
+            <div
+              key={corner}
+              onPointerDown={(e) => opts.onPointerDown(corner, e)}
+              className={`absolute ${posClass} w-5 h-5 flex items-center justify-center z-30 group pointer-events-auto`}
+              title="Drag corner to resize"
+            >
+              <div
+                className="w-3 h-3 rounded-full ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform"
+                style={{ backgroundColor: opts.handleColor }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   // Crop box overlay, rendered over every visible page (primary + dual-mode secondary) when in Crop tool.
   const renderCropOverlay = (box?: CropBox, side: "primary" | "secondary" = "primary") => {
     if (isSplitMode || !cropModule?.enabled || !box) return null;
+    const disabled = isPanMode || eyedropperActive || straightenActive || maskToolActive;
     return (
       <div
         data-crop-overlay={side}
         onClick={(e) => e.stopPropagation()}
-        className={`absolute inset-0 select-none ${isPanMode || eyedropperActive || straightenActive || maskToolActive ? "pointer-events-none" : "pointer-events-auto"}`}
+        className={`absolute inset-0 select-none ${disabled ? "pointer-events-none" : "pointer-events-auto"}`}
       >
-        <div
-          className="absolute border-2 border-solid shadow-[0_0_0_1px_rgba(0,0,0,0.6),0_0_24px_rgba(0,0,0,0.35)] select-none"
-          style={{
-            borderColor: ACCENT,
-            top: `${box.y1 * 100}%`,
-            left: `${box.x1 * 100}%`,
-            width: `${(box.x2 - box.x1) * 100}%`,
-            height: `${(box.y2 - box.y1) * 100}%`,
-          }}
-        >
-          {/* Interior Draggable Area for Moving */}
-          <div
-            onPointerDown={(e) => onCropPointerDown("move", e)}
-            className="absolute inset-2 cursor-move z-10"
-            title="Drag interior to move crop box"
-          />
+        {renderResizableBox({
+          box,
+          onPointerDown: onCropPointerDown,
+          borderColor: ACCENT,
+          handleColor: ACCENT,
+          moveTitle: "Drag interior to move crop box",
+          disabled,
+        })}
+      </div>
+    );
+  };
 
-          {/* Edge Resize Bars */}
-          <div
-            onPointerDown={(e) => onCropPointerDown("n", e)}
-            className="absolute -top-2 left-2 right-2 h-4 cursor-ns-resize z-20 hover:bg-white/10 transition-colors"
-            title="Drag top edge to resize height"
-          />
-          <div
-            onPointerDown={(e) => onCropPointerDown("s", e)}
-            className="absolute -bottom-2 left-2 right-2 h-4 cursor-ns-resize z-20 hover:bg-white/10 transition-colors"
-            title="Drag bottom edge to resize height"
-          />
-          <div
-            onPointerDown={(e) => onCropPointerDown("w", e)}
-            className="absolute top-2 bottom-2 -left-2 w-4 cursor-ew-resize z-20 hover:bg-white/10 transition-colors"
-            title="Drag left edge to resize width"
-          />
-          <div
-            onPointerDown={(e) => onCropPointerDown("e", e)}
-            className="absolute top-2 bottom-2 -right-2 w-4 cursor-ew-resize z-20 hover:bg-white/10 transition-colors"
-            title="Drag right edge to resize width"
-          />
+  const renderDraftMaskOverlay = (draftBox?: MaskBox | null, side: "primary" | "secondary" = "primary") => {
+    if (!draftBox || !onMaskPointerDown) return null;
+    const disabled = isPanMode || eyedropperActive || straightenActive;
+    return (
+      <div
+        data-page-overlay={side}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute inset-0 pointer-events-none select-none z-[55]"
+      >
+        {renderResizableBox({
+          box: draftBox,
+          onPointerDown: onMaskPointerDown,
+          borderColor: "#f59e0b",
+          backgroundColor: draftBox.color || cleanupModule?.maskColor || "#ffffff",
+          handleColor: "#f59e0b",
+          edgeHoverClass: "hover:bg-amber-400/20",
+          moveTitle: "Drag interior to move erase box",
+          disabled,
+        })}
+      </div>
+    );
+  };
 
-          {/* Corner Handles */}
+  const renderSpineBoxOverlay = (spineBox?: CropBox | null, side: "primary" | "secondary" = "primary") => {
+    if (!cleanupModule?.enabled || !cleanupModule.spineSelectionActive || !spineBox || !onSpinePointerDown) return null;
+    const disabled = isPanMode || eyedropperActive || straightenActive || maskToolActive;
+    return (
+      <div
+        data-page-overlay={side}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute inset-0 pointer-events-none select-none z-[50]"
+      >
+        {renderResizableBox({
+          box: spineBox,
+          onPointerDown: onSpinePointerDown,
+          borderColor: "var(--app-accent, #06b6d4)",
+          backgroundColor: "var(--app-accent-15, rgba(6, 182, 212, 0.15))",
+          boxShadow: "0 0 14px var(--app-accent-glow, rgba(6, 182, 212, 0.45))",
+          borderStyle: "dashed",
+          handleColor: "var(--app-accent, #06b6d4)",
+          edgeHoverClass: "hover:opacity-80",
+          moveTitle: "Drag interior to reposition spine shadow region",
+          disabled,
+        })}
+      </div>
+    );
+  };
+
+  const renderSavedMasksOverlay = (masks: MaskBox[]) => {
+    if (masks.length === 0) return null;
+    return (
+      <div className="absolute inset-0 z-40 pointer-events-none select-none">
+        {masks.map((m, idx) => {
+          const x1 = Math.min(m.x1, m.x2);
+          const y1 = Math.min(m.y1, m.y2);
+          const w = Math.max(0.01, Math.abs(m.x2 - m.x1));
+          const h = Math.max(0.01, Math.abs(m.y2 - m.y1));
+          const fillColor = m.color || "#ffffff";
+          return (
+            <div
+              key={m.id || idx}
+              className="group/mask absolute border border-dashed border-transparent hover:border-amber-500/80 transition-all pointer-events-auto rounded-[1px]"
+              style={{
+                left: `${x1 * 100}%`,
+                top: `${y1 * 100}%`,
+                width: `${w * 100}%`,
+                height: `${h * 100}%`,
+                backgroundColor: fillColor,
+              }}
+              title="Erase Box (hover and click × to delete)"
+            >
+              {onRemoveMaskBox && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveMaskBox(m.id);
+                  }}
+                  className="opacity-0 group-hover/mask:opacity-100 absolute -top-2.5 -right-2.5 w-5 h-5 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-md transition-opacity cursor-pointer z-[60] pointer-events-auto"
+                  title="Delete this erase box"
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderRulerSurface = (side: "primary" | "secondary") => {
+    if (!straightenActive) return null;
+    return (
+      <div
+        onPointerDown={(e) => handleRulerPointerDown(side, e)}
+        onPointerMove={handleRulerPointerMove}
+        onPointerUp={handleRulerPointerUp}
+        className="absolute inset-0 z-50 cursor-crosshair select-none touch-none"
+      >
+        {rulerDrag && rulerDrag.side === side && (
+          <>
+            <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+              <line
+                x1={`${rulerDrag.x1 * 100}%`}
+                y1={`${rulerDrag.y1 * 100}%`}
+                x2={`${rulerDrag.x2 * 100}%`}
+                y2={`${rulerDrag.y2 * 100}%`}
+                stroke="#000000"
+                strokeWidth={4}
+                strokeOpacity={0.75}
+              />
+              <line
+                x1={`${rulerDrag.x1 * 100}%`}
+                y1={`${rulerDrag.y1 * 100}%`}
+                x2={`${rulerDrag.x2 * 100}%`}
+                y2={`${rulerDrag.y2 * 100}%`}
+                stroke="#f59e0b"
+                strokeWidth={2}
+                strokeDasharray="6 3"
+              />
+              <circle cx={`${rulerDrag.x1 * 100}%`} cy={`${rulerDrag.y1 * 100}%`} r={4} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.5} />
+              <circle cx={`${rulerDrag.x2 * 100}%`} cy={`${rulerDrag.y2 * 100}%`} r={4} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.5} />
+            </svg>
+            <div
+              className={`absolute pointer-events-none whitespace-nowrap px-1.5 py-0.5 rounded bg-slate-950/85 backdrop-blur-sm border border-amber-500/40 text-amber-300 font-mono text-[9px] font-semibold shadow-md transition-opacity duration-150 ${
+                rulerDrag.x2 > 0.8 ? "-translate-x-full -ml-3" : "translate-x-3"
+              } ${
+                rulerDrag.y2 < 0.1 ? "translate-y-3" : "-translate-y-5"
+              }`}
+              style={{ left: `${rulerDrag.x2 * 100}%`, top: `${rulerDrag.y2 * 100}%` }}
+            >
+              {rulerDrag.deltaAngle > 0 ? "+" : ""}{rulerDrag.deltaAngle.toFixed(2)}°
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderMaskDrawSurface = (side: "primary" | "secondary") => {
+    if (!maskToolActive) return null;
+    return (
+      <div
+        onPointerDown={(e) => handleMaskPointerDown(side, e)}
+        onPointerMove={handleMaskPointerMove}
+        onPointerUp={handleMaskPointerUp}
+        className="absolute inset-0 z-50 cursor-crosshair select-none touch-none"
+      >
+        {maskDrag && maskDrag.side === side && (
           <div
-            onPointerDown={(e) => onCropPointerDown("nw", e)}
-            className="absolute -top-2.5 -left-2.5 w-5 h-5 flex items-center justify-center cursor-nwse-resize z-30 group"
-            title="Drag corner to resize"
-          >
-            <div className="w-3 h-3 rounded-full ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" style={{ backgroundColor: ACCENT }} />
-          </div>
-          <div
-            onPointerDown={(e) => onCropPointerDown("ne", e)}
-            className="absolute -top-2.5 -right-2.5 w-5 h-5 flex items-center justify-center cursor-nesw-resize z-30 group"
-            title="Drag corner to resize"
-          >
-            <div className="w-3 h-3 rounded-full ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" style={{ backgroundColor: ACCENT }} />
-          </div>
-          <div
-            onPointerDown={(e) => onCropPointerDown("sw", e)}
-            className="absolute -bottom-2.5 -left-2.5 w-5 h-5 flex items-center justify-center cursor-nesw-resize z-30 group"
-            title="Drag corner to resize"
-          >
-            <div className="w-3 h-3 rounded-full ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" style={{ backgroundColor: ACCENT }} />
-          </div>
-          <div
-            onPointerDown={(e) => onCropPointerDown("se", e)}
-            className="absolute -bottom-2.5 -right-2.5 w-5 h-5 flex items-center justify-center cursor-nwse-resize z-30 group"
-            title="Drag corner to resize"
-          >
-            <div className="w-3 h-3 rounded-full ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" style={{ backgroundColor: ACCENT }} />
-          </div>
-        </div>
+            className="absolute border-2 border-dashed border-amber-400 bg-white/65 backdrop-blur-[1px] shadow-md pointer-events-none"
+            style={{
+              left: `${Math.min(maskDrag.x1, maskDrag.x2) * 100}%`,
+              top: `${Math.min(maskDrag.y1, maskDrag.y2) * 100}%`,
+              width: `${Math.abs(maskDrag.x2 - maskDrag.x1) * 100}%`,
+              height: `${Math.abs(maskDrag.y2 - maskDrag.y1) * 100}%`,
+            }}
+          />
+        )}
       </div>
     );
   };
@@ -844,6 +1054,7 @@ export function PageCanvas({
         {/* Universal geometry overlay ref container covering the image bounds */}
         <div
           ref={overlayRef}
+          data-page-overlay="primary"
           className="absolute inset-0 pointer-events-none select-none"
         />
 
@@ -902,271 +1113,11 @@ export function PageCanvas({
           />
         )}
         {isSplitMode ? renderSplitOverlay("primary") : renderCropOverlay(cropModule?.cropBox, "primary")}
-        {straightenActive && (
-          <div
-            onPointerDown={handleRulerPointerDown}
-            onPointerMove={handleRulerPointerMove}
-            onPointerUp={handleRulerPointerUp}
-            className="absolute inset-0 z-50 cursor-crosshair select-none touch-none"
-          >
-            {rulerDrag && (
-              <>
-                <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                  <line
-                    x1={`${rulerDrag.x1 * 100}%`}
-                    y1={`${rulerDrag.y1 * 100}%`}
-                    x2={`${rulerDrag.x2 * 100}%`}
-                    y2={`${rulerDrag.y2 * 100}%`}
-                    stroke="#000000"
-                    strokeWidth={4}
-                    strokeOpacity={0.75}
-                  />
-                  <line
-                    x1={`${rulerDrag.x1 * 100}%`}
-                    y1={`${rulerDrag.y1 * 100}%`}
-                    x2={`${rulerDrag.x2 * 100}%`}
-                    y2={`${rulerDrag.y2 * 100}%`}
-                    stroke="#f59e0b"
-                    strokeWidth={2}
-                    strokeDasharray="6 3"
-                  />
-                  <circle cx={`${rulerDrag.x1 * 100}%`} cy={`${rulerDrag.y1 * 100}%`} r={4} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.5} />
-                  <circle cx={`${rulerDrag.x2 * 100}%`} cy={`${rulerDrag.y2 * 100}%`} r={4} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.5} />
-                </svg>
-                <div
-                  className={`absolute pointer-events-none whitespace-nowrap px-1.5 py-0.5 rounded bg-slate-950/85 backdrop-blur-sm border border-amber-500/40 text-amber-300 font-mono text-[9px] font-semibold shadow-md transition-opacity duration-150 ${
-                    rulerDrag.x2 > 0.8 ? "-translate-x-full -ml-3" : "translate-x-3"
-                  } ${
-                    rulerDrag.y2 < 0.1 ? "translate-y-3" : "-translate-y-5"
-                  }`}
-                  style={{ left: `${rulerDrag.x2 * 100}%`, top: `${rulerDrag.y2 * 100}%` }}
-                >
-                  {rulerDrag.deltaAngle > 0 ? "+" : ""}{rulerDrag.deltaAngle.toFixed(2)}°
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Interactive Draft Mask Box (when draftMaskBox exists, editable with 8 resize handles + move) */}
-        {cleanupModule?.draftMaskBox && onMaskPointerDown && (
-          <div
-            className={`absolute border-2 border-solid shadow-[0_0_0_1px_rgba(0,0,0,0.6),0_0_24px_rgba(0,0,0,0.35)] select-none touch-none z-[55] ${
-              isPanMode || eyedropperActive || straightenActive ? "pointer-events-none" : "pointer-events-auto"
-            }`}
-            style={{
-              borderColor: "#f59e0b",
-              backgroundColor: cleanupModule.draftMaskBox.color || cleanupModule.maskColor || "#ffffff",
-              top: `${Math.min(cleanupModule.draftMaskBox.y1, cleanupModule.draftMaskBox.y2) * 100}%`,
-              left: `${Math.min(cleanupModule.draftMaskBox.x1, cleanupModule.draftMaskBox.x2) * 100}%`,
-              width: `${Math.max(0.005, Math.abs(cleanupModule.draftMaskBox.x2 - cleanupModule.draftMaskBox.x1)) * 100}%`,
-              height: `${Math.max(0.005, Math.abs(cleanupModule.draftMaskBox.y2 - cleanupModule.draftMaskBox.y1)) * 100}%`,
-            }}
-          >
-            {/* Interior Draggable Area for Moving */}
-            <div
-              onPointerDown={(e) => onMaskPointerDown("move", e)}
-              className="absolute inset-2 cursor-move z-10"
-              title="Drag interior to move erase box"
-            />
-
-            {/* Edge Resize Bars */}
-            <div
-              onPointerDown={(e) => onMaskPointerDown("n", e)}
-              className="absolute -top-2 left-2 right-2 h-4 cursor-ns-resize z-20 hover:bg-amber-400/20 transition-colors pointer-events-auto"
-              title="Drag top edge to resize height"
-            />
-            <div
-              onPointerDown={(e) => onMaskPointerDown("s", e)}
-              className="absolute -bottom-2 left-2 right-2 h-4 cursor-ns-resize z-20 hover:bg-amber-400/20 transition-colors pointer-events-auto"
-              title="Drag bottom edge to resize height"
-            />
-            <div
-              onPointerDown={(e) => onMaskPointerDown("w", e)}
-              className="absolute top-2 bottom-2 -left-2 w-4 cursor-ew-resize z-20 hover:bg-amber-400/20 transition-colors pointer-events-auto"
-              title="Drag left edge to resize width"
-            />
-            <div
-              onPointerDown={(e) => onMaskPointerDown("e", e)}
-              className="absolute top-2 bottom-2 -right-2 w-4 cursor-ew-resize z-20 hover:bg-amber-400/20 transition-colors pointer-events-auto"
-              title="Drag right edge to resize width"
-            />
-
-            {/* Corner Handles */}
-            <div
-              onPointerDown={(e) => onMaskPointerDown("nw", e)}
-              className="absolute -top-2.5 -left-2.5 w-5 h-5 flex items-center justify-center cursor-nwse-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-amber-500 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-            <div
-              onPointerDown={(e) => onMaskPointerDown("ne", e)}
-              className="absolute -top-2.5 -right-2.5 w-5 h-5 flex items-center justify-center cursor-nesw-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-amber-500 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-            <div
-              onPointerDown={(e) => onMaskPointerDown("sw", e)}
-              className="absolute -bottom-2.5 -left-2.5 w-5 h-5 flex items-center justify-center cursor-nesw-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-amber-500 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-            <div
-              onPointerDown={(e) => onMaskPointerDown("se", e)}
-              className="absolute -bottom-2.5 -right-2.5 w-5 h-5 flex items-center justify-center cursor-nwse-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-amber-500 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-          </div>
-        )}
-
-        {/* Interactive Manual Spine Selection Box (editable with 8 resize handles + move) */}
-        {cleanupModule?.enabled && (cleanupModule.flattenIllumination || cleanupModule.spineBox || cleanupModule.spineSelectionActive) && cleanupModule.spineBox && onSpinePointerDown && (
-          <div
-            className={`absolute border-2 border-dashed border-cyan-400 select-none touch-none z-[50] shadow-[0_0_14px_rgba(6,182,212,0.45)] ${
-              isPanMode || eyedropperActive || straightenActive || maskToolActive ? "pointer-events-none" : "pointer-events-auto"
-            }`}
-            style={{
-              backgroundColor: "rgba(6, 182, 212, 0.12)",
-              top: `${Math.min(cleanupModule.spineBox.y1, cleanupModule.spineBox.y2) * 100}%`,
-              left: `${Math.min(cleanupModule.spineBox.x1, cleanupModule.spineBox.x2) * 100}%`,
-              width: `${Math.max(0.01, Math.abs(cleanupModule.spineBox.x2 - cleanupModule.spineBox.x1)) * 100}%`,
-              height: `${Math.max(0.01, Math.abs(cleanupModule.spineBox.y2 - cleanupModule.spineBox.y1)) * 100}%`,
-            }}
-          >
-            {/* Spine Label Pill */}
-            <div className="absolute top-1 left-1.5 px-1.5 py-0.5 rounded bg-cyan-950/90 border border-cyan-500/50 text-[9px] font-mono text-cyan-300 font-bold pointer-events-none flex items-center gap-1 shadow-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-              <span>Spine Region ({Math.round((cleanupModule.spineStrength ?? 1.0) * 100)}%)</span>
-            </div>
-
-            {/* Interior Draggable Area */}
-            <div
-              onPointerDown={(e) => onSpinePointerDown("move", e)}
-              className="absolute inset-2 cursor-move z-10"
-              title="Drag interior to reposition spine shadow region"
-            />
-
-            {/* Edge Resize Bars */}
-            <div
-              onPointerDown={(e) => onSpinePointerDown("n", e)}
-              className="absolute -top-2 left-2 right-2 h-4 cursor-ns-resize z-20 hover:bg-cyan-400/20 transition-colors pointer-events-auto"
-              title="Resize top edge"
-            />
-            <div
-              onPointerDown={(e) => onSpinePointerDown("s", e)}
-              className="absolute -bottom-2 left-2 right-2 h-4 cursor-ns-resize z-20 hover:bg-cyan-400/20 transition-colors pointer-events-auto"
-              title="Resize bottom edge"
-            />
-            <div
-              onPointerDown={(e) => onSpinePointerDown("w", e)}
-              className="absolute top-2 bottom-2 -left-2 w-4 cursor-ew-resize z-20 hover:bg-cyan-400/20 transition-colors pointer-events-auto"
-              title="Resize left edge"
-            />
-            <div
-              onPointerDown={(e) => onSpinePointerDown("e", e)}
-              className="absolute top-2 bottom-2 -right-2 w-4 cursor-ew-resize z-20 hover:bg-cyan-400/20 transition-colors pointer-events-auto"
-              title="Resize right edge"
-            />
-
-            {/* 4 Corner Handles */}
-            <div
-              onPointerDown={(e) => onSpinePointerDown("nw", e)}
-              className="absolute -top-2.5 -left-2.5 w-5 h-5 flex items-center justify-center cursor-nwse-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-cyan-400 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-            <div
-              onPointerDown={(e) => onSpinePointerDown("ne", e)}
-              className="absolute -top-2.5 -right-2.5 w-5 h-5 flex items-center justify-center cursor-nesw-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-cyan-400 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-            <div
-              onPointerDown={(e) => onSpinePointerDown("sw", e)}
-              className="absolute -bottom-2.5 -left-2.5 w-5 h-5 flex items-center justify-center cursor-nesw-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-cyan-400 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-            <div
-              onPointerDown={(e) => onSpinePointerDown("se", e)}
-              className="absolute -bottom-2.5 -right-2.5 w-5 h-5 flex items-center justify-center cursor-nwse-resize z-30 group pointer-events-auto"
-              title="Drag corner to resize"
-            >
-              <div className="w-3 h-3 rounded-full bg-cyan-400 ring-2 ring-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.8)] group-hover:scale-125 transition-transform" />
-            </div>
-          </div>
-        )}
-
-        {/* Saved Spot Mask Overlay Badges (renders instant visual fill + click × to remove) */}
-        {pageMasks.length > 0 && (
-          <div className="absolute inset-0 z-40 pointer-events-none select-none">
-            {pageMasks.map((m, idx) => {
-              const x1 = Math.min(m.x1, m.x2);
-              const y1 = Math.min(m.y1, m.y2);
-              const w = Math.max(0.01, Math.abs(m.x2 - m.x1));
-              const h = Math.max(0.01, Math.abs(m.y2 - m.y1));
-              const fillColor = m.color || "#ffffff";
-              return (
-                <div
-                  key={m.id || idx}
-                  className="group/mask absolute border border-dashed border-transparent hover:border-amber-500/80 transition-all pointer-events-auto rounded-[1px]"
-                  style={{
-                    left: `${x1 * 100}%`,
-                    top: `${y1 * 100}%`,
-                    width: `${w * 100}%`,
-                    height: `${h * 100}%`,
-                    backgroundColor: fillColor,
-                  }}
-                  title="Erase Box (hover and click × to delete)"
-                >
-                  {onRemoveMaskBox && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveMaskBox(m.id);
-                      }}
-                      className="opacity-0 group-hover/mask:opacity-100 absolute -top-2.5 -right-2.5 w-5 h-5 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-md transition-opacity cursor-pointer z-[60] pointer-events-auto"
-                      title="Delete this erase box"
-                    >
-                      <X size={11} />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Interactive Erase / Whiteout Box Drawing Surface */}
-        {maskToolActive && (
-          <div
-            onPointerDown={handleMaskPointerDown}
-            onPointerMove={handleMaskPointerMove}
-            onPointerUp={handleMaskPointerUp}
-            className="absolute inset-0 z-50 cursor-crosshair select-none touch-none"
-          >
-            {maskDrag && (
-              <div
-                className="absolute border-2 border-dashed border-amber-400 bg-white/65 backdrop-blur-[1px] shadow-md pointer-events-none"
-                style={{
-                  left: `${Math.min(maskDrag.x1, maskDrag.x2) * 100}%`,
-                  top: `${Math.min(maskDrag.y1, maskDrag.y2) * 100}%`,
-                  width: `${Math.abs(maskDrag.x2 - maskDrag.x1) * 100}%`,
-                  height: `${Math.abs(maskDrag.y2 - maskDrag.y1) * 100}%`,
-                }}
-              />
-            )}
-          </div>
-        )}
+        {renderRulerSurface("primary")}
+        {renderDraftMaskOverlay(primaryDraftMaskBox ?? cleanupModule?.draftMaskBox, "primary")}
+        {renderSpineBoxOverlay(primarySpineBox ?? cleanupModule?.spineBox, "primary")}
+        {renderSavedMasksOverlay(pageMasks)}
+        {renderMaskDrawSurface("primary")}
         </div>
         </div>
 
@@ -1183,13 +1134,27 @@ export function PageCanvas({
               crossOrigin="anonymous"
               src={secondaryImageSrc}
               alt={secondaryImageAlt}
+              onClick={handleImageClick}
+              onMouseMove={handleImageMouseMove}
+              onMouseLeave={handleImageMouseLeave}
               decoding="async"
-              className="max-h-[calc(100vh-14rem)] max-w-full object-contain rounded-sm shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9)] ring-1 ring-white/10 group-hover/sec:ring-blue-500/60 transition-all"
+              className={`max-h-[calc(100vh-14rem)] max-w-full object-contain rounded-sm shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9)] ring-1 ring-white/10 group-hover/sec:ring-blue-500/60 transition-all ${
+                eyedropperActive ? "cursor-crosshair" : ""
+              }`}
+              style={{
+                filter: secondaryCanvasImageFilter !== "none" ? secondaryCanvasImageFilter : undefined,
+              }}
               draggable={false}
             />
             {isSplitMode
               ? renderSplitOverlay("secondary")
               : renderCropOverlay(secondaryCropBox ?? cropModule?.cropBox, "secondary")}
+            {renderRulerSurface("secondary")}
+            {renderDraftMaskOverlay(secondaryDraftMaskBox, "secondary")}
+            {renderSpineBoxOverlay(secondarySpineBox, "secondary")}
+            {renderSavedMasksOverlay(secondaryPageMasks)}
+            {renderMaskDrawSurface("secondary")}
+
             <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-slate-950/80 border border-white/10 text-[10px] font-mono text-slate-300 pointer-events-none">
               {secondaryImageAlt}
             </div>

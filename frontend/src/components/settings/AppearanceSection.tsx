@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Moon, Sun, Palette, Sparkles, Check, Laptop, Monitor, RotateCcw, Pipette } from "lucide-react";
+import { Moon, Sun, Palette, Sparkles, Check, Laptop, Monitor, RotateCcw } from "lucide-react";
 import {
   useAppearance,
   UiScale,
@@ -70,22 +70,6 @@ export default function AppearanceSection() {
     } else {
       setDarkAccentColor(DEFAULT_DARK_ACCENT);
     }
-  };
-
-  const handleOpenEyedropper = async () => {
-    if (typeof window !== "undefined" && window.EyeDropper) {
-      try {
-        const eyeDropper = new window.EyeDropper();
-        const result = await eyeDropper.open();
-        if (result?.sRGBHex) {
-          setCurrentEditingAccent(result.sRGBHex);
-          return;
-        }
-      } catch {
-        // Fallback to native color picker dialog
-      }
-    }
-    colorInputRef.current?.click();
   };
 
   const presets = editingAccentTheme === "light" ? LIGHT_PRESET_ACCENTS : DARK_PRESET_ACCENTS;
@@ -265,14 +249,6 @@ export default function AppearanceSection() {
             >
               <Palette size={13} style={{ color: currentEditingAccent }} />
               <span>Color Picker</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenEyedropper}
-              className="p-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-50 dark:bg-gray-900 text-slate-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-              title="Sample Accent Color from Screen (Eyedropper)"
-            >
-              <Pipette size={14} />
             </button>
             <input
               type="text"

@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Pipette, Check, RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "lucide-react";
 import { BleedModuleConfig, BleedEntry, ModuleTaskProgress, BookStudioPage } from "@/types/book_studio";
 import { type LengthUnit, mmToUnit, unitToMm, UNIT_OPTIONS } from "@/lib/units";
-import { PageScopeSelector, ModuleProgressBar, formatScopeLabel } from "./PageScopeSelector";
+import { PageScopeSelector, ModuleProgressBar, StudioColorPicker, formatScopeLabel } from "./PageScopeSelector";
 import { resolveConcretePageNumbers } from "@/lib/pageScope";
 
 export interface BleedPanelProps {
@@ -12,10 +12,14 @@ export interface BleedPanelProps {
   setBleedModule: React.Dispatch<React.SetStateAction<BleedModuleConfig>>;
   unit?: LengthUnit;
   onActivateEyedropper?: () => void;
+  resetBleed?: () => void;
   taskProgress?: ModuleTaskProgress;
   pages?: BookStudioPage[];
   selectedPageId?: string | null;
   activePageNum?: number;
+  isDualPage?: boolean;
+  onSelectPageId?: (id: string) => void;
+  onRecordHistory?: (label: string, nextBleed: BleedModuleConfig) => void;
   shortcutLabels?: Record<string, string>;
 }
 
@@ -26,10 +30,14 @@ export function BleedPanel({
   setBleedModule,
   unit = "mm",
   onActivateEyedropper,
+  resetBleed,
   taskProgress,
   pages = [],
   selectedPageId,
   activePageNum,
+  isDualPage = false,
+  onSelectPageId,
+  onRecordHistory,
   shortcutLabels = {},
 }: BleedPanelProps) {
   const unitShort = UNIT_OPTIONS.find((o) => o.value === unit)?.short || "mm";
@@ -84,34 +92,15 @@ export function BleedPanel({
       },
     };
 
-    setBleedModule((prev) => {
-      const existing = prev.appliedBleeds || [];
-      const updated = [...existing.filter((b) => b.scopeLabel !== concrete.scopeLabel), currentEntry];
-      return {
-        ...prev,
-        enabled: true,
-        appliedBleeds: updated,
-      };
-    });
-  };
-
-  const handleNativeEyedropper = async () => {
-    if (typeof window !== "undefined" && window.EyeDropper) {
-      try {
-        const eyeDropper = new window.EyeDropper();
-        const result = await eyeDropper.open();
-        if (result?.sRGBHex) {
-          setBleedModule((prev) => ({ ...prev, enabled: true, solidColor: result.sRGBHex, mode: "solid" }));
-          return;
-        }
-      } catch {
-        // Fallback to canvas click sampling
-      }
-    }
-    if (onActivateEyedropper) {
-      setBleedModule((prev) => ({ ...prev, enabled: true, mode: "solid" }));
-      onActivateEyedropper();
-    }
+    const existing = bleedModule.appliedBleeds || [];
+    const updated = [...existing.filter((b) => b.scopeLabel !== concrete.scopeLabel), currentEntry];
+    const nextBleed: BleedModuleConfig = {
+      ...bleedModule,
+      enabled: true,
+      appliedBleeds: updated,
+    };
+    setBleedModule(nextBleed);
+    onRecordHistory?.(`Apply Bleed (${concrete.scopeLabel} • ${details})`, nextBleed);
   };
 
   return (
@@ -190,29 +179,21 @@ export function BleedPanel({
 
         {/* Solid Color Picker + Eyedropper */}
         {bleedModule.mode === "solid" && (
-          <div className="flex items-center justify-between py-1 text-xs">
-            <span className="text-slate-400">Color</span>
-            <div className="flex items-center space-x-1.5">
-              <input
-                type="color"
-                value={bleedModule.solidColor || "#ffffff"}
-                onChange={(e) => setBleedModule((prev) => ({ ...prev, enabled: true, solidColor: e.target.value }))}
-                className="w-5 h-5 rounded border border-white/20 bg-transparent cursor-pointer p-0"
-                title="Choose solid bleed color"
-              />
-              <button
-                type="button"
-                onClick={handleNativeEyedropper}
-                className="p-1 rounded hover:bg-[#1C212C] text-slate-300 hover:text-white transition-colors cursor-pointer"
-                title={`Pick color directly from page (${shortcutLabels.eyedropper || "I"})`}
-              >
-                <Pipette size={13} />
-              </button>
-              <span className="font-mono text-[10px] text-slate-300 uppercase">
-                {(bleedModule.solidColor || "#ffffff").slice(0, 7)}
-              </span>
-            </div>
-          </div>
+          <StudioColorPicker
+            label="Color"
+            color={bleedModule.solidColor || "#ffffff"}
+            defaultColor="#ffffff"
+            onChange={(hex) => setBleedModule((prev) => ({ ...prev, enabled: true, solidColor: hex }))}
+            onActivateEyedropper={
+              onActivateEyedropper
+                ? () => {
+                    setBleedModule((prev) => ({ ...prev, enabled: true, mode: "solid" }));
+                    onActivateEyedropper();
+                  }
+                : undefined
+            }
+            eyedropperShortcut={shortcutLabels.eyedropper || "I"}
+          />
         )}
       </div>
 
@@ -315,6 +296,10 @@ export function BleedPanel({
           scope={bleedModule.scope}
           onChange={(sc) => setBleedModule((prev) => ({ ...prev, scope: sc }))}
           activePageNum={activePageNum}
+          pages={pages}
+          selectedPageId={selectedPageId}
+          isDualPage={isDualPage}
+          onSelectPageId={onSelectPageId}
         />
 
         {/* Apply / Update Bleed Button */}
@@ -330,9 +315,24 @@ export function BleedPanel({
 
           <button
             type="button"
-            onClick={() => setBleedModule((prev) => ({ ...prev, bleedMm: 0 }))}
+            onClick={() => {
+              if (resetBleed) {
+                resetBleed();
+              } else {
+                setBleedModule((prev) => ({
+                  ...prev,
+                  enabled: false,
+                  bleedMm: 3.0,
+                  mode: "mirror",
+                  solidColor: "#ffffff",
+                  placement: "outside",
+                  showCropMarks: true,
+                  appliedBleeds: [],
+                }));
+              }
+            }}
             className="px-3 py-2 bg-[#161A23] hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1"
-            title="Reset bleed to 0mm"
+            title="Reset all bleed modifications across the entire document"
           >
             <RotateCcw size={12} />
             <span>Reset</span>

@@ -67,10 +67,17 @@ export function buildImposingPagesFromMeta(
  * cohesive domain.
  */
 export function useImpositionStudio() {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [jobMode, setJobMode] = useState<"book" | "gang">("book");
   const [selectedBookIdx, setSelectedBookIdx] = useState(0);
   const [items, setItems] = useState<ImposingItem[]>([]);
   const [pages, setPages] = useState<ImposingPage[]>([]);
+  const [deckViewMode, setDeckViewMode] = useState<"grid" | "list">("grid");
+  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+
   const [mode, setMode] = useState<"Sheet" | "Roll">("Sheet");
   const [unit, setUnit] = useState("mm");
 
@@ -147,6 +154,155 @@ export function useImpositionStudio() {
   const clearAllPages = useCallback(() => {
     setPages([]);
     setItems([]);
+    setSelectedPageIds([]);
+  }, []);
+
+  // --- Selection & Batch Deck Operations ---
+  const toggleSelectPage = useCallback((id: string, isShift: boolean = false, isCtrl: boolean = false) => {
+    setSelectedPageIds((prev) => {
+      if (isCtrl || isShift) {
+        return prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id];
+      }
+      return prev.includes(id) && prev.length === 1 ? [] : [id];
+    });
+  }, []);
+
+  const selectAllPages = useCallback(() => {
+    setSelectedPageIds(pages.map((p) => p.id));
+  }, [pages]);
+
+  const deselectAllPages = useCallback(() => {
+    setSelectedPageIds([]);
+  }, []);
+
+  const invertSelectedPages = useCallback(() => {
+    setSelectedPageIds((prev) => pages.map((p) => p.id).filter((id) => !prev.includes(id)));
+  }, [pages]);
+
+  const batchRotateSelected = useCallback((dir: "cw" | "ccw") => {
+    const delta = dir === "cw" ? 90 : -90;
+    setPages((prev) =>
+      prev.map((p) => {
+        if (!selectedPageIds.includes(p.id)) return p;
+        const newRot = ((((p.rotation + delta) % 360) + 360) % 360) as ImposingPage["rotation"];
+        return { ...p, rotation: newRot };
+      })
+    );
+  }, [selectedPageIds]);
+
+  const batchToggleDeleteSelected = useCallback(() => {
+    setPages((prev) =>
+      prev.map((p) => (selectedPageIds.includes(p.id) ? { ...p, is_deleted: !p.is_deleted } : p))
+    );
+  }, [selectedPageIds]);
+
+  const batchDuplicateSelected = useCallback(() => {
+    setPages((prev) => {
+      const next: ImposingPage[] = [];
+      for (const p of prev) {
+        next.push(p);
+        if (selectedPageIds.includes(p.id)) {
+          next.push({
+            ...p,
+            id: `${p.file_id}_copy_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            display_page_num: p.display_page_num || p.original_page_num + 1,
+          });
+        }
+      }
+      return next;
+    });
+  }, [selectedPageIds]);
+
+  // --- Database Session Lifecycle ---
+  const initSession = useCallback(
+    async (opts: {
+      file?: File;
+      existingFilePath?: string;
+      fileId?: string;
+      name?: string;
+      jobMode?: "book" | "gang";
+      sheetW?: number;
+      sheetH?: number;
+      sheetPreset?: string;
+    }) => {
+      setIsUploading(true);
+      setError(null);
+      try {
+        const fd = new FormData();
+        if (opts.file) fd.append("file", opts.file);
+        if (opts.existingFilePath) fd.append("existing_file_path", opts.existingFilePath);
+        if (opts.fileId) fd.append("file_id", opts.fileId);
+        if (opts.name) fd.append("title", opts.name);
+        if (opts.jobMode) fd.append("job_mode", opts.jobMode);
+        if (opts.sheetW) fd.append("sheet_w", String(opts.sheetW));
+        if (opts.sheetH) fd.append("sheet_h", String(opts.sheetH));
+        if (opts.sheetPreset) fd.append("sheet_preset", opts.sheetPreset);
+
+        const res = await apiFetch(`/api/imposing/init-session`, {
+          method: "POST",
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.detail || data.error || "Failed to initialize imposing session.");
+        }
+        setSessionId(data.session_id);
+        setSessionTitle(data.title || data.name);
+        if (data.items) setItems(data.items);
+        if (data.pages) setPages(data.pages);
+        if (data.settings) {
+          if (data.settings.job_mode) setJobMode(data.settings.job_mode);
+          if (data.settings.sheet_w) setSheetW(data.settings.sheet_w);
+          if (data.settings.sheet_h) setSheetH(data.settings.sheet_h);
+          if (data.settings.sheet_preset) setSheetPreset(data.settings.sheet_preset);
+          if (data.settings.margin !== undefined) setMargin(data.settings.margin);
+          if (data.settings.gap !== undefined) setGap(data.settings.gap);
+        }
+        return data;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        return null;
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    []
+  );
+
+  const loadSession = useCallback(async (id: string) => {
+    setIsUploading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/imposing/session/${id}`);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || "Failed to load imposing session");
+      }
+      setSessionId(data.session_id);
+      setSessionTitle(data.title || data.original_filename);
+      if (data.items) setItems(data.items);
+      if (data.pages) setPages(data.pages);
+      if (data.settings) {
+        if (data.settings.job_mode) setJobMode(data.settings.job_mode);
+        if (data.settings.sheet_w) setSheetW(data.settings.sheet_w);
+        if (data.settings.sheet_h) setSheetH(data.settings.sheet_h);
+        if (data.settings.sheet_preset) setSheetPreset(data.settings.sheet_preset);
+        if (data.settings.margin !== undefined) setMargin(data.settings.margin);
+        if (data.settings.gap !== undefined) setGap(data.settings.gap);
+        if (data.settings.crop_marks !== undefined) setCropMarks(data.settings.crop_marks);
+        if (data.settings.reg_marks !== undefined) setRegMarks(data.settings.reg_marks);
+        if (data.settings.rows !== undefined) setRows(data.settings.rows);
+        if (data.settings.cols !== undefined) setCols(data.settings.cols);
+      }
+      return data;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      return null;
+    } finally {
+      setIsUploading(false);
+    }
   }, []);
 
   // --- Load Saved Presets & Defaults ---
@@ -220,6 +376,7 @@ export function useImpositionStudio() {
 
   const buildImposingPayload = useCallback(
     (layoutItems: ImposingItem[]) => ({
+      session_id: sessionId || undefined,
       items: layoutItems,
       job_mode: jobMode,
       mode,
@@ -238,6 +395,7 @@ export function useImpositionStudio() {
       uniform_orientation: uniformOrientation,
     }),
     [
+      sessionId,
       jobMode,
       mode,
       sheetW,
@@ -364,6 +522,7 @@ export function useImpositionStudio() {
   }, [getItemsForLayout, sheetW, sheetH, buildImposingPayload]);
 
   const handleExport = useCallback(async () => {
+    if (isExporting) return;
     const layoutItems = getItemsForLayout();
     if (layoutItems.length === 0 || !sheetW || !sheetH || sheetW <= 0 || sheetH <= 0) return;
     setIsExporting(true);
@@ -380,7 +539,7 @@ export function useImpositionStudio() {
     } finally {
       setIsExporting(false);
     }
-  }, [getItemsForLayout, sheetW, sheetH, mode, buildImposingPayload]);
+  }, [isExporting, getItemsForLayout, sheetW, sheetH, mode, buildImposingPayload]);
 
   // Debounced auto-preview key (350ms via shared hook)
   const debouncedPreviewKey = useDebounce(
@@ -409,11 +568,76 @@ export function useImpositionStudio() {
     handlePreview();
   }, [debouncedPreviewKey, items.length, pages.length, handlePreview]);
 
+  // Debounced auto-save settings & page changes to SQLite
+  const debouncedSaveKey = useDebounce(
+    JSON.stringify({
+      sessionId,
+      jobMode,
+      sheetW,
+      sheetH,
+      sheetPreset,
+      margin,
+      gap,
+      cropMarks,
+      regMarks,
+      drawBorder,
+      borderColor,
+      align,
+      rows,
+      cols,
+      pages: pages.map((p) => ({ id: p.id, rotation: p.rotation, is_deleted: p.is_deleted })),
+    }),
+    600
+  );
+
+  useEffect(() => {
+    if (!sessionId) return;
+    setIsSaving(true);
+    apiFetch(`/api/imposing/session/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        settings: {
+          job_mode: jobMode,
+          sheet_w: sheetW,
+          sheet_h: sheetH,
+          sheet_preset: sheetPreset,
+          margin,
+          gap,
+          crop_marks: cropMarks,
+          reg_marks: regMarks,
+          draw_border: drawBorder,
+          border_color: borderColor,
+          align,
+          rows,
+          cols,
+        },
+        pages: pages.map((p) => ({ id: p.id, rotation: p.rotation, is_deleted: p.is_deleted })),
+      }),
+    })
+      .catch(() => {})
+      .finally(() => setIsSaving(false));
+  }, [debouncedSaveKey, sessionId, jobMode, sheetW, sheetH, sheetPreset, margin, gap, cropMarks, regMarks, drawBorder, borderColor, align, rows, cols, pages]);
+
   return {
+    sessionId,
+    sessionTitle,
+    isSaving,
+    initSession,
+    loadSession,
     jobMode, setJobMode,
     selectedBookIdx, setSelectedBookIdx,
     items, setItems,
     pages, setPages,
+    deckViewMode, setDeckViewMode,
+    selectedPageIds, setSelectedPageIds,
+    toggleSelectPage,
+    selectAllPages,
+    deselectAllPages,
+    invertSelectedPages,
+    batchRotateSelected,
+    batchToggleDeleteSelected,
+    batchDuplicateSelected,
     reorderPages,
     rotatePage,
     toggleDeletePage,

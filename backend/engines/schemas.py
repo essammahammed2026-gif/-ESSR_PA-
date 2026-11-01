@@ -36,6 +36,7 @@ class ImposingItem(BaseModel):
 
 
 class ImposingRequest(BaseModel):
+    session_id: Optional[str] = None
     items: List[ImposingItem]
     job_mode: str = "gang"
     mode: str = "Sheet"

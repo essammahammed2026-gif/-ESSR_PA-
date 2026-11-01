@@ -243,6 +243,7 @@ function FlipbookStudioContent() {
 
   useEffect(() => {
     if (!exportTaskId || !isExporting) return;
+    let downloaded = false;
     const timer = setInterval(async () => {
       try {
         const j = await (await apiFetch(`/api/tasks/${exportTaskId}`)).json();
@@ -250,6 +251,8 @@ function FlipbookStudioContent() {
         setExportStatus(j.message || j.status);
         if (j.state === "SUCCESS") {
           clearInterval(timer);
+          if (downloaded) return;
+          downloaded = true;
           setIsExporting(false);
           setExportTaskId(null);
           setShowExportModal(false);

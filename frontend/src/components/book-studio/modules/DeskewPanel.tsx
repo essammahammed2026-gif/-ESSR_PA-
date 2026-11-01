@@ -25,6 +25,9 @@ export interface DeskewPanelProps {
   sessionId: string | null;
   pages?: BookStudioPage[];
   activePageNum?: number;
+  isDualPage?: boolean;
+  onSelectPageId?: (id: string) => void;
+  onRecordHistory?: (label: string, nextDeskew: DeskewModuleConfig) => void;
   shortcutLabels?: Record<string, string>;
 }
 
@@ -46,6 +49,9 @@ export function DeskewPanel({
   sessionId,
   pages = [],
   activePageNum,
+  isDualPage = false,
+  onSelectPageId,
+  onRecordHistory,
   shortcutLabels = {},
 }: DeskewPanelProps) {
   const effectiveAngle =
@@ -78,11 +84,11 @@ export function DeskewPanel({
       scope: deskewModule.scope,
     };
 
-    setDeskewModule((prev) => ({
-      ...prev,
+    const nextDeskew: DeskewModuleConfig = {
+      ...deskewModule,
       enabled: true,
       appliedEntries: [
-        ...(prev.appliedEntries || []).filter((e) => e.scopeLabel !== concrete.scopeLabel),
+        ...(deskewModule.appliedEntries || []).filter((e) => e.scopeLabel !== concrete.scopeLabel),
         {
           id: `deskew_${Date.now()}`,
           label,
@@ -96,7 +102,9 @@ export function DeskewPanel({
           params,
         },
       ],
-    }));
+    };
+    setDeskewModule(nextDeskew);
+    onRecordHistory?.(`Apply Deskew (${concrete.scopeLabel} • ${details})`, nextDeskew);
   };
 
   return (
@@ -278,6 +286,10 @@ export function DeskewPanel({
           scope={deskewModule.scope}
           onChange={(sc) => setDeskewModule((prev) => ({ ...prev, scope: sc }))}
           activePageNum={activePageNum}
+          pages={pages}
+          selectedPageId={selectedPageId}
+          isDualPage={isDualPage}
+          onSelectPageId={onSelectPageId}
         />
 
         <div className="flex gap-1.5">
@@ -293,17 +305,16 @@ export function DeskewPanel({
           <button
             type="button"
             onClick={() => {
-              const scopeMode = deskewModule.scope.mode === "all" ? "all" : "current";
               if (resetDeskew) {
-                void resetDeskew(scopeMode);
-              } else if (scopeMode === "all" && onClearAllAngles) {
+                void resetDeskew("all");
+              } else if (onClearAllAngles) {
                 onClearAllAngles();
               } else if (onChangePageAngle) {
                 onChangePageAngle(0.0);
               }
             }}
             className="px-3 py-2 bg-[#161A23] hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1"
-            title="Reset deskew angle to 0.0°"
+            title="Reset all deskew modifications across the entire document"
           >
             <RotateCcw size={12} />
             <span>Reset</span>

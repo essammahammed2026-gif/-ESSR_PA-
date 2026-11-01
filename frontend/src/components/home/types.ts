@@ -84,3 +84,102 @@ export interface UniversalAnalysis {
   file_path: string;
   report?: PrepressReport;
 }
+
+// Database-backed dashboard models
+
+export interface CustomTag {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+}
+
+export type TagDisplayMode = "both" | "icon" | "name";
+
+export type ProjectTag = string;
+
+export interface SessionNote {
+  id: string;
+  text: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export type DateFilterPreset = "all" | "today" | "week" | "month" | "custom";
+
+export interface SessionSummary {
+  id: string;
+  studio_type: string;
+  title: string;
+  original_filename?: string;
+  tag: ProjectTag;
+  status: "active" | "archived" | "completed" | "trash";
+  trash_reason?: "deleted" | "file_not_found" | string | null;
+  session_dir?: string;
+  intake_mode?: string;
+  notes?: string;
+  total_pages: number;
+  width_mm: number;
+  height_mm: number;
+  file_size?: number;
+  file_size_bytes?: number;
+  created_at: number;
+  updated_at: number;
+  thumbnail_url?: string | null;
+  lock?: {
+    workstation_id: string;
+    operator_name: string;
+    lease_expires_at: number;
+    is_locked: boolean;
+    remaining_seconds: number;
+  } | null;
+}
+
+export interface UploadedAsset {
+  file_id: string;
+  filename: string;
+  file_path: string;
+  file_size: number;
+  page_count: number;
+  width_mm: number;
+  height_mm: number;
+  uploaded_at: number;
+}
+
+export interface ExportJobSummary {
+  jobId: string;
+  session_id: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  stage: string;
+  progress: number;
+  message: string;
+  currentPage: number;
+  totalPages: number;
+  filename?: string | null;
+  outputFilePath?: string | null;
+  fileSizeBytes?: number | null;
+  error?: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface WorkshopTelemetry {
+  total_active_sessions: number;
+  total_archived_sessions: number;
+  sessions_by_studio: Record<string, number>;
+  processing_exports: number;
+  total_exports: number;
+  storage: {
+    root: string;
+    originals?: { bytes: number; files: number };
+    sessions: { bytes: number; files: number };
+    cache: { bytes: number; files: number };
+    exports: { bytes: number; files: number };
+    total_bytes: number;
+  };
+}
+
+export interface StorageSettingsConfig {
+  export_retention_days: number;
+  auto_clean_temp_hours: number;
+}

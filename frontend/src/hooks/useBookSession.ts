@@ -134,7 +134,7 @@ export function useBookSession() {
   }, []);
 
   // Initialize session with backend
-  const initSession = useCallback(async (arg?: string | File[]) => {
+  const initSession = useCallback(async (arg?: string | File[], customOriginalFilename?: string) => {
     setIsInitializing(true);
     setError(null);
 
@@ -142,9 +142,20 @@ export function useBookSession() {
       const formData = new FormData();
       formData.append("is_spread", "false");
 
+      if (customOriginalFilename) {
+        formData.append("original_filename", customOriginalFilename);
+      }
+
       if (typeof arg === "string") {
         formData.append("mode", "single");
         formData.append("existing_file_path", arg);
+        if (!customOriginalFilename) {
+          const rawBase = arg.split("/").pop() || "";
+          const cleanName = rawBase.replace(/^\d+_/, "");
+          if (cleanName) {
+            formData.append("original_filename", cleanName);
+          }
+        }
       } else if (Array.isArray(arg)) {
         if (arg.length === 0) {
           throw new Error("Please select or drop at least one file to begin.");
@@ -152,9 +163,15 @@ export function useBookSession() {
         if (arg.length === 1) {
           formData.append("mode", "single");
           formData.append("file_single", arg[0]);
+          if (!customOriginalFilename) {
+            formData.append("original_filename", arg[0].name);
+          }
         } else {
           formData.append("mode", "multi_merge");
           arg.forEach((f) => formData.append("files", f));
+          if (!customOriginalFilename) {
+            formData.append("original_filename", arg[0].name);
+          }
         }
       } else if (intakeMode === "dual_pass") {
         if (multiFileStrategy === "duplex") {
@@ -167,6 +184,9 @@ export function useBookSession() {
           formData.append("odds_order", oddsOrder);
           formData.append("evens_order", evensOrder);
           formData.append("start_with", startWith);
+          if (!customOriginalFilename) {
+            formData.append("original_filename", fileOdds.name);
+          }
         } else {
           // sequential merge
           if (files.length === 0) {
@@ -177,6 +197,9 @@ export function useBookSession() {
           if (reverseFileIndices.length > 0) {
             formData.append("reverse_file_indices", reverseFileIndices.join(","));
           }
+          if (!customOriginalFilename && files[0]) {
+            formData.append("original_filename", files[0].name);
+          }
         }
       } else {
         // intakeMode === "single_page"
@@ -184,12 +207,18 @@ export function useBookSession() {
           if (files.length > 0) {
             formData.append("mode", "multi_merge");
             files.forEach((f) => formData.append("files", f));
+            if (!customOriginalFilename) {
+              formData.append("original_filename", files[0].name);
+            }
           } else {
             throw new Error("Please select a book PDF file to begin.");
           }
         } else {
           formData.append("mode", "single");
           formData.append("file_single", fileSingle);
+          if (!customOriginalFilename) {
+            formData.append("original_filename", fileSingle.name);
+          }
         }
       }
 
@@ -229,6 +258,36 @@ export function useBookSession() {
     files,
     reverseFileIndices,
   ]);
+
+  // Load an existing session directly by ID (from Dashboard or resume URL)
+  const loadSession = useCallback(async (targetSessionId: string) => {
+    setIsInitializing(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/sessions/${targetSessionId}`);
+      if (!res.ok) {
+        throw new Error(`Failed to load session ${targetSessionId}`);
+      }
+      const data = await res.json();
+      if (data.success && data.session) {
+        const sess = data.session;
+        setSessionId(sess.id);
+        const sessPages: BookStudioPage[] = sess.pages || [];
+        setPages(sessPages);
+        if (sessPages.length > 0) {
+          setSelectedPageId(sessPages[0].id);
+        }
+        return sess;
+      }
+      throw new Error("Invalid session data returned from server");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      return null;
+    } finally {
+      setIsInitializing(false);
+    }
+  }, []);
 
   // Detect deskew angle via backend analysis
   const detectPageAngle = useCallback(async (
@@ -483,25 +542,32 @@ export function useBookSession() {
     const deskewEntry = opts.deskewAppliedEntries && opts.deskewAppliedEntries.length > 0
       ? getAppliedEntryForPage(pageNum, pageId, opts.deskewAppliedEntries)
       : undefined;
-    const inDeskewScope = deskewEntry
-      ? true
-      : (!opts.deskewAppliedEntries || opts.deskewAppliedEntries.length === 0) && isPageInScope(pageNum, opts.deskewScope, activePageNum);
+    const inDeskewDraftScope = isPageInScope(pageNum, opts.deskewScope, activePageNum);
+    const inDeskewScope = deskewEntry ? true : inDeskewDraftScope;
     const hasPageAngle = page?.deskew_angle !== undefined && page?.deskew_angle !== null;
-    const applyDeskew = inDeskewScope && (opts.deskewEnabled || hasPageAngle);
+    const applyDeskew = hasPageAngle || (opts.deskewEnabled && inDeskewScope);
     const effectiveDeskewAngle = hasPageAngle
       ? Number(page.deskew_angle)
-      : deskewEntry?.params?.angle !== undefined
-        ? Number(deskewEntry.params.angle)
-        : opts.deskewAngle;
+      : inDeskewDraftScope && opts.deskewEnabled
+        ? opts.deskewAngle
+        : deskewEntry?.params?.angle !== undefined
+          ? Number(deskewEntry.params.angle)
+          : opts.deskewAngle;
     const effectiveDeskewMode = hasPageAngle
       ? "manual"
-      : (deskewEntry?.params?.mode || opts.deskewMode);
-    const effectiveDeskewMaxAngle = deskewEntry?.params?.maxAngle !== undefined
-      ? Number(deskewEntry.params.maxAngle)
-      : opts.deskewMaxAngle;
-    const effectiveDeskewIgnoreBorders = deskewEntry?.params?.ignoreBorders !== undefined
-      ? Boolean(deskewEntry.params.ignoreBorders)
-      : opts.deskewIgnoreBorders;
+      : inDeskewDraftScope && opts.deskewEnabled
+        ? opts.deskewMode
+        : (deskewEntry?.params?.mode || opts.deskewMode);
+    const effectiveDeskewMaxAngle = inDeskewDraftScope && opts.deskewEnabled
+      ? opts.deskewMaxAngle
+      : deskewEntry?.params?.maxAngle !== undefined
+        ? Number(deskewEntry.params.maxAngle)
+        : opts.deskewMaxAngle;
+    const effectiveDeskewIgnoreBorders = inDeskewDraftScope && opts.deskewEnabled
+      ? opts.deskewIgnoreBorders
+      : deskewEntry?.params?.ignoreBorders !== undefined
+        ? Boolean(deskewEntry.params.ignoreBorders)
+        : opts.deskewIgnoreBorders;
 
     // Cleanup Layer Resolution
     // Mask entries are overlays (rendered separately); only filter entries drive cleanup params.
@@ -511,71 +577,102 @@ export function useBookSession() {
     const cleanupEntry = cleanupFilterEntries.length > 0
       ? getAppliedEntryForPage(pageNum, pageId, cleanupFilterEntries)
       : undefined;
-    const inCleanupScope = cleanupEntry
-      ? true
-      : cleanupFilterEntries.length === 0 && isPageInScope(pageNum, opts.cleanupScope, activePageNum);
-    const applyCleanup = isClean && opts.cleanupEnabled && inCleanupScope;
-    const effectiveFlattenIllumination = cleanupEntry?.params?.flattenIllumination !== undefined
-      ? Boolean(cleanupEntry.params.flattenIllumination)
-      : opts.flattenIllumination;
-    const effectiveSpineStrength = cleanupEntry?.params?.spineStrength !== undefined
-      ? Number(cleanupEntry.params.spineStrength)
-      : (opts.spineStrength ?? 1.0);
-    const effectiveSpineBox = cleanupEntry?.params?.spineBox !== undefined
-      ? cleanupEntry.params.spineBox
-      : opts.spineBox;
-    const effectiveDespeckleLevel = cleanupEntry?.params?.despeckleLevel !== undefined
-      ? Number(cleanupEntry.params.despeckleLevel)
-      : opts.despeckleLevel;
+
+    const inDraftScope = isPageInScope(pageNum, opts.cleanupScope, activePageNum);
+    const hasLiveDraft = Boolean(
+      opts.cleanupEnabled && (opts.flattenIllumination || opts.despeckleLevel > 0 || opts.spineBox)
+    );
+
+    let applyCleanup = false;
+    let effectiveFlattenIllumination = false;
+    let effectiveSpineStrength = 1.0;
+    let effectiveSpineBox = opts.spineBox;
+    let effectiveDespeckleLevel = 0.0;
+
+    if (inDraftScope && hasLiveDraft) {
+      // Live draft preview takes immediate priority across its active scope
+      applyCleanup = isClean;
+      effectiveFlattenIllumination = Boolean(opts.flattenIllumination);
+      effectiveSpineStrength = opts.spineStrength ?? 1.0;
+      effectiveSpineBox = opts.spineBox;
+      effectiveDespeckleLevel = opts.despeckleLevel ?? 0.0;
+    } else if (cleanupEntry) {
+      // Fall back to previously committed applied entry for this page
+      applyCleanup = isClean;
+      effectiveFlattenIllumination = Boolean(cleanupEntry.params?.flattenIllumination);
+      effectiveSpineStrength = Number(cleanupEntry.params?.spineStrength ?? 1.0);
+      effectiveSpineBox = cleanupEntry.params?.spineBox;
+      effectiveDespeckleLevel = Number(cleanupEntry.params?.despeckleLevel ?? 0);
+    } else if (inDraftScope && opts.cleanupEnabled) {
+      applyCleanup = isClean;
+      effectiveFlattenIllumination = Boolean(opts.flattenIllumination);
+      effectiveSpineStrength = opts.spineStrength ?? 1.0;
+      effectiveSpineBox = opts.spineBox;
+      effectiveDespeckleLevel = opts.despeckleLevel ?? 0.0;
+    }
 
     // Restoration (Colors) Layer Resolution
     const restorationEntry = opts.restorationAppliedEntries && opts.restorationAppliedEntries.length > 0
       ? getAppliedEntryForPage(pageNum, pageId, opts.restorationAppliedEntries)
       : undefined;
-    const inRestorationScope = restorationEntry
-      ? true
-      : (!opts.restorationAppliedEntries || opts.restorationAppliedEntries.length === 0) && isPageInScope(pageNum, opts.restorationScope, activePageNum);
+    const inRestorationDraftScope = isPageInScope(pageNum, opts.restorationScope, activePageNum);
+    const inRestorationScope = restorationEntry ? true : inRestorationDraftScope;
     const applyRestoration = isClean && opts.restorationEnabled && inRestorationScope;
     const hasPageColorOverride = isClean && Boolean(page?.color_mode);
-    const effectiveColorMode = page?.color_mode || (applyRestoration ? (restorationEntry?.params?.colorMode || opts.colorMode) : "original");
-    const effectiveCleanBorders = restorationEntry?.params?.cleanBorders !== undefined
-      ? Boolean(restorationEntry.params.cleanBorders)
-      : opts.cleanBorders;
-    const effectiveBorderMarginPx = restorationEntry?.params?.borderMarginPx !== undefined
-      ? Number(restorationEntry.params.borderMarginPx)
-      : opts.borderMarginPx;
-    const effectiveBorderThreshold = restorationEntry?.params?.borderThreshold !== undefined
-      ? Number(restorationEntry.params.borderThreshold)
-      : opts.borderThreshold;
-    const effectiveEnhanceColors = restorationEntry?.params?.enhanceColors !== undefined
-      ? Boolean(restorationEntry.params.enhanceColors)
-      : opts.enhanceColors;
-    const effectiveSaturation = restorationEntry?.params?.saturation !== undefined
-      ? Number(restorationEntry.params.saturation)
-      : opts.saturation;
-    const effectiveContrast = restorationEntry?.params?.contrast !== undefined
-      ? Number(restorationEntry.params.contrast)
-      : opts.contrast;
-    const effectiveBwThreshold = restorationEntry?.params?.bwThreshold !== undefined
-      ? Number(restorationEntry.params.bwThreshold)
-      : opts.bwThreshold;
-    const effectiveWhitenBg = restorationEntry?.params?.whitenBg !== undefined
-      ? Boolean(restorationEntry.params.whitenBg)
-      : opts.whitenBg;
+    const effectiveColorMode = page?.color_mode || (applyRestoration ? (inRestorationDraftScope ? opts.colorMode : (restorationEntry?.params?.colorMode || opts.colorMode)) : "original");
+    const effectiveCleanBorders = inRestorationDraftScope
+      ? opts.cleanBorders
+      : restorationEntry?.params?.cleanBorders !== undefined
+        ? Boolean(restorationEntry.params.cleanBorders)
+        : opts.cleanBorders;
+    const effectiveBorderMarginPx = inRestorationDraftScope
+      ? opts.borderMarginPx
+      : restorationEntry?.params?.borderMarginPx !== undefined
+        ? Number(restorationEntry.params.borderMarginPx)
+        : opts.borderMarginPx;
+    const effectiveBorderThreshold = inRestorationDraftScope
+      ? opts.borderThreshold
+      : restorationEntry?.params?.borderThreshold !== undefined
+        ? Number(restorationEntry.params.borderThreshold)
+        : opts.borderThreshold;
+    const effectiveEnhanceColors = inRestorationDraftScope
+      ? opts.enhanceColors
+      : restorationEntry?.params?.enhanceColors !== undefined
+        ? Boolean(restorationEntry.params.enhanceColors)
+        : opts.enhanceColors;
+    const effectiveSaturation = inRestorationDraftScope
+      ? opts.saturation
+      : restorationEntry?.params?.saturation !== undefined
+        ? Number(restorationEntry.params.saturation)
+        : opts.saturation;
+    const effectiveContrast = inRestorationDraftScope
+      ? opts.contrast
+      : restorationEntry?.params?.contrast !== undefined
+        ? Number(restorationEntry.params.contrast)
+        : opts.contrast;
+    const effectiveBwThreshold = inRestorationDraftScope
+      ? opts.bwThreshold
+      : restorationEntry?.params?.bwThreshold !== undefined
+        ? Number(restorationEntry.params.bwThreshold)
+        : opts.bwThreshold;
+    const effectiveWhitenBg = inRestorationDraftScope
+      ? opts.whitenBg
+      : restorationEntry?.params?.whitenBg !== undefined
+        ? Boolean(restorationEntry.params.whitenBg)
+        : opts.whitenBg;
 
     // Bleed Layer Resolution
     const bleedEntry = opts.bleedAppliedEntries && opts.bleedAppliedEntries.length > 0
       ? getAppliedEntryForPage(pageNum, pageId, opts.bleedAppliedEntries)
       : undefined;
-    const inBleedScope = bleedEntry
-      ? true
-      : (!opts.bleedAppliedEntries || opts.bleedAppliedEntries.length === 0) && isPageInScope(pageNum, opts.bleedScope, activePageNum);
+    const inBleedDraftScope = isPageInScope(pageNum, opts.bleedScope, activePageNum);
+    const inBleedScope = bleedEntry ? true : inBleedDraftScope;
     const applyBleed = isClean && opts.bleedEnabled && inBleedScope;
-    const effectiveBleedMm = bleedEntry ? Number(bleedEntry.bleedMm ?? 0) : opts.bleedMm;
-    const effectiveBleedMode = bleedEntry?.mode || opts.bleedMode;
-    const effectiveBleedColor = bleedEntry?.solidColor || opts.bleedColor;
-    const effectiveBleedPlacement = bleedEntry?.placement || opts.bleedPlacement;
-    const effectiveShowCropMarks = bleedEntry ? Boolean(bleedEntry.showCropMarks) : opts.showCropMarks;
+    const effectiveBleedMm = inBleedDraftScope ? opts.bleedMm : (bleedEntry ? Number(bleedEntry.bleedMm ?? 0) : opts.bleedMm);
+    const effectiveBleedMode = inBleedDraftScope ? opts.bleedMode : (bleedEntry?.mode || opts.bleedMode);
+    const effectiveBleedColor = inBleedDraftScope ? opts.bleedColor : (bleedEntry?.solidColor || opts.bleedColor);
+    const effectiveBleedPlacement = inBleedDraftScope ? opts.bleedPlacement : (bleedEntry?.placement || opts.bleedPlacement);
+    const effectiveShowCropMarks = inBleedDraftScope ? opts.showCropMarks : (bleedEntry ? Boolean(bleedEntry.showCropMarks) : opts.showCropMarks);
 
     const params = new URLSearchParams({
       preview_clean: String(isClean),
@@ -653,5 +750,6 @@ export function useBookSession() {
     buildThumbnailUrl,
     resetSession,
     initSession,
+    loadSession,
   };
 }

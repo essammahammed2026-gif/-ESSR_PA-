@@ -7,6 +7,7 @@ import {
   CleanupColorMode,
   ModuleTaskProgress,
   BookStudioPage,
+  AppliedModuleEntry,
 } from "@/types/book_studio";
 import { PageScopeSelector, ModuleProgressBar, formatScopeLabel } from "./PageScopeSelector";
 import { resolveConcretePageNumbers } from "@/lib/pageScope";
@@ -16,11 +17,15 @@ export interface RestorePanelProps {
   setRestorationModule: React.Dispatch<React.SetStateAction<RestorationModuleConfig>>;
   pageColorMode?: CleanupColorMode | null;
   onSetPageColorMode?: (mode: CleanupColorMode | null, targetIds?: string[], clearAll?: boolean) => void;
+  resetRestoration?: () => Promise<void> | void;
   colorOverridePagesCount?: number;
   taskProgress?: ModuleTaskProgress;
   pages?: BookStudioPage[];
   selectedPageId?: string | null;
   activePageNum?: number;
+  isDualPage?: boolean;
+  onSelectPageId?: (id: string) => void;
+  onRecordHistory?: (label: string, nextRestore: RestorationModuleConfig) => void;
   shortcutLabels?: Record<string, string>;
 }
 
@@ -35,20 +40,52 @@ export function RestorePanel({
   restorationModule,
   setRestorationModule,
   onSetPageColorMode,
+  resetRestoration,
   taskProgress,
   pages = [],
   selectedPageId,
   activePageNum,
+  isDualPage = false,
+  onSelectPageId,
+  onRecordHistory,
   shortcutLabels = {},
 }: RestorePanelProps) {
   const colorMode = restorationModule.colorMode || "auto";
 
   const handleApply = () => {
     const concrete = resolveConcretePageNumbers(pages, restorationModule.scope, selectedPageId);
-    setRestorationModule((prev) => ({
-      ...prev,
+    const label = `Color & Tone (${concrete.scopeLabel} • ${colorMode.toUpperCase()})`;
+    const isAll = restorationModule.scope.mode === "all";
+
+    const currentEntry: AppliedModuleEntry = {
+      id: `restore_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      label: "Color & Tone",
+      details: `${colorMode.toUpperCase()} • Sat ${restorationModule.saturation.toFixed(2)}x • Con ${restorationModule.contrast.toFixed(2)}x`,
+      scopeLabel: concrete.scopeLabel,
+      origScope: isAll ? "all" : undefined,
+      targetPages: concrete.pageNumbers,
+      targetPageIds: concrete.pageIds,
+      visible: true,
+      params: {
+        colorMode,
+        saturation: restorationModule.saturation,
+        contrast: restorationModule.contrast,
+        whitenBg: restorationModule.whitenBg,
+        bwThreshold: restorationModule.bwThreshold,
+        cleanBorders: restorationModule.cleanBorders,
+        sharpen: restorationModule.sharpen,
+      },
+    };
+
+    const existing = restorationModule.appliedEntries || [];
+    const updated = [...existing.filter((e) => e.scopeLabel !== concrete.scopeLabel), currentEntry];
+    const nextRestore: RestorationModuleConfig = {
+      ...restorationModule,
       enabled: true,
-    }));
+      appliedEntries: updated,
+    };
+    setRestorationModule(nextRestore);
+    onRecordHistory?.(label, nextRestore);
 
     if (onSetPageColorMode) {
       onSetPageColorMode(colorMode, concrete.pageIds);
@@ -215,6 +252,10 @@ export function RestorePanel({
           scope={restorationModule.scope}
           onChange={(sc) => setRestorationModule((prev) => ({ ...prev, scope: sc }))}
           activePageNum={activePageNum}
+          pages={pages}
+          selectedPageId={selectedPageId}
+          isDualPage={isDualPage}
+          onSelectPageId={onSelectPageId}
         />
 
         <div className="flex gap-1.5">
@@ -229,20 +270,30 @@ export function RestorePanel({
 
           <button
             type="button"
-            onClick={() =>
-              setRestorationModule((prev) => ({
-                ...prev,
-                enhanceColors: false,
-                saturation: 1.0,
-                contrast: 1.0,
-                colorMode: "auto",
-                cleanBorders: false,
-                whitenBg: false,
-                sharpen: false,
-              }))
-            }
+            onClick={() => {
+              if (resetRestoration) {
+                void resetRestoration();
+              } else {
+                onSetPageColorMode?.(null, undefined, true);
+                setRestorationModule((prev) => ({
+                  ...prev,
+                  enabled: false,
+                  cleanBorders: false,
+                  borderMarginPx: 15,
+                  borderThreshold: 210,
+                  enhanceColors: true,
+                  saturation: 1.30,
+                  contrast: 1.10,
+                  colorMode: "auto",
+                  bwThreshold: 180,
+                  whitenBg: false,
+                  sharpen: true,
+                  appliedEntries: [],
+                }));
+              }
+            }}
             className="px-3 py-2 bg-[#161A23] hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1"
-            title="Reset filters to neutral default values"
+            title="Reset all color & tone modifications across the entire document"
           >
             <RotateCcw size={12} />
             <span>Reset</span>

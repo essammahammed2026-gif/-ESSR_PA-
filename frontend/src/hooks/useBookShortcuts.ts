@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useMemo } from "react";
+import { isTypingInInput, normalizeKeyEvent, formatShortcutCombo } from "./useStudioShortcuts";
 
 export interface BookShortcutHandlers {
   undo?: () => void;
@@ -75,15 +76,7 @@ export function useBookShortcuts({
 
   const formatCombo = useCallback((action: string): string => {
     const raw = activeShortcuts[action] || DEFAULT_BOOK_SHORTCUTS[action] || "";
-    if (!raw) return "";
-    return raw
-      .split("+")
-      .map((p) => {
-        const lower = p.toLowerCase();
-        if (lower === "escape" || lower === "esc") return "Esc";
-        return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
-      })
-      .join("+");
+    return formatShortcutCombo(raw);
   }, [activeShortcuts]);
 
   useEffect(() => {
@@ -91,31 +84,9 @@ export function useBookShortcuts({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore keystrokes when typing in inputs or textareas
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT" ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
+      if (isTypingInInput(e.target)) return;
 
-      const parts: string[] = [];
-      if (e.ctrlKey || e.metaKey) parts.push("ctrl");
-      if (e.shiftKey) parts.push("shift");
-      if (e.altKey) parts.push("alt");
-
-      let keyName = e.key.toLowerCase();
-      if (keyName === " ") keyName = "space";
-      else if (keyName === "arrowleft") keyName = "left";
-      else if (keyName === "arrowright") keyName = "right";
-      else if (keyName === "arrowup") keyName = "up";
-      else if (keyName === "arrowdown") keyName = "down";
-
-      parts.push(keyName);
-      const combo = parts.join("+");
+      const combo = normalizeKeyEvent(e);
 
       // Match actions
       if (combo === activeShortcuts.undo && handlers.undo) {

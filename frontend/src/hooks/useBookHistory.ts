@@ -2,7 +2,25 @@
 
 import { useState, useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { apiFetch } from "@/lib/api";
-import type { BookStudioPage } from "@/types/book_studio";
+import type {
+  BookStudioPage,
+  CropModuleConfig,
+  CropBox,
+  SplitLine,
+  DeskewModuleConfig,
+  CleanupModuleConfig,
+  RestorationModuleConfig,
+  BleedModuleConfig,
+} from "@/types/book_studio";
+
+export interface ModulesSnapshot {
+  cropModule: CropModuleConfig;
+  pageCrops: Record<string, { cropBox: CropBox; splitPos: number; splitLines: SplitLine[] }>;
+  deskewModule: DeskewModuleConfig;
+  cleanupModule: CleanupModuleConfig;
+  restorationModule: RestorationModuleConfig;
+  bleedModule: BleedModuleConfig;
+}
 
 export interface HistoryEntry {
   id: string;
@@ -10,6 +28,7 @@ export interface HistoryEntry {
   timestamp: number;
   pages: BookStudioPage[];
   selectedPageId: string | null;
+  modulesSnapshot?: ModulesSnapshot;
 }
 
 export interface UseBookHistoryArgs {
@@ -19,6 +38,8 @@ export interface UseBookHistoryArgs {
   selectedPageId: string | null;
   setSelectedPageId: Dispatch<SetStateAction<string | null>>;
   clearPageCrops?: (ids?: string[]) => void;
+  getModulesSnapshot?: () => ModulesSnapshot;
+  onRestoreModules?: (snapshot: ModulesSnapshot) => void;
   onStepRestored?: (target: HistoryEntry) => void;
   maxLimit?: number;
 }
@@ -28,12 +49,18 @@ export function useBookHistory({
   setPages,
   setSelectedPageId,
   clearPageCrops,
+  getModulesSnapshot,
+  onRestoreModules,
   onStepRestored,
   maxLimit = 50,
 }: UseBookHistoryArgs) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(-1);
   const isSyncingRef = useRef(false);
+  const getModulesSnapshotRef = useRef(getModulesSnapshot);
+  getModulesSnapshotRef.current = getModulesSnapshot;
+  const onRestoreModulesRef = useRef(onRestoreModules);
+  onRestoreModulesRef.current = onRestoreModules;
 
   // Sync state to backend
   const syncToBackend = useCallback(async (pagesToRestore: BookStudioPage[]) => {
@@ -50,20 +77,34 @@ export function useBookHistory({
   }, [sessionId]);
 
   // Initialize or reset history when a session opens
-  const initHistory = useCallback((initialPages: BookStudioPage[], initialSelectedId: string | null = null) => {
+  const initHistory = useCallback((
+    initialPages: BookStudioPage[],
+    initialSelectedId: string | null = null,
+    snapshotOverride?: ModulesSnapshot
+  ) => {
+    const snap = snapshotOverride ?? getModulesSnapshotRef.current?.();
     const entry: HistoryEntry = {
       id: "step_0",
       label: "Original Document",
       timestamp: Date.now(),
       pages: structuredClone(initialPages),
       selectedPageId: initialSelectedId,
+      modulesSnapshot: snap ? structuredClone(snap) : undefined,
     };
     setHistory([entry]);
     setCurrentIndex(0);
   }, []);
 
   // Record a new modification step
-  const recordStep = useCallback((label: string, nextPages: BookStudioPage[], nextSelectedId?: string | null) => {
+  const recordStep = useCallback((
+    label: string,
+    nextPages: BookStudioPage[],
+    nextSelectedId?: string | null,
+    snapshotOverride?: ModulesSnapshot
+  ) => {
+    const snap = snapshotOverride ?? getModulesSnapshotRef.current?.();
+    const clonedPages = structuredClone(nextPages);
+    const clonedSnap = snap ? structuredClone(snap) : undefined;
     setHistory((prev) => {
       // Prune future redo steps from current pointer
       const validBase = currentIndex >= 0 ? prev.slice(0, currentIndex + 1) : prev;
@@ -71,8 +112,9 @@ export function useBookHistory({
         id: `step_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         label,
         timestamp: Date.now(),
-        pages: structuredClone(nextPages),
+        pages: clonedPages,
         selectedPageId: nextSelectedId ?? null,
+        modulesSnapshot: clonedSnap,
       };
 
       const combined = [...validBase, newEntry];
@@ -108,8 +150,12 @@ export function useBookHistory({
     } else if (bumpedPages.length > 0) {
       setSelectedPageId(bumpedPages[0].id);
     }
-    clearPageCrops?.();
-    onStepRestored?.(target);
+    if (target.modulesSnapshot && onRestoreModulesRef.current) {
+      onRestoreModulesRef.current(structuredClone(target.modulesSnapshot));
+    } else {
+      clearPageCrops?.();
+      onStepRestored?.(target);
+    }
 
     await syncToBackend(bumpedPages);
     isSyncingRef.current = false;

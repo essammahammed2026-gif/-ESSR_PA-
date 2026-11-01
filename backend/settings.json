@@ -1,4 +1,25 @@
 {
+    "tags": [
+        {
+            "id": "pending",
+            "name": "Pending",
+            "color": "#f59e0b",
+            "icon": "Clock"
+        },
+        {
+            "id": "in-progress",
+            "name": "In-Progress",
+            "color": "#06b6d4",
+            "icon": "PlayCircle"
+        },
+        {
+            "id": "done",
+            "name": "Done",
+            "color": "#10b981",
+            "icon": "CheckCircle2"
+        }
+    ],
+    "tag_display_mode": "icon",
     "sheets": [
         {
             "name": "A4",
@@ -150,5 +171,9 @@
             "zoom_in": "ctrl+shift++",
             "zoom_out": "ctrl+shift+-"
         }
+    },
+    "storage": {
+        "export_retention_days": 7,
+        "auto_clean_temp_hours": 24
     }
 }

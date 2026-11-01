@@ -24,6 +24,15 @@ class BookTrimPreset(BaseModel):
     height: float = Field(..., gt=0, description="Height in mm")
     unit: str = "mm"
 
+class TagPreset(BaseModel):
+    id: str
+    name: str
+    color: str = "#06b6d4"
+    icon: str = "PlayCircle"
+
+class TagDisplayModeRequest(BaseModel):
+    display_mode: str = Field("both", pattern="^(both|icon|name)$")
+
 class ImposingSettings(BaseModel):
     default_sheet_unit: str = "mm"
     default_margin: float = 10.0
@@ -63,16 +72,29 @@ class BookStudioSettings(BaseModel):
         "rotate": "r"
     })
 
+class StorageSettings(BaseModel):
+    export_retention_days: int = Field(0, ge=0, le=365, description="0 means retain forever")
+    auto_clean_temp_hours: int = Field(24, ge=1, le=720)
+
 class AppSettings(BaseModel):
     sheets: List[SheetPreset] = []
     rolls: List[RollPreset] = []
     book_trims: List[BookTrimPreset] = []
+    tags: List[TagPreset] = []
+    tag_display_mode: str = "both"
     imposing: ImposingSettings = Field(default_factory=ImposingSettings)
     contour: ContourSettings = Field(default_factory=ContourSettings)
     flipbook: FlipbookSettings = Field(default_factory=FlipbookSettings)
     book_studio: BookStudioSettings = Field(default_factory=BookStudioSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
 
 DEFAULT_SETTINGS: dict = {
+    "tags": [
+        {"id": "pending", "name": "Pending", "color": "#f59e0b", "icon": "Clock"},
+        {"id": "in-progress", "name": "In-Progress", "color": "#06b6d4", "icon": "PlayCircle"},
+        {"id": "done", "name": "Done", "color": "#10b981", "icon": "CheckCircle2"},
+    ],
+    "tag_display_mode": "both",
     "sheets": [
         {"name": "A4", "width": 210.0, "height": 297.0, "unit": "mm"},
         {"name": "A3", "width": 297.0, "height": 420.0, "unit": "mm"},
@@ -133,6 +155,10 @@ DEFAULT_SETTINGS: dict = {
             "rotate": "r"
         }
     },
+    "storage": {
+        "export_retention_days": 0,
+        "auto_clean_temp_hours": 24,
+    },
 }
 
 def load_settings() -> dict:
@@ -144,13 +170,17 @@ def load_settings() -> dict:
             data = json.load(f)
             # Merge with defaults for missing keys
             merged = {**DEFAULT_SETTINGS, **data}
-            for k in ["imposing", "contour", "flipbook", "book_studio"]:
+            for k in ["imposing", "contour", "flipbook", "book_studio", "storage"]:
                 if k in data and isinstance(data[k], dict):
                     merged[k] = {**DEFAULT_SETTINGS[k], **data[k]}
             if "rolls" not in merged:
                 merged["rolls"] = DEFAULT_SETTINGS["rolls"]
             if "book_trims" not in merged:
                 merged["book_trims"] = DEFAULT_SETTINGS["book_trims"]
+            if "tags" not in merged or not merged["tags"]:
+                merged["tags"] = DEFAULT_SETTINGS["tags"]
+            if "tag_display_mode" not in merged:
+                merged["tag_display_mode"] = DEFAULT_SETTINGS["tag_display_mode"]
             return merged
     except Exception:
         return DEFAULT_SETTINGS
@@ -290,7 +320,8 @@ class OpenFolderRequest(BaseModel):
     key: str
 
 class CleanStorageRequest(BaseModel):
-    target: str = "runtime"  # "runtime", "all", or specific key
+    target: Optional[str] = None  # "safe", "build", "all", or specific key
+    targets: Optional[List[str]] = None  # Selective list of keys
 
 @router.get("/api/settings/storage-status")
 def get_storage_status():
@@ -306,13 +337,116 @@ def open_storage_folder(req: OpenFolderRequest):
 @router.post("/api/settings/clean-storage")
 def clean_storage(req: CleanStorageRequest):
     from engines.storage_cleaner import StorageCleaner
-    res = StorageCleaner.clean(req.target)
-    if req.target in ["runtime", "all", "book_scans"]:
+    targets = req.targets if req.targets is not None else (req.target or "safe")
+    res = StorageCleaner.clean(targets)
+    cleaned = res.get("cleaned_keys", [])
+    if any(k in cleaned for k in ["storage_cache", "safe", "runtime", "all", "all_safe"]):
         try:
-            from book_scan_api import SESSIONS, SESSION_TIMESTAMPS
-            SESSIONS.clear()
-            SESSION_TIMESTAMPS.clear()
+            from book_scan_api import _THUMB_RAM_CACHE, _THUMB_RAM_LOCK
+            with _THUMB_RAM_LOCK:
+                _THUMB_RAM_CACHE.clear()
         except ImportError:
             pass
     return res
+
+@router.post("/api/settings/backup-db")
+def trigger_database_backup():
+    """Triggers an immediate on-demand hot snapshot of flint.db."""
+    from db.session import backup_database
+    backup_path = backup_database()
+    if backup_path:
+        return {
+            "success": True,
+            "path": backup_path,
+            "filename": os.path.basename(backup_path),
+            "message": f"Created database backup snapshot: {os.path.basename(backup_path)}"
+        }
+    return {
+        "success": False,
+        "message": "No database found or backup could not be created."
+    }
+
+@router.post("/api/settings/empty-trash")
+def empty_trash_from_settings():
+    """Empties all soft-deleted projects in trash and purges their storage."""
+    from db.session import db_session
+    from db.repository import SessionRepository
+    from storage.asset_store import asset_store
+    with db_session() as db:
+        session_ids = SessionRepository.empty_trash(db)
+        total_freed_bytes = 0
+        for sid in session_ids:
+            try:
+                total_freed_bytes += asset_store.purge_session(sid)
+            except Exception:
+                pass
+    return {
+        "success": True,
+        "purged_count": len(session_ids),
+        "total_freed_bytes": total_freed_bytes,
+        "message": f"Successfully emptied Trash ({len(session_ids)} projects permanently purged)."
+    }
+
+class RetentionPruneRequest(BaseModel):
+    retention_days: Optional[int] = None
+
+@router.post("/api/settings/retention-prune")
+def prune_retention(req: Optional[RetentionPruneRequest] = None):
+    from engines.storage_cleaner import StorageCleaner
+    settings = load_settings()
+    retention_days = req.retention_days if (req and req.retention_days is not None) else settings.get("storage", {}).get("export_retention_days", 0)
+    res = StorageCleaner.prune_exports(retention_days)
+    return res
+
+@router.put("/api/settings/retention")
+def set_retention_policy(req: StorageSettings):
+    settings = load_settings()
+    settings["storage"] = req.dict()
+    save_settings(settings)
+    return {"success": True, "storage": settings["storage"]}
+
+
+# --- Dynamic Tag Customization Endpoints ---
+
+@router.get("/api/settings/tags")
+def get_tags():
+    settings = load_settings()
+    return {
+        "success": True,
+        "tags": settings.get("tags", DEFAULT_SETTINGS["tags"]),
+        "tag_display_mode": settings.get("tag_display_mode", "both"),
+    }
+
+
+@router.post("/api/settings/tags")
+def create_or_update_tag(tag: TagPreset):
+    settings = load_settings()
+    tags = settings.get("tags", list(DEFAULT_SETTINGS["tags"]))
+    # Replace if ID exists, else append
+    existing = [t for t in tags if t.get("id") != tag.id]
+    existing.append(tag.dict())
+    settings["tags"] = existing
+    save_settings(settings)
+    return {"success": True, "tags": settings["tags"]}
+
+
+@router.delete("/api/settings/tags/{tag_id}")
+def delete_tag(tag_id: str):
+    settings = load_settings()
+    tags = settings.get("tags", list(DEFAULT_SETTINGS["tags"]))
+    filtered = [t for t in tags if t.get("id") != tag_id]
+    if len(filtered) == len(tags):
+        raise HTTPException(status_code=404, detail="Tag not found")
+    settings["tags"] = filtered
+    save_settings(settings)
+    return {"success": True, "tags": settings["tags"]}
+
+
+@router.put("/api/settings/tags/display-mode")
+def set_tag_display_mode(req: TagDisplayModeRequest):
+    settings = load_settings()
+    settings["tag_display_mode"] = req.display_mode
+    save_settings(settings)
+    return {"success": True, "tag_display_mode": req.display_mode}
+
 

@@ -186,16 +186,18 @@ class AssetStore:
                             pass
             return total, count
 
+        orig_size, orig_count = dir_size(self.originals_dir)
         sess_size, sess_count = dir_size(self.sessions_dir)
         cache_size, cache_count = dir_size(self.cache_dir)
         export_size, export_count = dir_size(self.exports_dir)
 
         return {
             "root": self.root,
+            "originals": {"bytes": orig_size, "files": orig_count},
             "sessions": {"bytes": sess_size, "files": sess_count},
             "cache": {"bytes": cache_size, "files": cache_count},
             "exports": {"bytes": export_size, "files": export_count},
-            "total_bytes": sess_size + cache_size + export_size,
+            "total_bytes": orig_size + sess_size + cache_size + export_size,
         }
 
 

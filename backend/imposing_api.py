@@ -1,9 +1,14 @@
 import os
+import re
+import time
 import uuid
 import threading
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
-from typing import Optional
+from typing import Optional, List, Dict, Any
+from sqlalchemy.orm import Session as DBSession
+from db.session import get_db, SessionLocal
+from db.repository import SessionRepository
 from engines.sheet_packer import MaxRectsSheetPacker, SingleSheetResult, PlacedSheetItem
 from engines.roll_packer import MeterSegmentPacker
 from engines.sheet_gang_exporter import SheetGangExporter
@@ -103,6 +108,259 @@ async def upload_imposing_file(file: UploadFile = File(...)):
         "thumb": f"/api/imposing/thumbnail/{file_id_ext}/0",
         "pages": pages_meta
     }
+
+
+@router.post("/api/imposing/init-session")
+async def init_imposing_session(
+    file: Optional[UploadFile] = File(None),
+    existing_file_path: Optional[str] = Form(None),
+    file_id: Optional[str] = Form(None),
+    title: Optional[str] = Form(None),
+    original_filename: Optional[str] = Form(None),
+    job_mode: str = Form("book"),
+    sheet_w: float = Form(320.0),
+    sheet_h: float = Form(450.0),
+    sheet_preset: str = Form("320,450"),
+    db: DBSession = Depends(get_db),
+):
+    """
+    Initializes a persistent, database-backed Imposing Studio session in SQLite WAL.
+    Supports new file upload or intake from existing staged asset / path.
+    """
+    try:
+        from main import evict_stale_caches
+        evict_stale_caches()
+    except ImportError:
+        pass
+
+    file_size = 0
+    if file:
+        file_id_raw = str(uuid.uuid4())
+        ext = os.path.splitext(file.filename)[1].lower() or ".pdf"
+        file_id_ext = f"{file_id_raw}{ext}"
+        content = await file.read()
+        file_size = len(content)
+        _, file_path = asset_store.save_original(file_id_ext, content)
+        file_name = file.filename
+    elif existing_file_path and os.path.exists(existing_file_path):
+        file_path = existing_file_path
+        file_id_ext = os.path.basename(file_path)
+        file_name = original_filename or re.sub(r"^\d+_", "", file_id_ext)
+        file_size = os.path.getsize(file_path)
+    elif file_id:
+        resolved = resolve_temp_file(file_id)
+        if not resolved or not os.path.exists(resolved):
+            raise HTTPException(status_code=404, detail="Referenced file not found on disk")
+        file_path = resolved
+        file_id_ext = os.path.basename(file_path)
+        file_name = original_filename or file_id_ext
+        file_size = os.path.getsize(file_path)
+    else:
+        raise HTTPException(status_code=400, detail="No file or existing file reference provided")
+
+    session_id = str(uuid.uuid4())
+    session_dir = asset_store.get_session_dir(session_id)
+    os.makedirs(session_dir, exist_ok=True)
+
+    w, h, page_count, pages_meta = build_imposing_pages_meta(file_path, file_id_ext)
+    thumb_path = asset_store.get_thumbnail_cache_path("imposing", f"{os.path.splitext(file_id_ext)[0]}_thumb_p0")
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        if page_count > 0:
+            from engines.thumbnails import render_pdf_thumb
+            render_pdf_thumb(file_path, thumb_path, page_num=0)
+        if page_count > 1:
+            t = threading.Thread(
+                target=_pregen_all_thumbnails,
+                args=(file_path, file_id_ext, page_count),
+                daemon=True,
+                name=f"thumb-pregen-{file_id_ext[:8]}"
+            )
+            t.start()
+    else:
+        try:
+            from engines.thumbnails import render_image_thumb
+            render_image_thumb(file_path, thumb_path)
+        except Exception:
+            pass
+
+    pages_data = []
+    for p in pages_meta:
+        pages_data.append({
+            "id": f"{file_id_ext}_p{p['page_num']}_{uuid.uuid4().hex[:6]}",
+            "page_number": p["page_num"],
+            "original_w_mm": p.get("width_mm", w),
+            "original_h_mm": p.get("height_mm", h),
+            "rotation_deg": 0,
+            "is_deleted": False,
+            "applied_layers": {},
+        })
+
+    is_book = page_count > 1
+    actual_job_mode = job_mode if job_mode in ("book", "gang") else ("book" if is_book else "gang")
+    clean_title = title or original_filename or file_name
+
+    initial_settings = {
+        "job_mode": actual_job_mode,
+        "sheet_w": sheet_w,
+        "sheet_h": sheet_h,
+        "sheet_preset": sheet_preset,
+        "margin": 10.0,
+        "gap": 5.0,
+        "crop_marks": True,
+        "reg_marks": False,
+        "draw_border": False,
+        "border_color": "#000000",
+        "align": "Center",
+        "rows": None,
+        "cols": None,
+        "items": [{
+            "file_id": file_id_ext,
+            "name": file_name,
+            "w": round(w, 2),
+            "h": round(h, 2),
+            "copies": 1,
+            "ratio": round(w / h, 3) if h > 0 else 1.0,
+            "locked": True,
+            "keep_aspect": False,
+            "fill_color": "#FFFFFF",
+            "original_w": round(w, 2),
+            "original_h": round(h, 2),
+            "page_count": page_count,
+            "is_book": is_book,
+            "page_range": "all",
+            "fit_mode": "stretch",
+            "page_rotation": "cw" if is_book else "none",
+            "bleed_mode": "none",
+            "bleed_mm": 0.0,
+            "bleed_color": "#FFFFFF",
+            "bleed_type": "outside",
+        }],
+    }
+
+    session = SessionRepository.create_session(
+        db=db,
+        session_id=session_id,
+        studio_type="imposing",
+        intake_mode="single",
+        is_spread=False,
+        session_dir=session_dir,
+        title=clean_title,
+        original_filename=file_name,
+        file_size_bytes=file_size,
+        tag="in-progress",
+        notes="",
+        pages_data=pages_data,
+        settings=initial_settings,
+    )
+
+    formatted_pages = []
+    for p in session.pages:
+        formatted_pages.append({
+            "id": p.id,
+            "file_id": file_id_ext,
+            "name": file_name,
+            "original_page_num": p.page_number,
+            "display_page_num": p.page_number + 1,
+            "w": p.original_w_mm,
+            "h": p.original_h_mm,
+            "rotation": p.rotation_deg,
+            "is_deleted": p.is_deleted,
+            "thumb_url": f"/api/imposing/thumbnail/{file_id_ext}/{p.page_number}",
+        })
+
+    return {
+        "success": True,
+        "session_id": session.id,
+        "file_id": file_id_ext,
+        "name": file_name,
+        "title": clean_title,
+        "w": round(w, 2),
+        "h": round(h, 2),
+        "page_count": page_count,
+        "is_book": is_book,
+        "thumb": f"/api/imposing/thumbnail/{file_id_ext}/0",
+        "settings": initial_settings,
+        "items": initial_settings["items"],
+        "pages": formatted_pages,
+    }
+
+
+@router.get("/api/imposing/session/{session_id}")
+def get_imposing_session(session_id: str, db: DBSession = Depends(get_db)):
+    """Loads a persistent Imposing Studio session from SQLite WAL."""
+    session = SessionRepository.get_session(db, session_id)
+    if not session or session.status == "trash":
+        raise HTTPException(status_code=404, detail="Imposing session not found or moved to trash")
+
+    items = session.settings.get("items", [])
+    file_id = items[0]["file_id"] if items else (session.original_filename or "")
+    clean_name = session.original_filename or session.title or "Untitled Asset"
+
+    pages_list = []
+    for p in session.pages:
+        pages_list.append({
+            "id": p.id,
+            "file_id": file_id,
+            "name": clean_name,
+            "original_page_num": p.page_number,
+            "display_page_num": p.page_number + 1,
+            "w": p.original_w_mm,
+            "h": p.original_h_mm,
+            "rotation": p.rotation_deg,
+            "is_deleted": p.is_deleted,
+            "thumb_url": f"/api/imposing/thumbnail/{file_id}/{p.page_number}",
+        })
+
+    return {
+        "success": True,
+        "session_id": session.id,
+        "studio_type": session.studio_type,
+        "title": session.title,
+        "original_filename": session.original_filename,
+        "tag": session.tag,
+        "status": session.status,
+        "settings": session.settings or {},
+        "items": items,
+        "pages": pages_list,
+    }
+
+
+@router.patch("/api/imposing/session/{session_id}")
+def update_imposing_session(
+    session_id: str,
+    payload: Dict[str, Any] = Body(...),
+    db: DBSession = Depends(get_db),
+):
+    """Saves imposing settings and deck updates into SQLite WAL."""
+    session = SessionRepository.get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Imposing session not found")
+
+    settings = dict(session.settings or {})
+    if "settings" in payload and isinstance(payload["settings"], dict):
+        settings.update(payload["settings"])
+    if "items" in payload:
+        settings["items"] = payload["items"]
+    session.settings = settings
+
+    if "pages" in payload and isinstance(payload["pages"], list):
+        page_map = {p.id: p for p in session.pages}
+        for idx, page_update in enumerate(payload["pages"]):
+            pid = page_update.get("id")
+            if pid in page_map:
+                pm = page_map[pid]
+                pm.sort_order = idx
+                if "rotation" in page_update:
+                    pm.rotation_deg = int(page_update["rotation"])
+                if "is_deleted" in page_update:
+                    pm.is_deleted = bool(page_update["is_deleted"])
+
+    session.updated_at = time.time()
+    db.commit()
+    db.refresh(session)
+    return {"success": True, "session_id": session.id, "updated_at": session.updated_at}
 
 @router.get("/api/imposing/pages/{file_id}")
 def get_imposing_file_pages(file_id: str):
@@ -355,7 +613,39 @@ def export_imposing(req: ImposingRequest, background_tasks: BackgroundTasks):
             )
 
         background_tasks.add_task(_cleanup_export_file, out_path)
-        return FileResponse(out_path, filename="Imposed_Print_File.pdf", media_type="application/pdf")
+        timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+
+        # Database integration: update session to done/archived and log export job
+        clean_name = "Imposed_Sheet"
+        if req.items and req.items[0].name:
+            clean_name = os.path.splitext(req.items[0].name)[0].replace(" ", "_")
+        
+        session_short = (req.session_id[:8]) if req.session_id else uuid.uuid4().hex[:8]
+        export_filename = f"{timestamp_str}_{clean_name}_{session_short}.pdf"
+
+        if req.session_id:
+            try:
+                with SessionLocal() as db:
+                    SessionRepository.update_session_meta(
+                        db, session_id=req.session_id, tag="done", status="archived"
+                    )
+                    file_size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+                    job_id = f"job_exp_{uuid.uuid4().hex[:12]}"
+                    SessionRepository.create_or_update_export_job(
+                        db=db,
+                        job_id=job_id,
+                        session_id=req.session_id,
+                        status="completed",
+                        stage="done",
+                        progress=100.0,
+                        message="Imposed PDF export generated successfully",
+                        output_file_path=out_path,
+                        file_size_bytes=file_size,
+                    )
+            except Exception as db_err:
+                print(f"Warning: Failed to update session/export_job in DB: {db_err}")
+
+        return FileResponse(out_path, filename=export_filename, media_type="application/pdf")
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -453,5 +743,25 @@ def export_imposing_svg(req: ImposingRequest, background_tasks: BackgroundTasks)
         return FileResponse(out_path, filename=download_name, media_type="image/svg+xml")
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@router.post("/api/imposing/ocr-inspect")
+def ocr_inspect_page(payload: Dict[str, Any] = Body(...)):
+    """Inspects a page for vector text or runs Arabic & English OCR."""
+    file_id = payload.get("file_id")
+    if not file_id:
+        raise HTTPException(status_code=400, detail="file_id is required")
+
+    file_path = resolve_temp_file(file_id)
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    page_num = int(payload.get("page_num", 0))
+    languages = str(payload.get("languages", "ara+eng"))
+
+    from engines.ocr_engine import extract_page_ocr
+    result = extract_page_ocr(file_path, page_num=page_num, languages=languages)
+    return result
+
 
 

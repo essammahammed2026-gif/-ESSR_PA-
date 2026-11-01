@@ -16,9 +16,12 @@
 4. **Backend Architecture (Routers Thin, Engines Pure):**
    - Keep FastAPI routers in `main.py`, `imposing_api.py`, `book_scan_api.py`, etc., thin. They must only handle HTTP validation, response formatting, and background task dispatching.
    - All computer vision (OpenCV), PDF modification (PyMuPDF/fitz), and mathematical logic MUST live in pure, testable functions inside `backend/engines/`.
-5. **Zero-Retention File Policy:**
-   - Do not commit test images, sample PDFs, uploaded files, or generated assets. 
-   - Clean up temporary working files inside `backend/temp_uploads/` immediately after processing.
+5. **Absolute Data Preservation & Non-Destructive Storage Policy:**
+   - **User Data is Inviolable:** `backend/data/flint.db` and everything inside `backend/data/storage/` (`originals/`, `sessions/`, `exports/`) are **strictly permanent user assets**.
+   - **Zero-Tolerance Assistant Deletion Ban:** The AI assistant is ABSOLUTELY AND UNCONDITIONALLY FORBIDDEN from executing any command, script, or SQL statement that deletes records from SQLite (`sessions`, `pages`, `export_jobs`), drops tables, or deletes folders/files within `backend/data/storage/`. Test resets or database wipes are strictly forbidden unless the human user explicitly orders a full data wipe and provides direct confirmation in that prompt.
+   - **Non-Destructive Schema Migrations:** All database schema changes in `backend/db/` MUST be purely additive (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN`). Never drop, recreate, or truncate tables.
+   - **Automated Hot Snapshots:** The backend creates an automated, rolling SQLite hot snapshot (`flint_backup_*.db`) via SQLite online backup API before running migrations or database initialization.
+   - **Git & Scratch Hygiene:** Do not commit test images, sample PDFs, uploaded files, or generated assets to git. Clean up only transient scratch files inside `backend/temp_uploads/`. Never run cleanup commands against `data/storage/`.
 
 ---
 
@@ -59,9 +62,10 @@
    - Completely ignore build outputs, dependencies, and environment files (`node_modules/`, `.next/`, `.venv/`).
    - ABSOLUTELY ignore the contents of `backend/temp_uploads/` and `backend/public_flipbooks/` during text and code searches so the agent doesn't waste tokens reading old, cached images or heavy PDFs.
 
-3. **Automated Session Hand-Off & Crash Recovery:**
-   - At the beginning of a session, check if `backend/temp_uploads/` contains leftover scratch files from a previous crash. If it does, run the `backend/engines/storage_cleaner.py` routine to safely purge them before writing code. (Note: Persistent session assets live securely in `backend/data/storage/` tracked by SQLite WAL).
-   - Before ending a coding session, the agent MUST summarize workspace changes into `SESSION_LOG.md` and ensure `temp_uploads/` is cleanly maintained.
+3. **Automated Session Hand-Off & Safe Scratch Maintenance:**
+   - Scratch Cleanup Only: At the beginning of a session, check if `backend/temp_uploads/` contains leftover scratch files from a previous crash. If it does, safely purge only files inside `backend/temp_uploads/`.
+   - Never run bulk cleanup scripts or touch `backend/data/storage/` (sessions, originals, exports). Persistent user assets and cards live safely in `backend/data/storage/` and are tracked by SQLite WAL in `backend/data/flint.db`.
+   - Before ending a coding session, the agent MUST summarize workspace changes into `SESSION_LOG.md`.
 
 4. **Strict Version Control Restrictions (User-Only Permissions):**
    - The AI agent is ABSOLUTELY FORBIDDEN from running `git commit`, `git push`, or `git pull` commands autonomously.

@@ -125,6 +125,7 @@ export type ModulePageScopeMode = "all" | "current" | "odds" | "evens" | "range"
 export interface ModulePageScope {
   mode: ModulePageScopeMode;
   customRange: string;
+  dualSides?: Array<"left" | "right">;
 }
 
 export interface DeskewModuleConfig {
@@ -176,16 +177,16 @@ export type MaskApplyScopeMode = ModulePageScopeMode;
 
 export interface CleanupModuleConfig {
   enabled: boolean;
-  maskScopeMode: MaskApplyScopeMode;
-  maskCustomRange: string;
   maskColor: string;
   flattenIllumination: boolean;
   spineStrength?: number;
   spineBox?: CropBox | null;
+  pageSpineBoxes?: Record<string, CropBox>;
   spineSelectionActive?: boolean;
   despeckleLevel: number;
   scope: ModulePageScope;
   draftMaskBox?: MaskBox | null;
+  pageDraftMasks?: Record<string, MaskBox>;
   appliedEntries?: AppliedModuleEntry[];
 }
 

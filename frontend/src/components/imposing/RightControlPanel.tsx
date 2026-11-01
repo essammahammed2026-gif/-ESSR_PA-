@@ -1,29 +1,43 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import {
-  ChevronDown,
   ChevronLeft,
-  RotateCw,
-  Crop,
-  Copy,
-  RefreshCw,
-  Trash2,
-  Layers,
+  ChevronRight,
   Maximize2,
   Grid,
-  Crosshair,
+  Layers,
+  Shuffle,
+  Crop,
   SlidersHorizontal,
+  FileText,
+  BookOpen,
+  ArrowUpRight,
 } from "lucide-react";
-import { ImposingItem } from "@/types/prepress";
-import { mmToUnit, unitToMm } from "@/lib/units";
+import { ImposingItem, ImposingPage } from "@/types/prepress";
+import { PageSizePanel } from "./modules/PageSizePanel";
+import { StepRepeatPanel } from "./modules/StepRepeatPanel";
+import { NUpPanel } from "./modules/NUpPanel";
+import { ShufflePanel } from "./modules/ShufflePanel";
+import { ImposingBleedPanel } from "./modules/ImposingBleedPanel";
+import { PageToolsPanel } from "./modules/PageToolsPanel";
+import { OcrPanel } from "./modules/OcrPanel";
 
-type ImposingToolId = "mode" | "sheet" | "grid" | "actions" | "marks";
+export type ImposingToolId =
+  | "page_size"
+  | "step_repeat"
+  | "n_up"
+  | "shuffle"
+  | "bleed"
+  | "page_tools"
+  | "ocr";
 
 interface RightControlPanelProps {
   jobMode: string;
   setJobMode: (m: "book" | "gang") => void;
   items: ImposingItem[];
+  pages: ImposingPage[];
   sheetPreset: string;
   setSheetPreset: (p: string) => void;
   sheetW: number;
@@ -35,22 +49,22 @@ interface RightControlPanelProps {
   setGap: (g: number) => void;
   margin: number;
   setMargin: (m: number) => void;
-  handleExport: () => void;
-  isExporting: boolean;
-  cropMarks: boolean;
-  setCropMarks: (c: boolean) => void;
-  regMarks: boolean;
-  setRegMarks: (r: boolean) => void;
   rows?: number | null;
   setRows?: (r: number | null) => void;
   cols?: number | null;
   setCols?: (c: number | null) => void;
-  handlePreview?: () => void;
+  batchRotateSelected?: (dir: "cw" | "ccw") => void;
+  selectedPageIds?: string[];
+  rotatePage?: (id: string, dir: "cw" | "ccw") => void;
+  onCollapse?: () => void;
 }
 
 export function RightControlPanel({
   jobMode,
   setJobMode,
+  items,
+  pages,
+  sheetPreset,
   setSheetPreset,
   sheetW,
   setSheetW,
@@ -61,315 +75,220 @@ export function RightControlPanel({
   setGap,
   margin,
   setMargin,
-  handleExport,
-  isExporting,
-  cropMarks,
-  setCropMarks,
-  regMarks,
-  setRegMarks,
   rows,
   setRows,
   cols,
   setCols,
-  handlePreview,
+  batchRotateSelected,
+  selectedPageIds,
+  rotatePage,
+  onCollapse,
 }: RightControlPanelProps) {
   const [activeTool, setActiveTool] = useState<ImposingToolId | null>(null);
 
   const tools: {
     id: ImposingToolId;
+    shortcut: string;
     title: string;
-    category: "IMPOSITION SETUP" | "FINISHING & ACTIONS";
+    description: string;
     icon: React.ReactNode;
   }[] = [
-    { id: "mode", title: "Imposition Mode", category: "IMPOSITION SETUP", icon: <Layers size={15} /> },
-    { id: "sheet", title: "Sheet & Format", category: "IMPOSITION SETUP", icon: <Maximize2 size={15} /> },
-    { id: "grid", title: "Layout & Grid", category: "IMPOSITION SETUP", icon: <Grid size={15} /> },
-    { id: "marks", title: "Prepress Marks", category: "FINISHING & ACTIONS", icon: <Crosshair size={15} /> },
-    { id: "actions", title: "Page Actions", category: "FINISHING & ACTIONS", icon: <SlidersHorizontal size={15} /> },
+    {
+      id: "page_size",
+      shortcut: "1",
+      title: "Page Size",
+      description: `${Math.round(sheetW)}×${Math.round(sheetH)} ${unit} press format`,
+      icon: <Maximize2 size={14} />,
+    },
+    {
+      id: "step_repeat",
+      shortcut: "2",
+      title: "Step and Repeat",
+      description: !rows && !cols ? "Auto 2D nesting" : `${rows || 1}×${cols || 1} matrix`,
+      icon: <Grid size={14} />,
+    },
+    {
+      id: "n_up",
+      shortcut: "3",
+      title: "N-Up",
+      description: jobMode === "book" ? "Booklet signatures" : "Multi-up spreads",
+      icon: <Layers size={14} />,
+    },
+    {
+      id: "shuffle",
+      shortcut: "4",
+      title: "Shuffle",
+      description: "Cut & stack, saddle fold",
+      icon: <Shuffle size={14} />,
+    },
+    {
+      id: "bleed",
+      shortcut: "5",
+      title: "Bleed",
+      description: "Mirror, solid or TrimBox",
+      icon: <Crop size={14} />,
+    },
+    {
+      id: "page_tools",
+      shortcut: "6",
+      title: "Page Tools",
+      description: "Rotate, blanks, RTL order",
+      icon: <SlidersHorizontal size={14} />,
+    },
+    {
+      id: "ocr",
+      shortcut: "7",
+      title: "OCR",
+      description: "Arabic & English recognition",
+      icon: <FileText size={14} />,
+    },
   ];
 
   const activeToolMeta = tools.find((t) => t.id === activeTool);
 
   return (
-    <div className="flex flex-col h-full bg-[#11141B] select-none overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 flex items-center justify-between border-b border-[#1E232E] shrink-0">
+    <div className="flex flex-col h-full bg-[var(--surface-panel,#141923)] border-l border-[var(--border-subtle,#242C3D)] select-none overflow-hidden">
+      {/* Top Header Bar */}
+      <div className="h-10 px-3.5 border-b border-[var(--border-subtle,#242C3D)] bg-[var(--surface-panel,#141923)] flex items-center justify-between shrink-0">
         {activeTool && activeToolMeta ? (
           <button
             type="button"
             onClick={() => setActiveTool(null)}
-            className="flex items-center space-x-2 text-slate-200 hover:text-white transition-colors cursor-pointer group"
+            className="flex items-center space-x-1.5 text-[var(--text-secondary,#94A3B8)] hover:text-[var(--text-primary,#F1F5F9)] transition-colors cursor-pointer group"
           >
-            <ChevronLeft size={16} className="text-slate-400 group-hover:text-white transition-transform group-hover:-translate-x-0.5" />
-            <span className="text-xs font-semibold tracking-tight">{activeToolMeta.title}</span>
+            <ChevronLeft
+              size={15}
+              className="text-[var(--text-muted,#64748B)] group-hover:text-[var(--text-primary,#F1F5F9)] transition-transform group-hover:-translate-x-0.5"
+            />
+            <span className="text-xs font-bold">{activeToolMeta.title}</span>
           </button>
         ) : (
-          <span className="text-xs font-semibold text-slate-100 tracking-tight">Imposing Tools</span>
+          <span className="text-xs font-bold text-[var(--text-primary,#F1F5F9)]">Imposition Tools</span>
+        )}
+
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="p-1 text-[var(--text-muted,#64748B)] hover:text-[var(--text-primary,#F1F5F9)] hover:bg-[var(--surface-card,#181D27)] rounded transition-colors cursor-pointer"
+            title="Collapse Tools Panel"
+          >
+            <ChevronRight size={14} />
+          </button>
         )}
       </div>
 
-      {/* Main Content */}
+      {/* Main Panel Content */}
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {!activeTool ? (
-          <div className="space-y-5">
-            {(["IMPOSITION SETUP", "FINISHING & ACTIONS"] as const).map((cat) => (
-              <div key={cat} className="space-y-1">
-                <div className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  {cat}
-                </div>
-                {tools
-                  .filter((t) => t.category === cat)
-                  .map((tool) => (
-                    <button
-                      key={tool.id}
-                      type="button"
-                      onClick={() => setActiveTool(tool.id)}
-                      className="w-full flex items-center space-x-3 px-2.5 py-2.5 rounded-lg text-left text-slate-300 hover:text-white hover:bg-white/[0.04] transition-colors cursor-pointer group"
-                    >
-                      <span className="text-slate-400 group-hover:text-slate-200 transition-colors shrink-0">
-                        {tool.icon}
-                      </span>
-                      <span className="text-[13px] font-normal tracking-tight truncate">
-                        {tool.title}
-                      </span>
-                    </button>
-                  ))}
+          /* TIER 1: FLAT TOOL DIRECTORY (Clean Book Studio Style) */
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted,#64748B)]">
+                Prepress Tools
               </div>
-            ))}
+              {tools.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  onClick={() => setActiveTool(tool.id)}
+                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[var(--text-secondary,#94A3B8)] hover:text-[var(--text-primary,#F1F5F9)] hover:bg-[var(--surface-card,#181D27)] transition-colors cursor-pointer group border border-transparent hover:border-[var(--border-subtle,#242C3D)]"
+                >
+                  <div className="flex items-center space-x-2.5 min-w-0 pr-1">
+                    <span className="text-[var(--text-muted,#64748B)] group-hover:text-[var(--app-accent,#F59E0B)] transition-colors shrink-0">
+                      {tool.icon}
+                    </span>
+                    <div className="truncate">
+                      <div className="text-xs font-semibold text-[var(--text-primary,#F1F5F9)] truncate">
+                        {tool.title}
+                      </div>
+                      <div className="text-[10px] text-[var(--text-muted,#64748B)] truncate">
+                        {tool.description}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-1.5 shrink-0">
+                    <kbd className="hidden sm:inline-block px-1 py-0.2 rounded bg-[var(--surface-inset,#11151E)] border border-[var(--border-subtle,#242C3D)] text-[9px] font-mono text-[var(--text-muted,#64748B)]">
+                      {tool.shortcut}
+                    </kbd>
+                    <ChevronRight
+                      size={13}
+                      className="text-[var(--text-muted,#64748B)] group-hover:text-[var(--text-secondary,#94A3B8)] transition-transform group-hover:translate-x-0.5"
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Studio Handoffs */}
+            <div className="pt-2 border-t border-[var(--border-subtle,#242C3D)] space-y-1">
+              <div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted,#64748B)]">
+                Studio Handoff
+              </div>
+              <Link
+                href="/book-studio"
+                className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-[var(--text-secondary,#94A3B8)] hover:text-[var(--text-primary,#F1F5F9)] hover:bg-[var(--surface-card,#181D27)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border-subtle,#242C3D)] group"
+              >
+                <div className="flex items-center space-x-2.5">
+                  <BookOpen size={14} className="text-[var(--text-muted,#64748B)] group-hover:text-cyan-400" />
+                  <div>
+                    <div className="text-xs font-semibold text-[var(--text-primary,#F1F5F9)]">Scanned Book Studio</div>
+                    <div className="text-[10px] text-[var(--text-muted,#64748B)]">Crop, deskew & clean pages</div>
+                  </div>
+                </div>
+                <ArrowUpRight size={13} className="text-[var(--text-muted,#64748B)]" />
+              </Link>
+            </div>
           </div>
         ) : (
-          <div className="space-y-4 px-1">
-            {activeTool === "mode" && (
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block">
-                  Workflow Mode
-                </label>
-                <div className="relative">
-                  <select
-                    value={jobMode}
-                    onChange={(e) => setJobMode(e.target.value as "book" | "gang")}
-                    className="w-full appearance-none bg-[#181D27] border border-[#242A38] text-slate-200 text-xs px-3 py-2 rounded-lg outline-none cursor-pointer"
-                  >
-                    <option value="gang">Step & Repeat / N-Up (Auto-nest)</option>
-                    <option value="book">Publication / Booklet</option>
-                  </select>
-                  <ChevronDown size={14} className="absolute right-3 top-2.5 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
+          /* TIER 2: FOCUSED MODULE VIEW */
+          <div className="space-y-4">
+            {activeTool === "page_size" && (
+              <PageSizePanel
+                sheetW={sheetW}
+                setSheetW={setSheetW}
+                sheetH={sheetH}
+                setSheetH={setSheetH}
+                sheetPreset={sheetPreset}
+                setSheetPreset={setSheetPreset}
+                margin={margin}
+                setMargin={setMargin}
+                unit={unit}
+              />
             )}
 
-            {activeTool === "sheet" && (
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-400 uppercase font-semibold">Sheet Width / Height</label>
-                  <div className="flex items-center space-x-2">
-                    <div className="flex-1 bg-[#181D27] border border-[#242A38] rounded px-2 py-1.5 flex items-center">
-                      <input
-                        type="number"
-                        value={mmToUnit(sheetW, unit)}
-                        onChange={(e) => {
-                          setSheetPreset("custom");
-                          setSheetW(unitToMm(parseFloat(e.target.value) || 1, unit));
-                        }}
-                        className="w-full bg-transparent text-white text-xs outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <span className="text-[10px] text-slate-500">{unit}</span>
-                    </div>
-                    <span className="text-slate-500 text-xs font-mono">×</span>
-                    <div className="flex-1 bg-[#181D27] border border-[#242A38] rounded px-2 py-1.5 flex items-center">
-                      <input
-                        type="number"
-                        value={mmToUnit(sheetH, unit)}
-                        onChange={(e) => {
-                          setSheetPreset("custom");
-                          setSheetH(unitToMm(parseFloat(e.target.value) || 1, unit));
-                        }}
-                        className="w-full bg-transparent text-white text-xs outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <span className="text-[10px] text-slate-500">{unit}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-slate-300">Orientation</label>
-                  <select className="bg-[#181D27] border border-[#242A38] text-slate-200 text-xs px-2 py-1 rounded outline-none w-28">
-                    <option>Portrait</option>
-                    <option>Landscape</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-slate-300">Margins</label>
-                  <div className="flex items-center bg-[#181D27] border border-[#242A38] rounded px-2 py-1 w-24">
-                    <input
-                      type="number"
-                      value={mmToUnit(margin, unit)}
-                      onChange={(e) => setMargin(unitToMm(parseFloat(e.target.value) || 0, unit))}
-                      className="w-full bg-transparent text-white text-xs text-right outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                    <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                  </div>
-                </div>
-              </div>
+            {activeTool === "step_repeat" && (
+              <StepRepeatPanel
+                rows={rows ?? null}
+                setRows={(r) => setRows?.(r)}
+                cols={cols ?? null}
+                setCols={(c) => setCols?.(c)}
+                gap={gap}
+                setGap={setGap}
+                unit={unit}
+              />
             )}
 
-            {activeTool === "grid" && (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Grid Mode</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (rows || cols) {
-                        setRows?.(null);
-                        setCols?.(null);
-                      } else {
-                        setRows?.(2);
-                        setCols?.(2);
-                      }
-                    }}
-                    className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-slate-200 border border-[#242A38] transition-colors cursor-pointer"
-                  >
-                    {!rows && !cols ? "Auto-Fit Active" : "Manual Grid Locked"}
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-slate-300">Rows</label>
-                  <div className="flex items-center bg-[#181D27] border border-[#242A38] rounded px-2 py-1 w-20">
-                    <input
-                      type="number"
-                      min={1}
-                      max={50}
-                      placeholder="Auto"
-                      value={rows ?? ""}
-                      onChange={(e) => {
-                        const val = e.target.value === "" ? null : Math.max(1, parseInt(e.target.value, 10) || 1);
-                        setRows?.(val);
-                      }}
-                      className="w-full bg-transparent text-white text-xs text-right outline-none placeholder:text-slate-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-slate-300">Columns</label>
-                  <div className="flex items-center bg-[#181D27] border border-[#242A38] rounded px-2 py-1 w-20">
-                    <input
-                      type="number"
-                      min={1}
-                      max={50}
-                      placeholder="Auto"
-                      value={cols ?? ""}
-                      onChange={(e) => {
-                        const val = e.target.value === "" ? null : Math.max(1, parseInt(e.target.value, 10) || 1);
-                        setCols?.(val);
-                      }}
-                      className="w-full bg-transparent text-white text-xs text-right outline-none placeholder:text-slate-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-slate-300">Gap (Splitters)</label>
-                  <div className="flex items-center bg-[#181D27] border border-[#242A38] rounded px-2 py-1 w-24">
-                    <input
-                      type="number"
-                      value={mmToUnit(gap, unit)}
-                      onChange={(e) => setGap(unitToMm(parseFloat(e.target.value) || 0, unit))}
-                      className="w-full bg-transparent text-white text-xs text-right outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                    <span className="text-[10px] text-slate-500 ml-1">{unit}</span>
-                  </div>
-                </div>
-              </div>
+            {activeTool === "n_up" && (
+              <NUpPanel jobMode={jobMode} setJobMode={setJobMode} />
             )}
 
-            {activeTool === "actions" && (
-              <div className="space-y-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block">
-                  Quick Page Operations
-                </span>
-                <div className="flex items-center justify-between pt-1">
-                  <button className="flex flex-col items-center space-y-1 text-slate-400 hover:text-white transition-colors group cursor-pointer">
-                    <div className="p-2 rounded bg-[#181D27] group-hover:bg-white/[0.08] border border-[#242A38]"><RotateCw size={14} /></div>
-                    <span className="text-[9px]">Rotate 90°</span>
-                  </button>
-                  <button className="flex flex-col items-center space-y-1 text-slate-400 hover:text-white transition-colors group cursor-pointer">
-                    <div className="p-2 rounded bg-[#181D27] group-hover:bg-white/[0.08] border border-[#242A38]"><Crop size={14} /></div>
-                    <span className="text-[9px]">Crop</span>
-                  </button>
-                  <button className="flex flex-col items-center space-y-1 text-slate-400 hover:text-white transition-colors group cursor-pointer">
-                    <div className="p-2 rounded bg-[#181D27] group-hover:bg-white/[0.08] border border-[#242A38]"><Copy size={14} /></div>
-                    <span className="text-[9px]">Extract</span>
-                  </button>
-                  <button className="flex flex-col items-center space-y-1 text-slate-400 hover:text-white transition-colors group cursor-pointer">
-                    <div className="p-2 rounded bg-[#181D27] group-hover:bg-white/[0.08] border border-[#242A38]"><RefreshCw size={14} /></div>
-                    <span className="text-[9px]">Replace</span>
-                  </button>
-                  <button className="flex flex-col items-center space-y-1 text-slate-400 hover:text-rose-400 transition-colors group cursor-pointer">
-                    <div className="p-2 rounded bg-[#181D27] group-hover:bg-rose-500/20 border border-[#242A38] group-hover:border-rose-500/30"><Trash2 size={14} /></div>
-                    <span className="text-[9px]">Delete</span>
-                  </button>
-                </div>
-              </div>
+            {activeTool === "shuffle" && <ShufflePanel />}
+
+            {activeTool === "bleed" && <ImposingBleedPanel unit={unit} />}
+
+            {activeTool === "page_tools" && (
+              <PageToolsPanel
+                pages={pages}
+                batchRotateSelected={batchRotateSelected}
+                selectedPageIds={selectedPageIds}
+                rotatePage={rotatePage}
+              />
             )}
 
-            {activeTool === "marks" && (
-              <div className="space-y-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block">
-                  Sheet Marks
-                </span>
-                <div className="space-y-2 pt-1">
-                  <label className="flex items-center space-x-2.5 cursor-pointer py-1">
-                    <input
-                      type="checkbox"
-                      checked={cropMarks}
-                      onChange={(e) => setCropMarks(e.target.checked)}
-                      className="rounded bg-[#181D27] border-[#242A38] text-blue-500 focus:ring-blue-500"
-                    />
-                    <span className="text-xs text-slate-300">Trim Marks</span>
-                  </label>
-                  <label className="flex items-center space-x-2.5 cursor-pointer py-1">
-                    <input
-                      type="checkbox"
-                      checked={regMarks}
-                      onChange={(e) => setRegMarks(e.target.checked)}
-                      className="rounded bg-[#181D27] border-[#242A38] text-blue-500 focus:ring-blue-500"
-                    />
-                    <span className="text-xs text-slate-300">Registration Marks</span>
-                  </label>
-                  <label className="flex items-center space-x-2.5 cursor-pointer opacity-50 py-1">
-                    <input type="checkbox" disabled className="rounded bg-[#181D27] border-[#242A38]" />
-                    <span className="text-xs text-slate-400">Color Bars</span>
-                  </label>
-                  <label className="flex items-center space-x-2.5 cursor-pointer opacity-50 py-1">
-                    <input type="checkbox" disabled className="rounded bg-[#181D27] border-[#242A38]" />
-                    <span className="text-xs text-slate-400">Job Info Slug</span>
-                  </label>
-                </div>
-              </div>
-            )}
+            {activeTool === "ocr" && <OcrPanel />}
           </div>
         )}
-      </div>
-
-      {/* Bottom Primary Actions */}
-      <div className="p-3 border-t border-[#1E232E] space-y-2 shrink-0">
-        <button
-          onClick={handlePreview}
-          className="w-full py-2 bg-white/[0.06] hover:bg-white/[0.1] text-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-        >
-          Apply to Sheet
-        </button>
-        <button
-          onClick={handleExport}
-          disabled={isExporting}
-          className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
-        >
-          {isExporting ? "Exporting PDF..." : "Process & Export PDF"}
-        </button>
       </div>
     </div>
   );

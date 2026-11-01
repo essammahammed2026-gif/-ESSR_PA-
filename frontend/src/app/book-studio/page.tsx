@@ -79,6 +79,9 @@ function BookStudioContent() {
     revertCropLevel,
     resetCrop,
     resetDeskew,
+    resetCleanup,
+    resetRestoration,
+    resetBleed,
     removeAppliedCrop,
     removeAllAppliedCrops,
     clearAllDeskewAngles,
@@ -86,6 +89,7 @@ function BookStudioContent() {
     removeMaskBox,
     clearPageMasks,
     clearAllMasks,
+    applyCleanupFilters,
     setPageColorMode,
     isDetectingAngle, detectedAngle,
     detectPageAngle,
@@ -93,6 +97,7 @@ function BookStudioContent() {
     setPageDeskewAngle,
     resetJob,
     initSession,
+    loadSession,
     rotatePage,
     rotatePages,
     deletePage,
@@ -117,6 +122,8 @@ function BookStudioContent() {
     undo,
     redo,
     jumpToStep,
+    recordHistoryStep,
+    buildModulesSnapshot,
     shortcuts,
     shortcutLabels,
   } = useBookStudioState();
@@ -132,6 +139,22 @@ function BookStudioContent() {
     setCropModule((prev) => ({
       ...prev,
       target: { ...prev.target, dualSides: next && prev.target.base === "current" ? ["left", "right"] : undefined },
+    }));
+    setDeskewModule((prev) => ({
+      ...prev,
+      scope: { ...prev.scope, dualSides: next && prev.scope.mode === "current" ? ["left", "right"] : undefined },
+    }));
+    setCleanupModule((prev) => ({
+      ...prev,
+      scope: { ...prev.scope, dualSides: next && prev.scope.mode === "current" ? ["left", "right"] : undefined },
+    }));
+    setRestorationModule((prev) => ({
+      ...prev,
+      scope: { ...prev.scope, dualSides: next && prev.scope.mode === "current" ? ["left", "right"] : undefined },
+    }));
+    setBleedModule((prev) => ({
+      ...prev,
+      scope: { ...prev.scope, dualSides: next && prev.scope.mode === "current" ? ["left", "right"] : undefined },
     }));
   };
   const [historyMenuOpen, setHistoryMenuOpen] = useState<boolean>(false);
@@ -176,20 +199,31 @@ function BookStudioContent() {
   const searchParams = useSearchParams();
   const preloadedPathRef = useRef<string | null>(null);
 
-  // Preload file if routed from Hub or Command Center
+  // Preload file or resume session if routed from Hub or Command Center
   useEffect(() => {
+    const sessionIdParam = searchParams.get("session_id");
     const filePathParam = searchParams.get("file_path");
-    if (filePathParam && filePathParam !== preloadedPathRef.current && !sessionId && !isInitializing) {
+
+    if (sessionIdParam && sessionIdParam !== preloadedPathRef.current && !sessionId && !isInitializing) {
+      preloadedPathRef.current = sessionIdParam;
+      void loadSession(sessionIdParam);
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {
+        // ignore
+      }
+    } else if (filePathParam && filePathParam !== preloadedPathRef.current && !sessionId && !isInitializing) {
       preloadedPathRef.current = filePathParam;
+      const nameParam = searchParams.get("name");
       setIntakeMode("single_page");
-      void initSession(filePathParam);
+      void initSession(filePathParam, nameParam || undefined);
       try {
         window.history.replaceState(null, "", window.location.pathname);
       } catch {
         // ignore
       }
     }
-  }, [searchParams, sessionId, isInitializing, setIntakeMode, initSession]);
+  }, [searchParams, sessionId, isInitializing, setIntakeMode, initSession, loadSession]);
 
   return (
     <>
@@ -510,9 +544,20 @@ function BookStudioContent() {
           eyedropperActive={eyedropperActive}
           onPickColor={(hex) => {
             if (focusedModule === "cleanup") {
-              setCleanupModule((prev) => ({ ...prev, enabled: true, maskColor: hex }));
+              const nextCleanup = {
+                ...cleanupModule,
+                enabled: true,
+                maskColor: hex,
+                draftMaskBox: cleanupModule.draftMaskBox
+                  ? { ...cleanupModule.draftMaskBox, color: hex }
+                  : cleanupModule.draftMaskBox,
+              };
+              setCleanupModule(nextCleanup);
+              recordHistoryStep(`Pick Erase Color (${hex.toUpperCase()})`, buildModulesSnapshot({ cleanupModule: nextCleanup }));
             } else {
-              setBleedModule((prev) => ({ ...prev, solidColor: hex }));
+              const nextBleed = { ...bleedModule, solidColor: hex };
+              setBleedModule(nextBleed);
+              recordHistoryStep(`Pick Bleed Color (${hex.toUpperCase()})`, buildModulesSnapshot({ bleedModule: nextBleed }));
             }
             setEyedropperActive(false);
           }}
@@ -550,15 +595,45 @@ function BookStudioContent() {
             openModule("crop");
             setCropModule((prev) => ({ ...prev, enabled: !prev.enabled }));
           }}
-          onApplyMaskBox={(box) => {
-            setCleanupModule((prev) => ({
-              ...prev,
-              draftMaskBox: {
-                id: `m_${Date.now().toString(36)}`,
-                ...box,
-                color: prev.maskColor || "#ffffff",
+          onApplyMaskBox={(box, side) => {
+            const currentIdx = pages.findIndex((p) => p.id === selectedPageId);
+            const pairStartIdx = currentIdx >= 0 ? Math.floor(currentIdx / 2) * 2 : 0;
+            const leftPage = pages[pairStartIdx];
+            const rightPage = pages[pairStartIdx + 1];
+            const targetPage = side === "secondary" ? rightPage : leftPage;
+            if (targetPage) {
+              setSelectedPageId(targetPage.id);
+            }
+            const isDualActive = isDualPage && Boolean(rightPage);
+            const isDualLinked = isDualActive && (cleanupModule.scope.dualSides?.length ?? 2) >= 2;
+            const nextDualSides = (isDualActive && !isDualLinked)
+              ? (side === "secondary" ? ["right" as const] : ["left" as const])
+              : cleanupModule.scope.dualSides;
+
+            const newDraftMask = {
+              id: `m_${Date.now().toString(36)}`,
+              ...box,
+              color: cleanupModule.maskColor || "#ffffff",
+            };
+
+            const nextPageDrafts = { ...(cleanupModule.pageDraftMasks || {}) };
+            if (!isDualActive || cleanupModule.scope.mode !== "current" || isDualLinked) {
+              if (leftPage) nextPageDrafts[leftPage.id] = newDraftMask;
+              if (isDualActive && rightPage) nextPageDrafts[rightPage.id] = newDraftMask;
+            } else if (targetPage) {
+              nextPageDrafts[targetPage.id] = newDraftMask;
+            }
+            const nextCleanup = {
+              ...cleanupModule,
+              draftMaskBox: newDraftMask,
+              pageDraftMasks: nextPageDrafts,
+              scope: {
+                ...cleanupModule.scope,
+                dualSides: nextDualSides,
               },
-            }));
+            };
+            setCleanupModule(nextCleanup);
+            recordHistoryStep("Draw Erase Box", buildModulesSnapshot({ cleanupModule: nextCleanup }));
             setMaskToolActive(false);
           }}
           onRemoveMaskBox={(maskId) => {
@@ -574,9 +649,14 @@ function BookStudioContent() {
           focusCropPage={focusCropPage}
           bleedModule={bleedModule}
           cleanupModule={cleanupModule}
+          deskewModule={deskewModule}
+          restorationModule={restorationModule}
           setCropModule={setCropModule}
           setCleanupModule={setCleanupModule}
-
+          setDeskewModule={setDeskewModule}
+          setRestorationModule={setRestorationModule}
+          setBleedModule={setBleedModule}
+          onCommitBoxDrag={(label) => recordHistoryStep(label)}
           onUndo={undo}
           canUndo={canUndo}
           onRedo={redo}
@@ -614,6 +694,9 @@ function BookStudioContent() {
           revertCropLevel={revertCropLevel}
           resetCrop={resetCrop}
           resetDeskew={resetDeskew}
+          resetCleanup={resetCleanup}
+          resetRestoration={resetRestoration}
+          resetBleed={resetBleed}
           removeAppliedCrop={removeAppliedCrop}
           removeAllAppliedCrops={removeAllAppliedCrops}
           pages={pages}
@@ -642,6 +725,7 @@ function BookStudioContent() {
           onClearAllMasks={() => void clearAllMasks()}
           applyMaskBox={applyMaskBox}
           removeMaskBox={removeMaskBox}
+          applyCleanupFilters={applyCleanupFilters}
           pageColorMode={
             selectedPageId
               ? pages.find((p) => p.id === selectedPageId)?.color_mode ?? null
@@ -688,6 +772,16 @@ function BookStudioContent() {
           bleedProgress={bleedProgress}
           restoreProgress={restoreProgress}
           selectedPageId={selectedPageId}
+          onSelectPageId={setSelectedPageId}
+          onRecordDeskewHistory={(label, nextDeskew) =>
+            recordHistoryStep(label, buildModulesSnapshot({ deskewModule: nextDeskew }))
+          }
+          onRecordBleedHistory={(label, nextBleed) =>
+            recordHistoryStep(label, buildModulesSnapshot({ bleedModule: nextBleed }))
+          }
+          onRecordRestorationHistory={(label, nextRestore) =>
+            recordHistoryStep(label, buildModulesSnapshot({ restorationModule: nextRestore }))
+          }
         />
       }
     />

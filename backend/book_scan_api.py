@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import shutil
 import threading
@@ -150,6 +151,7 @@ async def init_book_scan_session(
     files: Optional[List[UploadFile]] = File(None),
     reverse_file_indices: Optional[str] = Form(None),
     existing_file_path: Optional[str] = Form(None),
+    original_filename: Optional[str] = Form(None),
     db: DBSession = Depends(get_db),
 ):
     session_id = str(uuid.uuid4())
@@ -289,10 +291,45 @@ async def init_book_scan_session(
     SESSIONS[session_id] = session_data
 
     if db is not None:
+        orig_fname = "Document"
+        if original_filename and original_filename.strip():
+            orig_fname = original_filename.strip()
+        elif file_single and hasattr(file_single, "filename") and file_single.filename:
+            orig_fname = file_single.filename
+        elif existing_file_path:
+            base = os.path.basename(existing_file_path)
+            orig_fname = re.sub(r'^\d+_', '', base)
+        elif files and len(files) > 0 and hasattr(files[0], "filename") and files[0].filename:
+            orig_fname = files[0].filename
+        elif file_odds and hasattr(file_odds, "filename") and file_odds.filename:
+            orig_fname = file_odds.filename
+
+        orig_file_size = 0
+        if single_path and os.path.exists(single_path):
+            try:
+                orig_file_size = os.path.getsize(single_path)
+            except OSError:
+                pass
+        elif odds_path or evens_path:
+            for p in (odds_path, evens_path):
+                if p and os.path.exists(p):
+                    try:
+                        orig_file_size += os.path.getsize(p)
+                    except OSError:
+                        pass
+        elif existing_file_path and os.path.exists(existing_file_path):
+            try:
+                orig_file_size = os.path.getsize(existing_file_path)
+            except OSError:
+                pass
+
         SessionRepository.create_session(
             db,
             session_id=session_id,
             studio_type="book_scan",
+            title=orig_fname,
+            original_filename=orig_fname,
+            file_size_bytes=orig_file_size,
             intake_mode=mode,
             is_spread=is_spread,
             session_dir=session_dir,
@@ -890,63 +927,60 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
         )
 
     doc_map = BookScanEngine.open_session_docs(session)
+    doc_paths = {
+        "odds": session.get("odds_path"),
+        "evens": session.get("evens_path"),
+        "single": session.get("single_path"),
+    }
     try:
-        def render_progress(cur, total, msg):
-            pct = int((cur / max(1, total)) * 60)
-            EXPORT_JOBS[job_id]["progress"] = max(2, min(60, pct))
+        def export_progress(cur, total, msg):
+            pct = int((cur / max(1, total)) * 96) + 2
+            EXPORT_JOBS[job_id]["progress"] = max(2, min(98, pct))
             EXPORT_JOBS[job_id]["current_page"] = cur
             EXPORT_JOBS[job_id]["stage"] = "processing_pages"
             EXPORT_JOBS[job_id]["message"] = msg
 
-        processed_images, per_page_bleed_list = BookScanEngine.render_export_pages(
-            doc_map, pages, req, progress_callback=render_progress
-        )
-
         export_fmt = (getattr(req, "export_format", "pdf") or "pdf").lower()
-        effective_quality = getattr(req, "quality", 88) or 88
 
-        def bleed_progress(cur, total, msg):
-            pct = 60 + int((cur / max(1, total)) * 38)
-            EXPORT_JOBS[job_id]["progress"] = max(60, min(98, pct))
-            EXPORT_JOBS[job_id]["current_page"] = cur
-            EXPORT_JOBS[job_id]["stage"] = "compiling_pdf"
-            EXPORT_JOBS[job_id]["message"] = msg
+        # Resolve clean original filename
+        og_name = "Document"
+        try:
+            with db_session() as db:
+                s_obj = SessionRepository.get_session(db, session_id)
+                if s_obj:
+                    og_name = s_obj.get("original_filename") or s_obj.get("title") or "Document"
+        except Exception:
+            pass
+
+        clean_og = re.sub(r'^\d+_', '', og_name)
+        base_og = os.path.splitext(clean_og)[0]
+        base_og = re.sub(r'[^\w\-.]+', '_', base_og).strip('_') or "Document"
+        first_session_part = session_id.split("-")[0] if "-" in session_id else session_id[:8]
+        timestamp_str = time.strftime("%Y%m%d_%H%M%S")
 
         if export_fmt in ["pdf_split", "jpeg", "jpg", "png", "tiff", "tif"]:
-            export_filename = f"cleaned_book_{session_id[:8]}_{export_fmt}.zip"
+            export_filename = f"{timestamp_str}_{base_og}_{first_session_part}_{export_fmt}.zip"
             output_file_path = asset_store.get_export_path(f"{job_id}_{export_filename}", "zip")
             media_type = "application/zip"
-            success = BookScanEngine.export_pages_archive(
-                processed_images=processed_images,
+            success = BookScanEngine.stream_export_archive(
+                doc_map=doc_map,
+                pages=pages,
+                req=req,
                 output_zip_path=output_file_path,
-                export_format=export_fmt,
-                bleed_mm=req.bleed_mm,
-                bleed_mode=req.bleed_mode,
-                bleed_color=req.bleed_color,
-                show_crop_marks=req.show_crop_marks,
-                dpi=req.dpi,
-                quality=effective_quality,
-                tiff_compression=getattr(req, "tiff_compression", "lzw") or "lzw",
-                per_page_bleed=per_page_bleed_list,
-                bleed_placement=req.bleed_placement,
-                progress_callback=bleed_progress,
+                progress_callback=export_progress,
+                doc_paths=doc_paths,
             )
         else:
-            export_filename = f"cleaned_book_{session_id[:8]}.pdf"
+            export_filename = f"{timestamp_str}_{base_og}_{first_session_part}.pdf"
             output_file_path = asset_store.get_export_path(f"{job_id}_{export_filename}", "pdf")
             media_type = "application/pdf"
-            success = BookScanEngine.add_bleed_and_export_pdf(
-                processed_images=processed_images,
+            success = BookScanEngine.stream_export_pdf(
+                doc_map=doc_map,
+                pages=pages,
+                req=req,
                 output_pdf_path=output_file_path,
-                bleed_mm=req.bleed_mm,
-                bleed_mode=req.bleed_mode,
-                bleed_color=req.bleed_color,
-                show_crop_marks=req.show_crop_marks,
-                dpi=req.dpi,
-                jpeg_quality=effective_quality,
-                per_page_bleed=per_page_bleed_list,
-                bleed_placement=req.bleed_placement,
-                progress_callback=bleed_progress,
+                progress_callback=export_progress,
+                doc_paths=doc_paths,
             )
 
         if not success or not os.path.exists(output_file_path):
@@ -987,6 +1021,15 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
                 output_file_path=output_file_path,
                 file_size_bytes=file_size,
             )
+            SessionRepository.update_session_meta(
+                db,
+                session_id=session_id,
+                tag="done",
+                status="archived",
+            )
+        if session_id in SESSIONS:
+            SESSIONS[session_id]["tag"] = "done"
+            SESSIONS[session_id]["status"] = "archived"
     except Exception as e:
         EXPORT_JOBS[job_id]["status"] = "failed"
         EXPORT_JOBS[job_id]["error"] = str(e)
@@ -1095,29 +1138,39 @@ async def export_book_pdf(
     doc_map = BookScanEngine.open_session_docs(session)
 
     try:
-        processed_images, per_page_bleed_list = BookScanEngine.render_export_pages(
-            doc_map, pages, req
-        )
-
-        export_filename = f"cleaned_book_{session_id[:8]}.pdf"
+        og_name = "Document"
+        if db is not None:
+            s_obj = SessionRepository.get_session(db, session_id)
+            if s_obj:
+                og_name = s_obj.get("original_filename") or s_obj.get("title") or "Document"
+        clean_og = re.sub(r'^\d+_', '', og_name)
+        base_og = os.path.splitext(clean_og)[0]
+        base_og = re.sub(r'[^\w\-.]+', '_', base_og).strip('_') or "Document"
+        first_session_part = session_id.split("-")[0] if "-" in session_id else session_id[:8]
+        timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+        export_filename = f"{timestamp_str}_{base_og}_{first_session_part}.pdf"
         output_pdf_path = asset_store.get_export_path(f"sync_{session_id[:8]}", "pdf")
 
-        effective_quality = getattr(req, "quality", 88) or 88
-        success = BookScanEngine.add_bleed_and_export_pdf(
-            processed_images=processed_images,
+        success = BookScanEngine.stream_export_pdf(
+            doc_map=doc_map,
+            pages=pages,
+            req=req,
             output_pdf_path=output_pdf_path,
-            bleed_mm=req.bleed_mm,
-            bleed_mode=req.bleed_mode,
-            bleed_color=req.bleed_color,
-            show_crop_marks=req.show_crop_marks,
-            dpi=req.dpi,
-            jpeg_quality=effective_quality,
-            per_page_bleed=per_page_bleed_list,
-            bleed_placement=req.bleed_placement,
         )
 
         if not success:
             raise HTTPException(status_code=500, detail="PDF generation failed.")
+
+        if db is not None:
+            SessionRepository.update_session_meta(
+                db,
+                session_id=session_id,
+                tag="done",
+                status="archived",
+            )
+        if session_id in SESSIONS:
+            SESSIONS[session_id]["tag"] = "done"
+            SESSIONS[session_id]["status"] = "archived"
 
         return FileResponse(
             output_pdf_path,
