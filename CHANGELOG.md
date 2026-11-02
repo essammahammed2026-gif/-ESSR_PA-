@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Book Studio Minimal Format Dropdown & Dedicated Prepress Export Modal ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx), [`ExportConfigModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/ExportConfigModal.tsx), [`architecture.md`](file:///home/essam/Projects/ESSR_PA/docs/architecture.md))**:
+  - **Zero-Fluff Format Dropdown**: Simplified the Export dropdown to raw format items only (`PDF`, `PDF (Pages)`, `TIFF`, `PNG`, `JPEG`) with zero descriptive text or explanations.
+  - **Focused Prepress Export Modal (`ExportConfigModal.tsx`)**: Compact modal presenting direct controls without explanatory filler:
+    - **Format**: `PDF` | `PDF (Pages)` | `TIFF` | `PNG` | `JPEG`
+    - **Presets**: `Press (300 DPI)` | `Proof (150 DPI)` | `Archive (TIFF)`
+    - **Resolution**: `150` | `200` | `300` | `400` DPI
+    - **Compression / Quality**: `LZW` / `Deflate` / `None` for TIFF; direct quality slider for raster
+    - **Dismissal**: Closes via `Escape` key, backdrop click, or `Cancel`.
 - **Imposing Studio Clean Styling, Fixed Breadcrumbs, Top Header Actions & 7 Modular Tools ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/imposing/page.tsx), [`RightControlPanel.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/imposing/RightControlPanel.tsx), [`modules/`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/imposing/modules/), [`ocr_engine.py`](file:///home/essam/Projects/ESSR_PA/backend/engines/ocr_engine.py), [`imposing_api.py`](file:///home/essam/Projects/ESSR_PA/backend/imposing_api.py))**:
   - **Fixed Breadcrumbs Duplication**: Resolved repeated `Home / Imposing Studio` path; `StudioLayout` now cleanly renders `Home / Imposing Studio / {Project Name}`.
   - **Top Header Actions**: Relocated the global length unit picker (`UNIT_OPTIONS`: `mm`, `cm`, `in`, `pt`) and the primary `Export Print PDF` button directly to `headerActions` in the top header bar, eliminating duplicate bottom buttons.

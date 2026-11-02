@@ -1,5 +1,29 @@
 # Session Log
 
+## Date: 2026-11-02
+
+### Task 60: Book Studio Zero-Fluff Format Dropdown & Streamlined Export Modal
+- **Objective**:
+  - Keep only raw file format items in the Export dropdown without descriptive text or tutorials.
+  - When any format is picked from the dropdown (or the primary button clicked), open a clean popup with the options themselves (format, preset, DPI, quality/compression, minimal specs, export).
+- **Architectural Implementation**:
+  - **Zero-Fluff Format Dropdown ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx))**:
+    - Compact 144px menu displaying raw format names: `PDF`, `PDF (Pages)`, `TIFF`, `PNG`, `JPEG`.
+    - Clicking any item closes the dropdown and opens `ExportConfigModal`.
+  - **Focused Prepress Export Modal ([`ExportConfigModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/ExportConfigModal.tsx))**:
+    - Removed all explanatory sentences, subtitles, and tips.
+    - Segmented tracks for:
+      - Format (`PDF`, `PDF (Pages)`, `TIFF`, `PNG`, `JPEG`)
+      - Presets (`Press (300 DPI)`, `Proof (150 DPI)`, `Archive (TIFF)`)
+      - DPI (`150`, `200`, `300`, `400`)
+      - TIFF compression (`LZW`, `Deflate`, `None`) or raster Quality slider
+    - Standard `Escape` and backdrop dismissal.
+  - **Repository Navigation Map Updated ([`docs/architecture.md`](file:///home/essam/Projects/ESSR_PA/docs/architecture.md))**:
+    - Registered `ExportConfigModal.tsx` under `/book-studio`.
+- **Verification Results**:
+  - `cd frontend && npx tsc --noEmit` passed cleanly with code `0`.
+  - `cd backend && python3 -m py_compile main.py engines/*.py` passed with code `0`.
+
 ## Date: 2026-11-01
 
 ### Task 59: Imposing Studio Style Cleanup, Breadcrumb Fix, Top Header Actions & 7 Modular Tools

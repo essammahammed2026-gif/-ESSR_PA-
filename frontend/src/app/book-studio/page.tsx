@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { FolderOpen, SlidersHorizontal, Download, List, LayoutGrid, RefreshCw, ChevronDown, FileText, FileArchive, Image as ImageIcon, History } from "lucide-react";
+import { FolderOpen, SlidersHorizontal, Download, List, LayoutGrid, RefreshCw, ChevronDown, History } from "lucide-react";
 import { useBookStudioState } from "@/hooks/useBookStudioState";
 import { type LengthUnit, UNIT_OPTIONS } from "@/lib/units";
 import { ExportFormat, TiffCompression } from "@/types/book_studio";
@@ -12,6 +12,7 @@ import { BookLeftPanel } from "@/components/book-studio/BookLeftPanel";
 import { BookRightPanel } from "@/components/book-studio/BookRightPanel";
 import { HistoryPopover } from "@/components/book-studio/HistoryPopover";
 import { ExportProgressModal } from "@/components/book-studio/ExportProgressModal";
+import { ExportConfigModal } from "@/components/book-studio/ExportConfigModal";
 
 const BookWorkspace = dynamic(
   () => import("@/components/book-studio/BookWorkspace").then((mod) => mod.BookWorkspace),
@@ -159,11 +160,12 @@ function BookStudioContent() {
   };
   const [historyMenuOpen, setHistoryMenuOpen] = useState<boolean>(false);
 
-  // Multi-format Export Dropdown state
+  // Multi-format Export Dropdown & Config Modal state
   const [exportMenuOpen, setExportMenuOpen] = useState<boolean>(false);
+  const [exportConfigOpen, setExportConfigOpen] = useState<boolean>(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [exportDpi, setExportDpi] = useState<number>(300);
-  const [exportQuality, setExportQuality] = useState<number>(92);
+  const [exportQuality, setExportQuality] = useState<number>(95);
   const [tiffCompression, setTiffCompression] = useState<TiffCompression>("lzw");
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -179,12 +181,14 @@ function BookStudioContent() {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [exportMenuOpen]);
 
+  const activePagesCount = Math.max(1, pages.length);
+
   const exportFormatLabel =
     exportFormat === "pdf"
       ? "Export PDF"
       : exportFormat === "pdf_split"
-        ? "Export PDF Pages (.zip)"
-        : `Export ${exportFormat.toUpperCase()} (.zip)`;
+        ? "Export 1-Up PDFs"
+        : `Export ${exportFormat.toUpperCase()}`;
 
   const handleRunExport = (fmt: ExportFormat = exportFormat) => {
     setExportMenuOpen(false);
@@ -319,13 +323,13 @@ function BookStudioContent() {
 
           {/* Expandable Multi-Format Export Button & Dropdown */}
           <div className="relative flex items-center" ref={exportMenuRef}>
-            <div className="flex items-center rounded-lg shadow-sm overflow-hidden">
+            <div className="flex items-center rounded-lg shadow-xs overflow-hidden">
               <button
                 type="button"
-                onClick={() => handleRunExport(exportFormat)}
+                onClick={() => setExportConfigOpen(true)}
                 disabled={!sessionId || isExporting}
                 className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 text-xs font-bold transition-all cursor-pointer disabled:cursor-not-allowed"
-                title={`Run ${exportFormatLabel} at ${exportDpi} DPI`}
+                title={`Configure & Export ${exportFormatLabel}`}
               >
                 {isExporting ? (
                   <>
@@ -344,122 +348,39 @@ function BookStudioContent() {
                 onClick={() => setExportMenuOpen((p) => !p)}
                 disabled={!sessionId || isExporting}
                 className="px-1.5 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 border-l border-amber-700/40 transition-colors cursor-pointer disabled:cursor-not-allowed"
-                title="Choose export format (Merged PDF, Separate PDF Pages, JPEG, PNG, TIFF) and quality"
+                title="Choose file format"
               >
                 <ChevronDown size={13} />
               </button>
             </div>
 
+            {/* Clean Dropdown: Formats Only */}
             {exportMenuOpen && (
-              <div className="absolute right-0 top-full mt-1.5 w-72 rounded-xl bg-[var(--surface-panel,#131720)] border border-[var(--border-strong,#2E3648)] shadow-2xl p-3 z-50 space-y-3 text-xs select-none">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Export Format
-                  </span>
-                  <div className="space-y-1">
-                    {([
-                      { id: "pdf", label: "Merged Document (.pdf)", desc: "Single print-ready PDF with TrimBox & Bleed", icon: <FileText size={13} /> },
-                      { id: "pdf_split", label: "Separate PDF Pages (.zip)", desc: "Individual 1-page PDFs packaged in a ZIP", icon: <FileArchive size={13} /> },
-                      { id: "jpeg", label: "JPEG Images (.zip)", desc: "High-speed compressed images with quality control", icon: <ImageIcon size={13} /> },
-                      { id: "png", label: "Lossless PNG Images (.zip)", desc: "Crisp lossless RGB/Grayscale page images", icon: <ImageIcon size={13} /> },
-                      { id: "tiff", label: "Archival TIFF Images (.zip)", desc: "Prepress TIFF images with LZW/Deflate compression", icon: <ImageIcon size={13} /> },
-                    ] as const).map((item) => {
-                      const active = exportFormat === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setExportFormat(item.id)}
-                          className={`w-full flex items-start space-x-2 p-1.5 rounded-lg border text-left transition-colors cursor-pointer ${
-                            active
-                              ? "bg-amber-500/15 border-amber-500/50 text-[var(--text-primary,#fff)]"
-                              : "bg-[var(--surface-card,#181D27)] border-[var(--border-subtle,#242A38)] text-slate-300 hover:border-slate-500"
-                          }`}
-                        >
-                          <span className="mt-0.5 shrink-0 text-amber-400">{item.icon}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="font-semibold text-[11px]">{item.label}</div>
-                            <div className="text-[9px] text-slate-400 truncate">{item.desc}</div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Output DPI */}
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Resolution (DPI)
-                  </span>
-                  <div className="grid grid-cols-4 gap-1 p-0.5 bg-[var(--surface-card,#181D27)] rounded-lg border border-[var(--border-subtle,#242A38)] text-[10px]">
-                    {[150, 200, 300, 400].map((d) => (
-                      <button
-                        key={d}
-                        type="button"
-                        onClick={() => {
-                          setExportDpi(d);
-                          setBleedModule((prev) => ({ ...prev, exportDpi: d }));
-                        }}
-                        className={`py-1 rounded font-mono font-semibold cursor-pointer ${
-                          exportDpi === d ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"
-                        }`}
-                      >
-                        {d}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Quality Slider for PDF / JPEG / PNG */}
-                {exportFormat !== "tiff" ? (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-400 font-semibold">
-                        {exportFormat === "png" ? "Compression Level" : "Image Quality"}
-                      </span>
-                      <span className="font-mono font-bold text-amber-400">{exportQuality}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="60"
-                      max="100"
-                      step="2"
-                      value={exportQuality}
-                      onChange={(e) => setExportQuality(Number(e.target.value))}
-                      className="w-full h-1 accent-amber-500 cursor-pointer"
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                      TIFF Compression
-                    </span>
-                    <div className="grid grid-cols-3 gap-1 p-0.5 bg-[var(--surface-card,#181D27)] rounded-lg border border-[var(--border-subtle,#242A38)] text-[10px]">
-                      {(["lzw", "deflate", "none"] as TiffCompression[]).map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setTiffCompression(c)}
-                          className={`py-1 rounded uppercase font-mono font-semibold cursor-pointer ${
-                            tiffCompression === c ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-slate-200"
-                          }`}
-                        >
-                          {c}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => handleRunExport(exportFormat)}
-                  className="w-full py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 shadow cursor-pointer"
-                >
-                  <Download size={13} />
-                  <span>Download {exportFormatLabel}</span>
-                </button>
+              <div className="absolute right-0 top-full mt-1 w-36 rounded-lg bg-[#131720] border border-[#2E3648] shadow-2xl p-1 z-50 text-xs select-none">
+                {([
+                  { id: "pdf", label: "PDF" },
+                  { id: "pdf_split", label: "PDF (Pages)" },
+                  { id: "tiff", label: "TIFF" },
+                  { id: "png", label: "PNG" },
+                  { id: "jpeg", label: "JPEG" },
+                ] as const).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setExportFormat(item.id);
+                      setExportMenuOpen(false);
+                      setExportConfigOpen(true);
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded text-left font-medium transition-colors cursor-pointer ${
+                      exportFormat === item.id
+                        ? "bg-amber-500/15 text-amber-400 font-bold"
+                        : "text-slate-300 hover:bg-[#181D27] hover:text-white"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -784,6 +705,27 @@ function BookStudioContent() {
           }
         />
       }
+    />
+    <ExportConfigModal
+      isOpen={exportConfigOpen}
+      onClose={() => setExportConfigOpen(false)}
+      format={exportFormat}
+      onFormatChange={(fmt) => setExportFormat(fmt)}
+      dpi={exportDpi}
+      onDpiChange={(d) => {
+        setExportDpi(d);
+        setBleedModule((prev) => ({ ...prev, exportDpi: d }));
+      }}
+      quality={exportQuality}
+      onQualityChange={setExportQuality}
+      tiffCompression={tiffCompression}
+      onTiffCompressionChange={setTiffCompression}
+      onExport={() => {
+        setExportConfigOpen(false);
+        handleRunExport(exportFormat);
+      }}
+      pagesCount={activePagesCount}
+      isExporting={isExporting}
     />
     <ExportProgressModal
       progress={exportProgress}
