@@ -229,6 +229,11 @@ class ExportRequest(BaseModel):
     restoration_scope_mode: str = "all"
     restoration_custom_range: str = ""
 
+    # Studio Handoff & Session Archive flags
+    is_handoff: bool = False
+    archive_session: bool = True
+    target_page_indices: Optional[List[int]] = None
+
 
 class DuplicatePageRequest(BaseModel):
     page_id: str

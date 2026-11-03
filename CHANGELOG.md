@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+- **Repository Documentation Realignment, Pre-Flight Sync Automation & AGENTS.md Hardening ([`daily_sync.sh`](file:///home/essam/Projects/ESSR_PA/scripts/daily_sync.sh), [`StudioHandoffModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/StudioHandoffModal.tsx), [`AGENTS.md`](file:///home/essam/Projects/ESSR_PA/AGENTS.md), [`CONTRIBUTING.md`](file:///home/essam/Projects/ESSR_PA/CONTRIBUTING.md), [`docs/`](file:///home/essam/Projects/ESSR_PA/docs/))**:
+  - **Automated Safe Sync Automation (`scripts/daily_sync.sh`)**: Dedicated pre-flight synchronization script featuring automated secret detection, file size gating (< 25MB), upstream git divergence audits, and rapid non-build type/compilation verification.
+  - **Book Studio Handoff Modal (`StudioHandoffModal.tsx`)**: Modal enabling seamless cross-studio transitions from Book Studio into Imposing Studio and 3D Virtual Flipbook, carrying active session assets and trim bounds.
+  - **Documentation Alignment & Ghost Removal**:
+    - Eliminated non-existent `preflight.py` and `POST /api/preflight` from `docs/api.md`, `docs/engines.md`, `docs/architecture.md`, and `README.md`.
+    - Clarified that Prepress Quality Audit and technical triage are integrated into the Command Center (`/`).
+    - Documented `backend/sessions_api.py` (`/api/sessions/*`, `/api/intake/*`), `ocr_engine.py`, and `storage_cleaner.py`.
+    - Added newly added Imposing Studio endpoints (`POST /api/imposing/init-session`, `GET/PATCH /api/imposing/session/{id}`, and `POST /api/imposing/ocr-inspect`) to `docs/api.md`.
+    - Corrected `ModuleProgressBar` import path in `docs/design_system.md` to `src/components/shared/ModuleProgressBar.tsx`.
+  - **Rule Standardization (`AGENTS.md` & `CONTRIBUTING.md`)**:
+    - Aligned `CONTRIBUTING.md` with `AGENTS.md` by replacing the banned `npm run build` with `npx tsc --noEmit` and replacing outdated "Zero-Retention Storage" with modern SQLite WAL & permanent asset store policies.
+    - Standardized blanket ban on modifying Git operations (`commit`, `push`, `pull`, `reset`, `clean`, `checkout`, `rebase`, `merge`) in `AGENTS.md`.
+    - Added `backend/data/` to search hygiene exclusions and corrected canonical function signatures in `engines/units.py`.
+
 - **Book Studio Minimal Format Dropdown & Dedicated Prepress Export Modal ([`page.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/app/book-studio/page.tsx), [`ExportConfigModal.tsx`](file:///home/essam/Projects/ESSR_PA/frontend/src/components/book-studio/ExportConfigModal.tsx), [`architecture.md`](file:///home/essam/Projects/ESSR_PA/docs/architecture.md))**:
   - **Zero-Fluff Format Dropdown**: Simplified the Export dropdown to raw format items only (`PDF`, `PDF (Pages)`, `TIFF`, `PNG`, `JPEG`) with zero descriptive text or explanations.
   - **Focused Prepress Export Modal (`ExportConfigModal.tsx`)**: Compact modal presenting direct controls without explanatory filler:

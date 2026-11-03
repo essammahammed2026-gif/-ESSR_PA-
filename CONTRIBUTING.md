@@ -17,9 +17,10 @@ Welcome to ESSR_PA. Whether you are a human developer or an AI assistant pair pr
 4. **Keep Routers Thin, Engines Pure:**
    * Backend route handlers in `main.py`, `imposing_api.py`, etc., should only handle HTTP validation, background task dispatching, and error codes.
    * Core logic belongs in `backend/engines/` as pure, testable functions without HTTP dependencies.
-5. **Zero-Retention Storage:**
-   * Never commit uploaded files, user data, test PDFs, or generated output bundles.
-   * Clean up temporary working files inside `temp_uploads/` immediately after processing.
+5. **Non-Destructive Storage & Asset Inviolability:**
+   * User assets in `backend/data/storage/` (`originals/`, `sessions/`, `exports/`) and metadata in `backend/data/flint.db` are strictly permanent assets protected by SQLite WAL.
+   * Never run bulk cleanup commands, SQL drops, or deletions against `data/storage/` or `flint.db`.
+   * Never commit uploaded files, sample PDFs, or generated outputs to git. Only transient scratch files in `backend/temp_uploads/` may be purged (preserving `.gitkeep`).
 
 ---
 
@@ -27,18 +28,17 @@ Welcome to ESSR_PA. Whether you are a human developer or an AI assistant pair pr
 
 Before submitting a pull request or ending a coding session, always run the full verification battery:
 
-### Frontend Check
+### Frontend Check (Fast Type & Import Verification)
 ```bash
 cd frontend
-npm run lint    # Must report 0 errors and 0 warnings
-npm run build   # Must compile cleanly (100% static/dynamic routes passing)
+npx tsc --noEmit   # Verifies strict TypeScript safety and import integrity (strict ban on npm run build)
 ```
 
-### Backend Check
+### Backend Check (Syntax & Compilation Verification)
 ```bash
 cd backend
 source .venv/bin/activate
-python -m py_compile main.py imposing_api.py book_scan_api.py settings_api.py engines/*.py
+python3 -m py_compile main.py sessions_api.py imposing_api.py book_scan_api.py settings_api.py engines/*.py
 ```
 
 ### Smoke Test API

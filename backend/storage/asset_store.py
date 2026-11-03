@@ -149,7 +149,23 @@ class AssetStore:
             if os.path.isfile(cand_ext):
                 return cand_ext
 
-        # 3. Scan session directories
+        # 3. Exports storage (deliverables and studio handoff artifacts)
+        if os.path.exists(self.exports_dir):
+            cand_exp = os.path.join(self.exports_dir, safe_name)
+            if os.path.isfile(cand_exp):
+                return cand_exp
+            for ext in [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff"]:
+                cand_exp_ext = os.path.join(self.exports_dir, f"{safe_name}{ext}")
+                if os.path.isfile(cand_exp_ext):
+                    return cand_exp_ext
+            # Also check if safe_name is a prefix or filename without job_id prefix
+            for f in os.listdir(self.exports_dir):
+                if f == safe_name or f.endswith(f"_{safe_name}"):
+                    full_p = os.path.join(self.exports_dir, f)
+                    if os.path.isfile(full_p):
+                        return full_p
+
+        # 4. Scan session directories
         if os.path.exists(self.sessions_dir):
             for s_entry in os.scandir(self.sessions_dir):
                 if s_entry.is_dir():

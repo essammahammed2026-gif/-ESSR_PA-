@@ -564,8 +564,8 @@ export function useBookStudioState() {
   }, [session, modules]);
 
   // Export wired with the live intake mode and optional multi-format export options
-  const exportPdf = useCallback(async (options?: ExportOptions): Promise<void> => {
-    await modules.exportPdf(session.intakeMode, options);
+  const exportPdf = useCallback(async (options?: ExportOptions): Promise<{ fileId: string; filename: string } | null> => {
+    return await modules.exportPdf(session.intakeMode, options);
   }, [session, modules]);
 
   const applyMaskBox = useCallback(async (

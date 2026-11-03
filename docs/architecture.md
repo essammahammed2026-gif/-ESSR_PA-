@@ -33,6 +33,7 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 | **`/settings`** (System & Presets Config)<br>`src/app/settings/page.tsx` | `src/components/settings/` | `SheetsSection.tsx`, `RollsSection.tsx`, `BookTrimsSection.tsx`, `DefaultsSection.tsx`, `StorageSection.tsx`, `AppearanceSection.tsx`, `ShortcutsSection.tsx`, `types.ts` |
 | *Shared Shell, Components, Hooks & Core Libs* | `src/components/layout/`<br>`src/components/shared/`<br>`src/components/ui/`<br>`src/hooks/` | **Layout & UI:** `StudioLayout.tsx`, `StudioColorPicker.tsx`, `ModuleProgressBar.tsx`, `ExportProgressModal.tsx`, `FileUploadQueue.tsx`, `DeckGrid.tsx`, `NumberControl.tsx`, `StudioIcons.tsx`, `ClientOnly.tsx`, `button.tsx`<br>**Shared Hooks (`src/hooks/`):** `useCanvasPanZoom.ts`, `useStudioShortcuts.ts`, `useStudioHistory.ts`<br>**Context:** `src/context/AppearanceContext.tsx`<br>**Core Libs (`src/lib/`):** `api.ts`, `useDebounce.ts`, `units.ts`, `pageScope.ts`, `splitLines.ts`<br>**Design System Docs:** `docs/design_system.md` |
 | *Brand & App Icons* | `src/app/` (Next file conventions)<br>`public/`<br>`src-tauri/icons/` | `favicon.ico` (16–256 transparent glyph), `icon.png`, `apple-icon.png`, `manifest.ts`<br>**Public:** `flint_mark.png` (sidebar + PDF report logo), `icons/icon-192.png`, `icons/icon-512.png`, `icons/icon-maskable-512.png`<br>**OS launcher:** `~/.local/share/icons/hicolor/*/apps/flint.png` |
+| *CLI Scripts & Automation* | `scripts/`<br>`start.sh` | `start.sh` (Service control & window focus launcher), `scripts/daily_sync.sh` (Repository safety check & automated sync) |
 
 ---
 
@@ -64,10 +65,11 @@ ESSR_PA is a modular, high-performance prepress automation and web-to-print appl
 |   Native In-Process BackgroundTasks & Asyncio Worker Pool    |
 |                                                              |
 |   Routers:                                                   |
-|   main.py          /api/preflight, /api/contour, /api/flipbook|
+|   main.py          /api/inspect, /api/contour, /api/flipbook |
+|   sessions_api.py  /api/sessions, /api/intake                |
 |   imposing_api.py  /api/imposing (upload, preview, export)   |
 |   book_scan_api.py /init-session, thumbnails, reorder, export|
-|   settings_api.py  /api/settings (presets CRUD)              |
+|   settings_api.py  /api/settings (presets CRUD, storage)     |
 +--------------------------------------------------------------+
 ```
 

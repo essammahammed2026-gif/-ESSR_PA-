@@ -1396,11 +1396,11 @@ export function useBookModules({
   const exportPdf = useCallback(async (
     intakeMode: BookIntakeMode = "single_page",
     options?: ExportOptions
-  ) => {
-    if (!sessionId) return;
+  ): Promise<{ fileId: string; filename: string } | null> => {
+    if (!sessionId) return null;
     if (isExportingRef.current) {
       console.warn("[exportPdf] Export already running, ignoring concurrent click.");
-      return;
+      return null;
     }
     isExportingRef.current = true;
     hasDownloadedRef.current = false;
@@ -1570,114 +1570,147 @@ export function useBookModules({
       restoration_module_enabled: isRestorationActive,
       restoration_scope_mode: resolveModuleExportScope(restorationModule.scope, restorationModule.appliedEntries).mode,
       restoration_custom_range: resolveModuleExportScope(restorationModule.scope, restorationModule.appliedEntries).customRange,
+
+      // Studio Handoff & Session Archive flags
+      is_handoff: Boolean(options?.isHandoff),
+      archive_session: options?.archiveSession !== undefined ? options.archiveSession : !options?.isHandoff,
+      target_page_indices: options?.targetPageIndices,
     };
 
-    try {
-      const startRes = await apiFetch(`/api/book-scan/export-job/${sessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(exportPayload),
-      });
+    return new Promise<{ fileId: string; filename: string } | null>(async (resolve) => {
+      try {
+        const startRes = await apiFetch(`/api/book-scan/export-job/${sessionId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(exportPayload),
+        });
 
-      if (!startRes.ok) {
-        const errData = await startRes.json().catch(() => ({}));
-        throw new Error(errData.detail || "Failed to start export job.");
-      }
-
-      const { job_id, total_pages } = await startRes.json();
-      setExportProgress((prev) => ({
-        ...prev,
-        jobId: job_id,
-        status: "processing",
-        progress: 2,
-        stage: "processing_pages",
-        message: `Processing 1 of ${total_pages || pages.length}...`,
-        totalPages: total_pages || pages.length,
-      }));
-
-      // Sequential polling: only schedule the next tick AFTER the previous response finishes.
-      // This eliminates concurrent request pile-up and guarantees exactly ONE download trigger.
-      const pollStatus = async () => {
-        if (abortController.signal.aborted || hasDownloadedRef.current) return;
-
-        try {
-          const pollRes = await apiFetch(`/api/book-scan/export-job/${job_id}`, {
-            signal: abortController.signal,
-          });
-          if (!pollRes.ok) return;
-          const data = await pollRes.json();
-
-          if (abortController.signal.aborted || hasDownloadedRef.current) return;
-
-          setExportProgress({
-            jobId: job_id,
-            status: data.status,
-            progress: data.progress ?? 0,
-            stage: data.stage ?? "processing",
-            message: data.message ?? "",
-            totalPages: data.total_pages ?? pages.length,
-            currentPage: data.current_page ?? 0,
-            fileSizeBytes: data.file_size_bytes ?? null,
-            error: data.error ?? null,
-          });
-
-          if (data.status === "success") {
-            if (hasDownloadedRef.current) return;
-            hasDownloadedRef.current = true;
-            if (pollIntervalRef.current) {
-              clearTimeout(pollIntervalRef.current);
-              pollIntervalRef.current = null;
-            }
-            isExportingRef.current = false;
-            setIsExporting(false);
-
-            const isArchive = exportFormat !== "pdf";
-            const targetFilename = isArchive
-              ? `book_${intakeMode}_${exportFormat}_${exportDpi}dpi.zip`
-              : `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
-            const downloadUrl = data.download_url || `/api/book-scan/export-download/${job_id}`;
-            await downloadBlob(downloadUrl, targetFilename).catch((e) => {
-              console.error("Auto download failed:", e);
-            });
-            return;
-          }
-
-          if (data.status === "failed") {
-            if (pollIntervalRef.current) {
-              clearTimeout(pollIntervalRef.current);
-              pollIntervalRef.current = null;
-            }
-            isExportingRef.current = false;
-            setIsExporting(false);
-            setExportError(data.error || "Export failed.");
-            return;
-          }
-
-          // Schedule NEXT poll only AFTER previous response has cleanly returned
-          if (!abortController.signal.aborted && !hasDownloadedRef.current) {
-            pollIntervalRef.current = setTimeout(pollStatus, 350);
-          }
-        } catch (pollErr: unknown) {
-          const isAbort = pollErr instanceof Error && pollErr.name === "AbortError";
-          if (isAbort || abortController.signal.aborted || hasDownloadedRef.current) return;
-          console.warn("Export polling hiccup:", pollErr);
-          pollIntervalRef.current = setTimeout(pollStatus, 800);
+        if (!startRes.ok) {
+          const errData = await startRes.json().catch(() => ({}));
+          throw new Error(errData.detail || "Failed to start export job.");
         }
-      };
 
-      pollIntervalRef.current = setTimeout(pollStatus, 350);
-    } catch (err: unknown) {
-      isExportingRef.current = false;
-      const msg = err instanceof Error ? err.message : String(err);
-      setExportError(msg);
-      setExportProgress((prev) => ({
-        ...prev,
-        status: "failed",
-        error: msg,
-        message: `Failed: ${msg}`,
-      }));
-      setIsExporting(false);
-    }
+        const { job_id, total_pages } = await startRes.json();
+        setExportProgress((prev) => ({
+          ...prev,
+          jobId: job_id,
+          status: "processing",
+          progress: 2,
+          stage: "processing_pages",
+          message: `Processing 1 of ${total_pages || pages.length}...`,
+          totalPages: total_pages || pages.length,
+        }));
+
+        // Sequential polling: only schedule the next tick AFTER the previous response finishes.
+        // This eliminates concurrent request pile-up and guarantees exactly ONE download trigger.
+        const pollStatus = async () => {
+          if (abortController.signal.aborted || hasDownloadedRef.current) {
+            resolve(null);
+            return;
+          }
+
+          try {
+            const pollRes = await apiFetch(`/api/book-scan/export-job/${job_id}`, {
+              signal: abortController.signal,
+            });
+            if (!pollRes.ok) {
+              if (!abortController.signal.aborted) {
+                pollIntervalRef.current = setTimeout(pollStatus, 400);
+              }
+              return;
+            }
+            const data = await pollRes.json();
+
+            if (abortController.signal.aborted || hasDownloadedRef.current) {
+              resolve(null);
+              return;
+            }
+
+            setExportProgress({
+              jobId: job_id,
+              status: data.status,
+              progress: data.progress ?? 0,
+              stage: data.stage ?? "processing",
+              message: data.message ?? "",
+              totalPages: data.total_pages ?? pages.length,
+              currentPage: data.current_page ?? 0,
+              fileSizeBytes: data.file_size_bytes ?? null,
+              error: data.error ?? null,
+            });
+
+            if (data.status === "success") {
+              if (hasDownloadedRef.current) return;
+              hasDownloadedRef.current = true;
+              if (pollIntervalRef.current) {
+                clearTimeout(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
+              isExportingRef.current = false;
+              setIsExporting(false);
+
+              const isArchive = exportFormat !== "pdf";
+              const targetFilename = isArchive
+                ? `book_${intakeMode}_${exportFormat}_${exportDpi}dpi.zip`
+                : `book_${intakeMode}_${bleedModule.bleedMm}mm_bleed.pdf`;
+              const downloadUrl = data.download_url || `/api/book-scan/export-download/${job_id}`;
+
+              const shouldDownload = !options?.isHandoff || Boolean(options?.downloadBackup);
+              if (shouldDownload) {
+                await downloadBlob(downloadUrl, targetFilename).catch((e) => {
+                  console.error("Auto download failed:", e);
+                });
+              }
+
+              const resolvedFileId = data.file_id || `${job_id}_${data.filename || targetFilename}`;
+              resolve({
+                fileId: resolvedFileId,
+                filename: data.filename || targetFilename,
+              });
+              return;
+            }
+
+            if (data.status === "failed") {
+              if (pollIntervalRef.current) {
+                clearTimeout(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
+              isExportingRef.current = false;
+              setIsExporting(false);
+              setExportError(data.error || "Export failed.");
+              resolve(null);
+              return;
+            }
+
+            // Schedule NEXT poll only AFTER previous response has cleanly returned
+            if (!abortController.signal.aborted && !hasDownloadedRef.current) {
+              pollIntervalRef.current = setTimeout(pollStatus, 350);
+            }
+          } catch (pollErr: unknown) {
+            const isAbort = pollErr instanceof Error && pollErr.name === "AbortError";
+            if (isAbort || abortController.signal.aborted || hasDownloadedRef.current) {
+              resolve(null);
+              return;
+            }
+            console.warn("Export polling hiccup:", pollErr);
+            pollIntervalRef.current = setTimeout(pollStatus, 800);
+          }
+        };
+
+        pollIntervalRef.current = setTimeout(pollStatus, 350);
+      } catch (err: unknown) {
+        isExportingRef.current = false;
+        const msg = err instanceof Error ? err.message : String(err);
+        setExportError(msg);
+        setExportProgress((prev) => ({
+          ...prev,
+          status: "failed",
+          error: msg,
+          message: `Failed: ${msg}`,
+        }));
+        setIsExporting(false);
+        resolve(null);
+      }
+    });
   }, [sessionId, pages, selectedPageId, cropModule.enabled, bleedModule, cleanupModule, restorationModule, deskewModule]);
 
   return {

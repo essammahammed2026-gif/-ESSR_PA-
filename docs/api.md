@@ -25,20 +25,37 @@ Managed in `backend/main.py`.
 * **`POST /api/inspect/export-report-pdf`**: Accepts custom analysis payloads or cached file IDs and compiles the printable audit report PDF.
 
 ### 2. Imposition Pipeline (`/api/imposing/*`)
-Managed by `backend/imposing_api.py`.
+Managed by `backend/imposing_api.py`. Backed by SQLite WAL persistence (`SessionModel(studio_type="imposing")`).
 
 * **`POST /api/imposing/upload`**: Uploads source artwork or PDF page to inspect geometry and dimensions. Pre-generates page thumbnails in background threads for instant lightbox display.
+* **`POST /api/imposing/init-session`**: Initializes a persistent SQLite WAL imposing session from an uploaded file, staged asset ID, or local file path, indexing pages in the `pages` table.
+* **`GET /api/imposing/session/{session_id}`**: Restores session layout parameters, substrate specs, and page deck state from SQLite WAL.
+* **`PATCH /api/imposing/session/{session_id}`**: Debounced auto-save endpoint to transactionally persist layout parameters and page mutations.
 * **`GET /api/imposing/pages/{file_id}`**: Retrieves granular page deck metadata (dimensions, aspect ratios, thumbnail URLs) for drag-and-drop deck reordering, rotation, and duplication.
 * **`GET /api/imposing/thumbnail/{file_id}/{page_num}`**: Streams lazy, on-demand JPEG thumbnails for large multi-page publications.
 * **`POST /api/imposing/preview`**: Accepts layout parameters (sheet dimensions, roll width, margins, spacing, rotation flag, manual rows × cols) and runs `sheet_packer` or `roll_packer`. Returns calculated layout metrics (yield count, waste percentage) and an SVG representation for live canvas visualization.
-* **`POST /api/imposing/export`**: Renders the final print-ready PDF via `sheet_gang_exporter.py` with crop marks, registration targets, and bleed margins.
+* **`POST /api/imposing/export`**: Renders the final print-ready PDF via `sheet_gang_exporter.py` with crop marks, registration targets, and bleed margins; marks the session as `tag="done"` and records an `ExportJobModel`.
 * **`POST /api/imposing/export-svg`**: Generates a layered SVG with separated `Artwork` (print) and `CutContour` (die-cut vector) layers for digital flatbed cutter software.
+* **`POST /api/imposing/ocr-inspect`**: Runs live PyMuPDF/Tesseract OCR inspection on a page, returning detected text blocks, bounding boxes, and script confidence.
 
-### 3. Preflight Inspection (`/api/preflight`)
-Managed in `backend/main.py`.
+### 3. Session Registry & Staged Intake Pipeline (`/api/sessions/*`, `/api/intake/*`)
+Managed in `backend/sessions_api.py`. Backed by SQLite WAL persistence (`backend/db/`) and structured asset storage (`backend/storage/`).
 
-* **`POST /api/preflight`**: Accepts one or more uploaded PDF files. Passes file paths to `engines.preflight.run_preflight()` to verify page geometry (`TrimBox`, `BleedBox`), image DPI, embedded fonts, and color spaces.
-* *Note:* Uploaded files are processed and unlinked immediately in the endpoint's `finally` block.
+* **`GET /api/sessions`**: Lists all persistent project sessions across all studios with filtering (`studio_type`, `status`, `tag`, `search`, `date_preset`), sorting, and pagination.
+* **`GET /api/sessions/{session_id}`**: Retrieves complete session metadata, applied layer history, page records, and lock state.
+* **`PATCH /api/sessions/{session_id}`**: Updates session title, studio tag (`active`, `done`, `starred`, `needs_review`), notes, or layout parameters.
+* **`DELETE /api/sessions/{session_id}`**: Moves a project session to Trash (`status="trash"`).
+* **`POST /api/sessions/{session_id}/restore`**: Restores a project session from Trash to `status="active"`.
+* **`POST /api/sessions/trash/empty`**: Permanently cleans metadata records marked for trash disposal.
+* **`GET /api/sessions/telemetry/stats`**: Returns real-time dashboard telemetry (active/archived project counts, total storage usage across originals, sessions, cache, and exports).
+* **`GET /api/sessions/exports/jobs`**: Paginated server-side log of completed and active PDF export jobs with status filtering.
+* **`GET /api/sessions/exports/{job_id}/download`**: Direct download endpoint for compiled PDF/archive deliverables.
+* **`GET /api/intake/assets`**: Lists staged intake assets with pagination, search, and file-type filtering.
+* **`POST /api/intake/upload-batch`**: Ingests files into the Staged Asset Workbench, recording metadata in `intake_assets` and storing files in `storage/originals/`.
+* **`POST /api/intake/combine-sequential`**: Combines multiple selected staged assets sequentially into a single multi-page PDF saved directly back to the staging area.
+* **`POST /api/intake/combine-duplex`**: Interleaves odd and even pass scans into a collation-ordered document in staging.
+* **`PATCH /api/intake/assets/{file_id}`**: Renames a staged intake file.
+* **`DELETE /api/intake/assets/{file_id}`** / **`DELETE /api/intake/assets`**: Removes single or batch assets from staging.
 
 ### 4. Die-Cut Contour Vectorization (`/api/contour/*`)
 Managed in `backend/main.py`.
@@ -78,7 +95,14 @@ Managed by `backend/book_scan_api.py`, backed by SQLite WAL persistence (`backen
 * **`GET /api/book-scan/export-download/{job_id}`**: Downloads the print-ready compiled PDF once the background export job completes.
 * **`POST /api/book-scan/export/{session_id}`**: Synchronously compiles processed pages with synthesized bleed, trim boxes, and vector crop marks into a print-ready PDF.
 
-### 6. Settings, Presets & Runtime Storage (`/api/settings/*`)
+### 6. 3D Virtual Flipbook Proofing (`/api/flipbook/*`)
+Managed in `backend/main.py` and `backend/engines/flipbook_worker.py`.
+
+* **`POST /api/flipbook`**: Ingests multi-page PDF or image list and builds an interactive 3D virtual page-turn proof preview (hardcover or paperback).
+* **`POST /api/flipbook/update`**: Updates virtual binding settings (page turn speed, cover texture, LTR/RTL reading direction, spine thickness).
+* **`POST /api/flipbook/export`**: Bundles a standalone self-contained HTML5/WebGL 3D flipbook package for client approval.
+
+### 7. Settings, Presets & Runtime Storage (`/api/settings/*`)
 Managed by `backend/settings_api.py` and `backend/engines/storage_cleaner.py`.
 
 * **`GET /api/settings`**: Retrieves application settings, standard sheet sizes (A4, A3, SRA3, B2), roll widths, and studio default values from `settings.json`.

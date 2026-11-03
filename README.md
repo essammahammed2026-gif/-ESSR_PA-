@@ -10,7 +10,7 @@ A modular, high-performance web-to-print and prepress automation suite built wit
 * **Imposing Studio (`/imposing`)**: Unified collapsible studio shell, MaxRects gang runs, sheet/roll packing, margins, gaps, bleeds, live SVG visualizer, sheet efficiency HUD, cut marks, and print-ready PDF export.
 * **Contour Cut Studio (`/contour`)**: Alpha/Otsu thresholding, dilation/erosion offsets, smooth cubic Bézier vectorization, and SVG spot-color die lines.
 * **Flipbook Studio (`/flipbook`)**: 3D interactive virtual proofing (LTR/RTL, paperback/hardcover simulation).
-* **PDF Preflight Center (`/preflight`)**: Executive inspection report cards for trim boxes, bleed tolerances, DPI, and color spaces.
+* **Prepress Audit & Triage (`/`)**: Integrated directly into the Command Center; generates executive inspection report cards for trim boxes, bleed tolerances, image DPI, and color spaces, with printable A4 preflight audit PDFs.
 * **Settings & Presets (`/settings`)**: Standard sheet dimensions (SRA3, A3, B2, etc.), roll widths, and studio defaults.
 
 ---

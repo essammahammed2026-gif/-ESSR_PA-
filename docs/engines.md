@@ -58,14 +58,12 @@ All core printing, geometry, computer vision, and document-transformation logic 
   * **Contrast & Margin Normalization:** Removes dark scan edges and optimizes legibility via outer border clearing along straightened document axes, with levels and saturation boosting.
   * **Bleed Synthesis & Prepress Marks (`add_bleed_and_export_pdf`):** Synthesizes outer bleed extension using mirror-edge pixel padding for safe binding and guillotine trimming, rendering vector trim marks per-page according to module scope.
 
-### 4. PDF Preflight Analyzer (`preflight.py`)
-* **Purpose:** Inspects incoming PDF assets before production to prevent costly press downtime and print defects.
-* **Inspections:**
-  * **Page Geometry:** Reads `MediaBox`, `TrimBox`, `BleedBox`, `CropBox`, and `ArtBox`. Verifies trim consistency across all pages.
-  * **Bleed Verification:** Confirms whether artwork extends past the trim boundary by the required 2mm–3mm tolerance.
-  * **Resolution (DPI):** Scans embedded raster images and reports effective DPI, flagging low-resolution assets (< 300 DPI for offset, < 150 DPI for large format).
-  * **Color Space Detection:** Identifies color models (CMYK, RGB, Spot/Pantone, Grayscale) and flags unseparated RGB elements.
-  * **Font Embedding:** Checks if all document typefaces are fully embedded or subsetted.
+### 4. Pure OCR Engine (`ocr_engine.py`)
+* **Purpose:** Provides pure OCR text extraction, live language detection, and searchable PDF layer generation for bilingual Arabic (`ara`) and English (`eng`) publications.
+* **Pipeline & Features:**
+  * **Tesseract & PyMuPDF Bindings:** Direct integration with PyMuPDF OCR interfaces backed by native Tesseract engine calls, with automatic runtime detection (`is_tesseract_installed`, `get_available_ocr_languages`).
+  * **Page-Level OCR Extraction (`extract_page_ocr`):** Renders the page bitmap, performs text and script recognition, and returns structured dictionaries containing detected full-text strings, word boundaries, and character metrics.
+  * **Searchable PDF Layer Synthesis (`apply_ocr_to_pdf`):** Generates invisible, selectable vector text layers mapped directly over source bitmap pages, producing fully searchable PDFs while preserving 100% of the underlying visual scan fidelity.
 
 ### 5. Virtual 3D Proofing (`flipbook_worker.py`)
 * **Purpose:** Generates interactive 3D virtual page-turn proofing previews for print customer sign-off.
@@ -76,7 +74,7 @@ All core printing, geometry, computer vision, and document-transformation logic 
   * Outputs standalone HTML5 bundles using `templates/flipbook.html`.
 
 ### 6. Universal Asset Inspector (`asset_inspector.py`)
-* **Purpose:** Provides universal ingest, triage, and multi-page technical audit for PDFs and raster assets.
+* **Purpose:** Provides universal ingest, triage, and multi-page technical audit for PDFs and raster assets (replacing legacy monolithic preflight checks).
 * **Pipeline & Inspections:**
   * **Geometry & Box Analysis:** Reads `MediaBox`, `CropBox`, `BleedBox`, and `TrimBox` for every page using PyMuPDF (`fitz`). Groups pages by identical trim dimensions to identify mixed-size publications.
   * **Embedded Image DPI Scanner:** Iterates through all embedded XObjects on each page, computes effective resolution ($DPI_x, DPI_y$) relative to on-page transform matrices, and catalogs all low-resolution images (< 300 DPI) with exact page numbers, pixel sizes, and bounding box dimensions.
@@ -89,8 +87,16 @@ All core printing, geometry, computer vision, and document-transformation logic 
 * **Features:**
   * **Engine:** Built with ReportLab using vector flowables (`SimpleDocTemplate`, `Table`, `ParagraphStyle`).
   * **Structure:** Includes executive header with document metadata (filename, page count, file size, dimensions, primary color space), traffic-light audit checklist table with visual pass/warning status pills, page-by-page findings matrix, and remediation advice block.
-   * **Output:** Returns pure PDF bytes for direct streaming download via `GET /api/inspect/report-pdf/{file_id}` or `POST /api/inspect/export-report-pdf`.
+  * **Output:** Returns pure PDF bytes for direct streaming download via `GET /api/inspect/report-pdf/{file_id}` or `POST /api/inspect/export-report-pdf`.
 
-### 8. Shared Router-Support Helpers (`thumbnails.py`, `imposing_prep.py`, `units.py`, `schemas.py`)
+### 8. Storage & Retention Cleaner (`storage_cleaner.py`)
+* **Purpose:** Manages tiered disk retention, cache eviction, and automated cleanup across runtime scratch spaces, build outputs, and export deliverables while safeguarding permanent user assets.
+* **Architecture & Safety Tiers:**
+  * **Tier 1 (Safe Disposable Caches):** `data/storage/cache/` (preview thumbnails/textures), `public_flipbooks/` (WebGL proof bundles), and `temp_uploads/` (transient upload scratch). 100% safe to clear anytime; regenerates automatically on-demand.
+  * **Tier 2 (Build Caches):** `.next` and Tauri build caches. Safe to clear to reclaim gigabytes of disk space; recompiles on launch.
+  * **Tier 3 (Export Deliverables):** Completed PDF exports in `data/storage/exports/`. Pruned according to configurable retention schedules (24h, 7d, 14d, 30d, permanent).
+  * **Tier 4 (Protected Permanent Assets):** Active session working assets (`data/storage/sessions/`), originals (`data/storage/originals/`), and SQLite WAL database files (`flint.db`). Strictly locked against bulk deletion; cross-references active sessions in `flint.db` and prunes only unregistered abandoned directories.
+
+### 9. Shared Router-Support Helpers (`thumbnails.py`, `imposing_prep.py`, `units.py`, `schemas.py`)
 * **Purpose:** Single-copy probes and gates so FastAPI routers stay HTTP-only with zero `fitz`/`cv2` imports: PDF page-count/dimension probes, raster size probes, JPEG writers, opposing-orientation rotation gate, book-scan session open/close/collate helpers, and shared request schemas.
 

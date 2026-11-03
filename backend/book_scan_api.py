@@ -907,6 +907,13 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
         return
 
     pages = session.get("pages", [])
+    target_indices = getattr(req, "target_page_indices", None)
+    if target_indices and len(target_indices) > 0:
+        target_set = set(target_indices)
+        filtered_pages = [p for i, p in enumerate(pages) if i in target_set]
+        if filtered_pages:
+            pages = filtered_pages
+
     total_pages = len(pages)
     EXPORT_JOBS[job_id]["total_pages"] = total_pages
     EXPORT_JOBS[job_id]["status"] = "processing"
@@ -1004,6 +1011,8 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
         EXPORT_JOBS[job_id]["stage"] = "completed"
         EXPORT_JOBS[job_id]["message"] = f"Export complete ({total_pages} pages)"
         EXPORT_JOBS[job_id]["output_path"] = output_file_path
+        file_id = f"{job_id}_{export_filename}"
+        EXPORT_JOBS[job_id]["file_id"] = file_id
         EXPORT_JOBS[job_id]["filename"] = export_filename
         EXPORT_JOBS[job_id]["media_type"] = media_type
         EXPORT_JOBS[job_id]["file_size_bytes"] = file_size
@@ -1021,13 +1030,16 @@ def _run_export_job(job_id: str, session_id: str, req: ExportRequest):
                 output_file_path=output_file_path,
                 file_size_bytes=file_size,
             )
-            SessionRepository.update_session_meta(
-                db,
-                session_id=session_id,
-                tag="done",
-                status="archived",
-            )
-        if session_id in SESSIONS:
+            # Only archive and mark done if this is a standard export, not a non-destructive studio handoff
+            should_archive = getattr(req, "archive_session", True) and not getattr(req, "is_handoff", False)
+            if should_archive:
+                SessionRepository.update_session_meta(
+                    db,
+                    session_id=session_id,
+                    tag="done",
+                    status="archived",
+                )
+        if session_id in SESSIONS and should_archive:
             SESSIONS[session_id]["tag"] = "done"
             SESSIONS[session_id]["status"] = "archived"
     except Exception as e:
@@ -1059,6 +1071,13 @@ async def start_export_job(
     pages = session.get("pages", [])
     if not pages:
         raise HTTPException(status_code=400, detail="No pages available to export.")
+
+    target_indices = getattr(req, "target_page_indices", None)
+    if target_indices and len(target_indices) > 0:
+        target_set = set(target_indices)
+        filtered_pages = [p for i, p in enumerate(pages) if i in target_set]
+        if filtered_pages:
+            pages = filtered_pages
 
     job_id = str(uuid.uuid4())[:12]
     EXPORT_JOBS[job_id] = {

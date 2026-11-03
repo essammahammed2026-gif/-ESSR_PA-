@@ -61,5 +61,5 @@ Dark Mode and Light Mode each persist their own independent accent color in [`Ap
 
 When updating **Imposing Studio**, **Contour Studio**, or **Flipbook Studio** in future sessions:
 1. **Use Semantic Surface Tokens:** Prefer `bg-[var(--surface-panel)]`, `bg-[var(--surface-card)]`, `bg-[var(--surface-inset)]`, and `border-[var(--border-subtle)]` (or rely on the automatic light-mode remapping rules in `globals.css`).
-2. **Use `ModuleProgressBar` for Long Tasks:** Import `ModuleProgressBar` from `src/components/book-studio/modules/PageScopeSelector.tsx` (or promote to `src/components/shared/`) whenever a module runs batch detection, nesting, or vectorization.
+2. **Use `ModuleProgressBar` for Long Tasks:** Import `ModuleProgressBar` directly from `src/components/shared/ModuleProgressBar.tsx` whenever a module runs batch detection, nesting, or vectorization.
 3. **Preserve Single Responsibility:** Keep all API calls inside `src/lib/api.ts`, unit math inside `src/lib/units.ts`, and studio state consolidated in each studio's primary hook (`useBookModules.ts`, `useImpositionStudio.ts`).

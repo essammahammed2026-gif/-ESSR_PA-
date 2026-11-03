@@ -26,6 +26,10 @@ export interface ExportOptions {
   dpi?: number;
   quality?: number;
   tiffCompression?: TiffCompression;
+  isHandoff?: boolean;
+  archiveSession?: boolean;
+  targetPageIndices?: number[];
+  downloadBackup?: boolean;
 }
 
 export type SplitDirection = "vertical" | "horizontal";
@@ -293,3 +297,6 @@ export interface ExportJobProgress {
   fileSizeBytes: number | null;
   error: string | null;
 }
+
+export type { StudioExportProgress } from "@/components/shared/ExportProgressModal";
+

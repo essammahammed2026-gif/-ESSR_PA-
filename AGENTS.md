@@ -43,7 +43,7 @@
        - `src/hooks/useBookModules.ts`: Unified Book Studio module state, split/crop operations, per-page layer unlinking, and PDF/imposing export handoff. Never split back into separate sub-hooks.
        - `src/hooks/useImpositionStudio.ts`: Unified Imposing Studio page deck, layout state, debounced preview, and export actions (`buildImposingPagesFromMeta`, `buildImposingPayload`). Never split back into separate sub-hooks.
      - **Backend (`backend/`)**:
-       - `engines/units.py`: `MM_TO_PTS`, `PTS_TO_MM`, `mm_to_px`, `px_to_mm`, `is_page_in_scope`, `resolve_scope_pages`, `hex_to_rgb`, `format_page_ranges`, `parse_page_range`, `parse_page_selection`. Never hardcode `(pt / 72.0) * 25.4`.
+       - `engines/units.py`: `MM_TO_PTS`, `PTS_TO_MM`, `mm_to_px`, `px_to_mm`, `is_page_in_scope`, `hex_to_rgb`, `format_page_ranges`, `parse_page_range`, `parse_page_selection`. Never hardcode `(pt / 72.0) * 25.4`.
        - `engines/thumbnails.py`: `resolve_temp_file`, `get_dimensions_mm`, `list_pdf_pages_mm`, `render_pdf_thumb`, `render_image_thumb`, `probe_source_dims`. Never write manual `.pdf/.png/.jpg` extension-fallback loops in routers.
        - `engines/imposing_prep.py`: `compute_opposing_rotation_deg`, `effective_page_rotation`, `build_imposing_pages_meta`, `build_sheet_specs`, `build_roll_specs`, `apply_alignment`.
        - `db/`: SQLite WAL ACID Persistence (`session.py`, `models.py`, `repository.py`) - handles concurrent session state, page ordering, applied edit layers, distributed locks, and export task tracking.
@@ -60,17 +60,18 @@
 2. **Search and Scope Hygiene:**
    - Restrict file exploration exclusively to relevant code directories. 
    - Completely ignore build outputs, dependencies, and environment files (`node_modules/`, `.next/`, `.venv/`).
-   - ABSOLUTELY ignore the contents of `backend/temp_uploads/` and `backend/public_flipbooks/` during text and code searches so the agent doesn't waste tokens reading old, cached images or heavy PDFs.
+   - ABSOLUTELY ignore the contents of `backend/temp_uploads/`, `backend/public_flipbooks/`, and `backend/data/` (`flint.db`, snapshots, and `storage/`) during text and code searches so the agent doesn't waste tokens reading old, cached images or hang on binary database files.
 
 3. **Automated Session Hand-Off & Safe Scratch Maintenance:**
-   - Scratch Cleanup Only: At the beginning of a session, check if `backend/temp_uploads/` contains leftover scratch files from a previous crash. If it does, safely purge only files inside `backend/temp_uploads/`.
+   - Scratch Cleanup Only: At the beginning of a session, check if `backend/temp_uploads/` contains leftover scratch files from a previous crash. If it does, safely purge only loose files inside `backend/temp_uploads/` (preserving `.gitkeep` and active subdirectories).
    - Never run bulk cleanup scripts or touch `backend/data/storage/` (sessions, originals, exports). Persistent user assets and cards live safely in `backend/data/storage/` and are tracked by SQLite WAL in `backend/data/flint.db`.
-   - Before ending a coding session, the agent MUST summarize workspace changes into `SESSION_LOG.md`.
+   - Before ending a coding session, the agent MUST summarize workspace changes into both `CHANGELOG.md` (under `[Unreleased]`) and `SESSION_LOG.md`.
 
 4. **Strict Version Control Restrictions (User-Only Permissions):**
-   - The AI agent is ABSOLUTELY FORBIDDEN from running `git commit`, `git push`, or `git pull` commands autonomously.
+   - The AI agent is ABSOLUTELY AND UNCONDITIONALLY FORBIDDEN from running any modifying Git command (`git commit`, `git push`, `git pull`, `git reset`, `git clean`, `git checkout`, `git rebase`, `git merge`).
    - All code version check-ins, remote synchronization, and branch merges are the exclusive responsibility of the human user.
-   - The agent may use presentational commands like `git status` or `git diff` for workspace diagnostics during crash recoveries or logs, but it must never modify the Git ledger history independently.
+   - The agent may use non-destructive presentational commands like `git status` or `git diff` for workspace diagnostics during crash recoveries or logs, but it must never modify the Git ledger history or working tree state independently.
+   - **Repository Synchronization & Backups:** Scheduled or daily syncs must always use the dedicated pre-flight script [`scripts/daily_sync.sh`](file:///home/essam/Projects/ESSR_PA/scripts/daily_sync.sh), which enforces automated fail-safes (secret scans, file size limits < 25MB, upstream divergence checks, and code verification).
 
 5. **Zero-Lag Navigation Mapping Protocol:**
    - The agent is strictly forbidden from running slow, global repository text searches to locate core features or routing code.
@@ -84,10 +85,10 @@
 ## 4. Live Iteration & Pay-As-You-Go Refactoring
 
 1. **Active Context Cleanups:**
-   - When instructed to fix a bug or add a feature within a specific file, the agent must spend 30 seconds assessing that local code block for structural debt before writing new lines.
+   - When instructed to fix a bug or add a feature within a specific file, inspect the local function or component for duplicate logic, unused state, or structural debt before writing new lines.
    - If localized duplicate blocks or disorganized state code are found in the immediate area of modification, refactor and clean them up *in-stride* as part of fixing the issue.
-2. **Verification Protocol (Fast Inner Loop vs. Final Gate):**
-   - **During active editing:** Do NOT run full Next.js production builds (`npm run build`). Use targeted, low-overhead checking commands:
-     - Frontend: `cd frontend && npx tsc --noEmit` (Checks typescript health)
-     - Backend: `cd backend && python -m py_compile main.py engines/*.py` (Checks for syntax/import errors)
-   - **Final Session Gate:** Only run comprehensive linting and production build verification checks (`npm run build`) once, immediately before checking in code or completing a major feature.
+2. **Verification Protocol (Strict Ban on `npm run build`):**
+   - **Absolute Ban on `npm run build`:** The AI agent is STRICTLY AND UNCONDITIONALLY FORBIDDEN from running `npm run build` or full production packaging under any circumstance, unless the human user explicitly commands it in that exact prompt. Running full Next.js production builds during development wastes memory, causes UI lag, and litters the workspace with `.next` build artifacts.
+   - **Approved Fast Verification Commands Only:** Always verify code integrity using fast, targeted checks only:
+     - Frontend TypeScript: `cd frontend && npx tsc --noEmit` (Checks typescript type safety and import integrity with zero build overhead)
+     - Backend Python: `cd backend && python3 -m py_compile main.py sessions_api.py imposing_api.py book_scan_api.py settings_api.py engines/*.py` (Checks for syntax and compilation errors without starting server daemons)
